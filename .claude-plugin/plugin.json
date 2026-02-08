@@ -1,0 +1,19 @@
+{
+  "name": "do",
+  "version": "1.0.0",
+  "description": "Structured planning and wave-based execution for Claude Code — /do:plan and /do:execute",
+  "author": {
+    "name": "morphiax",
+    "url": "https://github.com/morphiax"
+  },
+  "homepage": "https://github.com/morphiax/claude-do",
+  "repository": "https://github.com/morphiax/claude-do",
+  "license": "MIT",
+  "keywords": [
+    "planning",
+    "execution",
+    "orchestration",
+    "automation",
+    "workflow"
+  ]
+}

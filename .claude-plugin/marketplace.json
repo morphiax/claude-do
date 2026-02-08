@@ -1,0 +1,14 @@
+{
+  "name": "do",
+  "owner": {
+    "name": "morphiax"
+  },
+  "plugins": [
+    {
+      "name": "do",
+      "source": "./",
+      "description": "Structured planning and wave-based execution — /do:plan and /do:execute",
+      "strict": false
+    }
+  ]
+}
