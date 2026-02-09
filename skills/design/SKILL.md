@@ -29,7 +29,7 @@ Thin-lead orchestrator: decompose a goal into `.design/plan.json` using a dynami
 Create the team and spawn a goal analyst as the first teammate. The analyst deeply understands the goal, explores the codebase, and recommends the expert team composition.
 
 1. Attempt cleanup of any stale team: `TeamDelete(team_name: "do-design")` (ignore errors)
-2. `TeamCreate(team_name: "do-design")`
+2. `TeamCreate(team_name: "do-design")`. If TeamCreate fails, tell user: "Agent Teams is required for /do:design. Ensure your Claude Code version supports Agent Teams and retry." Then STOP.
 3. `TaskCreate` for the goal analyst (subject: "Analyze goal and recommend team composition")
 4. Spawn the goal analyst:
 
@@ -71,7 +71,14 @@ You are the Goal Analyst on a planning team. Your job is to deeply understand th
    - risk level (low/medium/high)
    Mark one as recommended with a brief rationale. Consider: could this be solved differently than the obvious way? What would a pragmatist do vs a purist?
 
-4. Based on your understanding, recommend 2–5 expert roles. Each expert has a **type**:
+4. Assess goal complexity and determine the appropriate analysis tier:
+   - **minimal** — 1-3 tasks, single obvious approach, minimal uncertainty (e.g., update a config value, add a simple endpoint)
+   - **standard** — 4-8 tasks, some design decisions, moderate uncertainty (e.g., add feature with multiple files, refactor a module)
+   - **full** — 9+ tasks, multiple viable approaches, cross-cutting concerns, significant uncertainty (e.g., architecture change, new subsystem, complex integration)
+   Output: `complexity` (minimal|standard|full) and `complexityRationale` (1-2 sentences explaining the classification).
+   For minimal goals: still output all fields, but `recommendedTeam` can be empty since no experts will be spawned.
+
+5. Based on your understanding, recommend 2–5 expert roles. Each expert has a **type**:
    - `scanner` — analyzes the goal through a domain lens, produces findings and task recommendations. Use for well-understood domains where the main question is what needs to happen (test coverage, security review, API surface).
    - `architect` — designs HOW to solve a specific sub-problem. Proposes 2–3 concrete implementation strategies with tradeoffs, recommends one. Use when the sub-problem has multiple viable solutions and the choice materially affects the plan (state management approach, data model design, integration pattern).
    Aim for a mix — not all scanners, not all architects. The right ratio depends on how much of the goal is figuring out what to do vs figuring out how to do it.
@@ -99,6 +106,8 @@ Write atomically to .design/goal-analysis.json:
   "approaches": [
     {"name": "...", "description": "...", "pros": ["..."], "cons": ["..."], "effort": "low|medium|high", "risk": "low|medium|high", "recommended": true|false, "rationale": "why recommended or not"}
   ],
+  "complexity": "minimal|standard|full",
+  "complexityRationale": "1-2 sentences explaining the classification",
   "scopeNotes": "refinements or hidden complexity",
   "recommendedTeam": [
     {"name": "...", "role": "...", "type": "scanner|architect", "model": "opus|sonnet|haiku", "mandate": "..."}
