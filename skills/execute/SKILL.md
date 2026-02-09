@@ -22,10 +22,9 @@ Execute a `.design/plan.json` using dependency-graph scheduling with Task subage
 **Delegated to subagents** (lead never reads raw `.design/plan.json`, except during fallback recovery):
 
 - Plan reading, validation, TaskList creation, prompt assembly, task file writing → Setup Subagent
-- Result parsing (from worker log files), spot-checks, acceptance checks, retry prompt assembly → Batch Processor Subagent
-- `.design/plan.json` mutation, progress tracking, cascading failures, trimming → Plan Updater Subagent
+- Result parsing (from worker log files), spot-checks, acceptance checks, retry prompt assembly, plan mutation, progress tracking, cascading failures, trimming → Batch Finalizer Subagent
 
-**Fallback rule**: If any delegation subagent fails (non-zero exit, malformed JSON output, or missing required fields), the lead performs that step's scoped minimal-mode fallback inline. Each step (Setup, Processor, Updater) defines its own fallback with reduced scope — see the **Fallback (minimal mode)** block at each step. Never abort execution due to a subagent infrastructure failure.
+**Fallback rule**: If any delegation subagent fails (non-zero exit, malformed JSON output, or missing required fields), the lead performs that step's scoped minimal-mode fallback inline. Each step (Setup, Finalizer) defines its own fallback with reduced scope — see the **Fallback (minimal mode)** block at each step. Never abort execution due to a subagent infrastructure failure.
 
 ### Conventions
 
@@ -37,11 +36,12 @@ Execute a `.design/plan.json` using dependency-graph scheduling with Task subage
 
 ### A. Setup Subagent (Plan Bootstrap)
 
-Replaces plan reading, validation, task list creation, and prompt assembly. Spawn once at the start.
+Replaces plan reading, validation, task list creation, and prompt assembly. Spawn once at the start. Model: sonnet.
 
 ```
 Task:
   subagent_type: "general-purpose"
+  model: sonnet
   prompt: <assembled from template below>
 ```
 
@@ -125,46 +125,25 @@ Task:
    ```
    ## Step 5: Assemble Worker Prompts
 
-   For each task, concatenate these sections. Include conditional sections only when the referenced field is non-empty. Produce final prompt text — no template markers.
+   For each task, concatenate sections S1-S9. Include conditional sections only when referenced field is non-empty.
 
-   **S1: Role line** [always]
-   `You are a {agent.role}` + ` with expertise in {agent.expertise}` [if agent.expertise]
+   **S1: Role** [always] `You are a {agent.role}` + ` with expertise in {agent.expertise}` [if exists]
 
-   **S2: Pre-flight** [always]
-   Emit heading: `## Pre-flight` / `Verify before starting. If BLOCKING check fails, return BLOCKED: followed by the reason.`
-   + agent.assumptions as checklist: `- [ ] [{severity}] {claim}: \`{verify}\``
+   **S2: Pre-flight** [always] `## Pre-flight` / `Verify before starting. If BLOCKING check fails, return BLOCKED: followed by the reason.` + agent.assumptions as checklist: `- [ ] [{severity}] {claim}: \`{verify}\``
 
-   **S3: Context section** [always]
-   Emit heading: `## Context` / `Read before implementing:`
-   + agent.contextFiles as bullets: `- {path} — {reason}`
-   + `Project: {context.stack}. Conventions: {context.conventions}.`
-   + `Test: {context.testCommand}` [if exists]
-   + `Use LSP (goToDefinition, findReferences, hover) over Grep for {context.lsp.available}.` [if exists]
-   + `Use WebSearch/WebFetch for current information. Prefer web tools over assumptions when external facts are needed.` [if metadata.type = research]
+   **S3: Context** [always] `## Context` / `Read before implementing:` + agent.contextFiles as `- {path} — {reason}` + `Project: {context.stack}. Conventions: {context.conventions}.` + `Test: {context.testCommand}` [if exists] + `Use LSP (goToDefinition, findReferences, hover) over Grep for {context.lsp.available}.` [if exists] + `Use WebSearch/WebFetch for current information. Prefer web tools over assumptions when external facts are needed.` [if metadata.type = research]
 
-   **S4: Task section** [always]
-   `## Task: {task.subject}` / `{task.description}`
-   `Files to create: {metadata.files.create or "(none)"}` / `Files to modify: {metadata.files.modify or "(none)"}`
-   + agent.constraints as bullets under `Constraints:` heading
+   **S4: Task** [always] `## Task: {task.subject}` / `{task.description}` / `Files to create: {metadata.files.create or "(none)"}` / `Files to modify: {metadata.files.modify or "(none)"}` + agent.constraints as bullets under `Constraints:`
 
-   **S5: Strategy lines** [if any field exists]
-   + `Approach: {agent.approach}` [if exists] / `Apply: {agent.priorArt}` [if exists] / `Fallback: {agent.fallback}` [if exists]
+   **S5: Strategy** [if any exists] `Approach: {agent.approach}` [if exists] / `Apply: {agent.priorArt}` [if exists] / `Fallback: {agent.fallback}` [if exists]
 
-   **S6: Dependency results** [if task.blockedBy non-empty]
-   Emit exactly: `[Dependency results — deferred: lead appends actual results at spawn time]`
-   Do NOT resolve during assembly — the lead injects actual results at spawn time.
+   **S6: Dependency placeholder** [if task.blockedBy non-empty] Emit: `[Dependency results — deferred: lead appends actual results at spawn time]`
 
-   **S7: Rollback triggers** [always]
-   `Rollback triggers — STOP immediately if any occur:` + agent.rollbackTriggers as bullets
+   **S7: Rollback** [always] `Rollback triggers — STOP immediately if any occur:` + agent.rollbackTriggers as bullets
 
-   **S8: Post-implementation** [always]
-   `## After implementing` / `1. Verify acceptance criteria:`
-   + agent.acceptanceCriteria as checklist: `- [ ] {criterion}: \`{check}\``
-   + `   Fix failures before proceeding.`
-   + `2. Do NOT stage or commit — the lead handles git after the batch completes.`
+   **S8: Acceptance** [always] `## After implementing` / `1. Verify acceptance criteria:` + agent.acceptanceCriteria as `- [ ] {criterion}: \`{check}\`` + `   Fix failures before proceeding.` / `2. Do NOT stage or commit — the lead handles git after the batch completes.`
 
-   **S9: Output format** [always] (substitute {planIndex} with actual plan index)
-   Emit verbatim:
+   **S9: Output format** [always] Emit verbatim (substitute {planIndex}):
       ## After implementing (continued)
       3. Write your full work log (reasoning, commands run, decisions made, issues encountered) to `.design/worker-{planIndex}.log` using the Write tool. This log is consumed by the result processor — include enough detail for verification.
 
@@ -211,8 +190,6 @@ Task:
 
    ```
    ## Output
-
-   **Context efficiency**: Minimize text output. Write reasoning to .design/setup.log if needed. Target: under 100 tokens of non-JSON output.
 
    The FINAL line of your output MUST be a single JSON object (no markdown fencing). All fields required:
 
@@ -264,30 +241,17 @@ Task:
 
    ```
    ## Input
-
-   Round: {round_number}
-   Total tasks in plan: {taskCount}
-   Tasks with 3 or fewer total: {true/false}
+   Round: {round_number}, Total tasks: {taskCount}, Small plan (<=3 tasks): {true/false}
    Task prompt file: .design/tasks.json
-   Read .design/tasks.json for task metadata (subject, model, files, acceptance criteria, fallback strategy).
+   Read .design/tasks.json for task metadata.
 
    ### Task Results
+   - planIndex: {planIndex}, statusLine: {FINAL status line}, attempts: {attempts}
    ```
 
-   For each task, append one line:
+   Append one line per task. If surprises/decisions exist, append `### Surprises/Decisions` with bullets.
 
-   `- planIndex: {planIndex}, statusLine: {FINAL status line from worker}, attempts: {attempts}`
-
-   If any surprises or decisions were noted during the round, append:
-
-   ```
-   ### Surprises/Decisions
-   - {description}
-   ```
-
----
-
-The finalizer reads task metadata from the task file and detailed work output from worker log files (`.design/worker-{planIndex}.log`). If a log file is missing, fall back to the status line only.
+The finalizer reads task metadata from tasks.json and detailed output from `.design/worker-{planIndex}.log` (fallback to status line if missing).
 
 3. **Processing instructions**:
 
@@ -296,46 +260,19 @@ The finalizer reads task metadata from the task file and detailed work output fr
 
    For each task:
 
-   1. Parse the status line provided in the input. Match against the regex: ^(COMPLETED|FAILED|BLOCKED): .+
-      If no match, treat as FAILED. Read `.design/worker-{planIndex}.log` for failure details — if the log file is missing, use "No status line returned and no log file found" as the failure reason.
+   1. Parse status line. Match `^(COMPLETED|FAILED|BLOCKED): .+`. If no match, treat as FAILED. Read `.design/worker-{planIndex}.log` for failure details (if missing, use "No status line returned and no log file found").
 
-   2. Spot-check files:
-      - For each path in files to modify: run `git diff --name-only` and verify the path appears
-      - For each path in files to create: run `test -f {path}`
-      - Unexpected file detection: run `git diff --name-only` for the full batch and flag any modified files not listed in any task's files to create/modify. Include unexpected files in the result summary as warnings.
+   2. Spot-check files: For creates, run `test -f {path}`. For modifies, verify in `git diff --name-only`. Flag unexpected diffs as warnings. If spot-check fails but agent reported COMPLETED: override to FAILED.
 
-   3. If spot-check fails but agent reported COMPLETED: override to FAILED with reason describing which file verification failed
+   3. If COMPLETED and spot-check passed: run acceptance criteria checks. Override to FAILED if any fail (include command and output).
 
-   4. If COMPLETED and spot-check passed: run each acceptance criteria check command via Bash. If any fail, override to FAILED with the acceptance failure details (command and output).
+   4. If BLOCKED: record as blocked — no retry, no cleanup.
 
-   5. If BLOCKED: record status as blocked — no retry, no cleanup.
+   5. If FAILED and attempts < 3: Read worker log for context. Clean up: `git checkout -- {modifies}` and `rm -f {creates}`. Delete stale log: `rm -f .design/worker-{planIndex}.log`. Assemble retry prompt: (a) original prompt from tasks.json, (b) retry context block with attempt number and failure reason, (c) fallback strategy if exists: "IMPORTANT: The primary approach failed. Use this strategy instead: {fallback}", (d) acceptance failures if relevant: "The following acceptance checks failed — ensure they pass before reporting COMPLETED: {failures}".
 
-   6. If FAILED and current attempts < 3:
-      - Read `.design/worker-{planIndex}.log` for detailed failure context (if missing, use the status line).
-      - Clean up partial artifacts: revert uncommitted changes to files-to-modify via `git checkout -- {files}` and delete partially created files-to-create via `rm -f {files}`.
-      - Delete the stale worker log: `rm -f .design/worker-{planIndex}.log`
-      - Assemble a retry prompt by concatenating:
-        a. The original worker prompt (read from .design/tasks.json, extracting the entry matching the task's planIndex).
-        b. A retry context block:
+   6. If FAILED and attempts >= 3: record as failed — no retry.
 
-           ## Retry context
-           This is attempt {attempts + 1} of 3. The previous attempt failed.
-
-           Previous failure reason:
-           {failure reason or raw output}
-
-        c. If the task has a fallback strategy, append:
-
-           IMPORTANT: The primary approach failed. Use this strategy instead: {fallback strategy}
-
-        d. If the failure was due to acceptance criteria, append:
-
-           The following acceptance checks failed — ensure they pass before reporting COMPLETED:
-           {list of failed check commands and their output}
-
-   7. If FAILED and current attempts >= 3: record as failed — no retry.
-
-   8. If COMPLETED and all checks passed: record as completed.
+   7. If COMPLETED and all checks passed: record as completed.
    ```
 
 4. **Plan update instructions**:
@@ -343,65 +280,24 @@ The finalizer reads task metadata from the task file and detailed work output fr
    ```
    ## Phase 2: Update Plan State
 
-   1. Read .design/plan.json from the project root.
+   1. Read .design/plan.json.
 
-   2. For each task in the batch results from Phase 1:
-      - Set task.status to the determined status
-      - Set task.result to the result string
-      - Set task.attempts to the attempts count
+   2. For each task from Phase 1: set status, result, attempts. Append completed tasks to progress.completedTasks. Append surprises and decisions.
 
-   3. Append completed tasks to progress.completedTasks as [{index, summary}] for each task with completed status.
+   3. Progressive trimming: for completed tasks, keep ONLY: subject, status, result, metadata.files, blockedBy, agent.role, agent.model. Remove all other fields.
 
-   4. Append any surprises to progress.surprises and decisions to progress.decisions.
+   4. Compute cascading failures: tasks whose blockedBy chain includes failed/blocked tasks → set to skipped with dependency message.
 
-   5. Apply progressive plan trimming: for every task with completed status, strip verbose agent fields — keep ONLY these fields on the task object:
-      - subject
-      - status
-      - result
-      - metadata.files (the full files object with create and modify)
-      - blockedBy
-      - agent.role
-      - agent.model
-      Remove all other agent subfields (approach, priorArt, fallback, contextFiles, assumptions, acceptanceCriteria, rollbackTriggers, constraints, expertise) and all other task-level fields (description, activeForm, attempts, metadata.type, metadata.reads) from completed tasks. This reduces plan size progressively as execution proceeds.
+   5. Write .design/plan.json.
 
-   6. Compute cascading failure skip list: for tasks whose blockedBy includes any task with failed or blocked status (following transitive blockedBy chains), set their status to skipped and result to a message indicating which dependency caused the skip.
-
-   7. Write to .design/plan.json.
-
-   8. Compute circuit breaker evaluation:
-      - Count all tasks still in pending status
-      - Count how many of those pending tasks would be skipped due to cascading failures (their blockedBy chain leads to a failed/blocked task)
-      - Determine shouldAbort: true if totalTasks > 3 AND wouldBeSkipped >= 50% of pending tasks
+   6. Circuit breaker: count pending tasks, count how many would be skipped by cascading failures. shouldAbort: true if totalTasks > 3 AND wouldBeSkipped >= 50% of pending.
    ```
 
-5. **Output format instructions**:
+5. **Output format**:
 
    ```
    ## Output
-
-   Minimize non-JSON output.
-
-   The FINAL line of your output MUST be a single JSON object (no markdown fencing). Use this exact schema:
-
-   {
-     "retryTasks": [
-       {"planIndex": 1, "retryPrompt": "<full assembled retry prompt>", "model": "opus", "attempt": 2}
-     ],
-     "completedFiles": {
-       "create": ["src/auth.ts"],
-       "modify": ["src/app.ts"]
-     },
-     "summary": "2 completed, 1 retry pending, 0 blocked",
-     "updated": true,
-     "skipList": [3, 5, 7],
-     "circuitBreaker": {
-       "totalTasks": 8,
-       "pendingCount": 5,
-       "wouldBeSkipped": 3,
-       "shouldAbort": true
-     },
-     "planSizeAfterTrim": "<approximate token count>"
-   }
+   FINAL line: JSON object (no fencing). Schema: {"retryTasks": [{"planIndex": 1, "retryPrompt": "...", "model": "opus", "attempt": 2}], "completedFiles": {"create": [...], "modify": [...]}, "summary": "...", "updated": true, "skipList": [...], "circuitBreaker": {"totalTasks": N, "pendingCount": N, "wouldBeSkipped": N, "shouldAbort": bool}, "planSizeAfterTrim": "..."}
    ```
 
 ---
@@ -422,9 +318,9 @@ Parse the final line of the subagent's return value as JSON.
 - If error is `schema_version`: tell user the plan uses an unsupported schema version and v3 is required, then stop.
 - If error is `empty_tasks`: tell user the plan contains no tasks and to re-run `/design`, then stop.
 
-Store the setup output for use throughout execution. The lead never reads `.design/plan.json` directly — all plan data comes through the setup output or updater responses. Worker prompts are stored in `.design/tasks.json`, not in the setup output — workers self-read their prompts at execution time via the bootstrap template.
+Store setup output. The lead never reads `.design/plan.json` directly — all plan data comes through setup/finalizer responses. Worker prompts live in `.design/tasks.json` — workers self-read via bootstrap.
 
-**Resume-nothing-to-do check**: If resuming (`isResume` is true) and the setup output shows no pending tasks remain (all tasks are already completed, failed, blocked, or skipped), tell the user "All tasks are already resolved — nothing to do." and stop.
+**Resume-nothing-to-do check**: If resuming and no pending tasks remain, tell user "All tasks are already resolved — nothing to do." and stop.
 
 ### Step 2: Report Validation
 
@@ -452,9 +348,9 @@ Initialize `roundNumber` to 1. Maintain a `completedResults` map (planIndex → 
 
 Compute the ready set: tasks that are `pending` AND all tasks in their `blockedBy` are `completed` (check against the `completedResults` map and prior updater `skipList` responses).
 
-**Deadlock detection**: If the ready set is empty but pending tasks remain, this indicates either a dependency cycle or all remaining pending tasks are blocked by failed/skipped tasks. Abort execution with message: "Deadlock detected: {pendingCount} tasks remain but none are ready. Remaining tasks depend on failed or blocked predecessors." Proceed to Step 4.
+**Deadlock detection**: If ready set is empty but pending tasks remain, abort with: "Deadlock detected: {pendingCount} tasks remain but none are ready. Remaining tasks depend on failed or blocked predecessors." Proceed to Step 4.
 
-Read `.design/tasks.json` for task metadata only (planIndex, taskId, subject, model, fileOverlaps) — do NOT read prompt fields into lead context. Workers self-read their prompts.
+Read `.design/tasks.json` for task metadata only (planIndex, taskId, subject, model, fileOverlaps) — NOT prompts. Workers self-read.
 
 #### 3b. Spawn Task Subagents
 
@@ -492,79 +388,37 @@ If the task has dependency results (from point 2 above), append them directly af
 
 **Parallel safety**: Check the setup output's `fileOverlapMatrix`. If any tasks in this ready set have file overlaps with each other, run those conflicting tasks sequentially. Spawn all non-conflicting tasks in parallel in a single response.
 
-#### 3c. Process Results
+#### 3c. Process Results and Update Plan
 
 After all batch workers return, extract the FINAL status line from each worker's return value. The FINAL line is the last line of output and must match the format `COMPLETED:|FAILED:|BLOCKED:`. Discard all preceding output — only the FINAL status line is retained for processing.
 
-Spawn the Batch Processor Subagent using the prompt template from Section B.
+Spawn the Batch Finalizer Subagent using the prompt template from Section B.
 
-Assemble the processor's input data section by inserting:
+Assemble finalizer input: round number, total task count, task prompt file path (`.design/tasks.json`), and for each task: planIndex, status line (FINAL line only), attempts count, surprises/decisions. The lead does NOT embed raw output — finalizer reads from worker log files.
 
-- The round number and task prompt file path (`.design/tasks.json`)
-- For each task: its planIndex, the **status line only** (FINAL line from worker return value), and current attempts count
-- For retry processing: include the task prompt file path so the processor can read original prompts
+Parse the final line of the finalizer's return value as JSON. The finalizer processes results and updates plan state in a single pass.
 
-The lead does NOT embed raw return values or full worker output — the processor reads detailed output from worker log files directly.
-
-Parse the final line of the processor's return value as JSON.
-
-**Fallback (minimal mode)**: Parse worker status lines against `^(COMPLETED|FAILED|BLOCKED): .+`. For COMPLETED tasks, verify primary output files exist (`test -f` for creates, `git diff --name-only` for modifies). Skip acceptance criteria checks — retry catches regressions. For FAILED tasks with attempts < 3, read original prompt from `.design/tasks.json` by planIndex, append retry context, assemble retry prompt. Write results to `.design/processor-batch-{roundNumber}.json`. Log: "Processor subagent failed — executing inline (minimal mode)."
+**Fallback (minimal mode)**: Parse worker status lines against `^(COMPLETED|FAILED|BLOCKED): .+`. For COMPLETED tasks, verify primary output files exist (`test -f` for creates, `git diff --name-only` for modifies). Skip acceptance criteria checks. For FAILED tasks with attempts < 3, read original prompt from `.design/tasks.json` by planIndex, append retry context, assemble retry prompt. Read `.design/plan.json`, update status/result/attempts fields. Skip progressive trimming and cascading failure computation. Write plan. Return `{"retryTasks": [...], "completedFiles": {...}, "updated": true, "skipList": [], "circuitBreaker": {"shouldAbort": false}}`. Log: "Finalizer subagent failed — executing inline (minimal mode)."
 
 #### 3d. Handle Retries
 
-If the processor output contains `retryTasks`:
-
-For each retry task, spawn a new Task subagent using the processor-provided `retryPrompt` and `model`. Collect return values.
-
-After all retry agents return, spawn the Batch Processor Subagent again with the retry results (status lines and worker log file paths). Include the task prompt file path so the processor can read original prompts for further retry assembly if needed.
-
-Repeat until no `retryTasks` remain or all failed tasks have reached 3 attempts. Each retry pass processes only the tasks that were marked for retry in the previous pass.
+If finalizer output contains `retryTasks`: spawn new Task subagents with finalizer-provided `retryPrompt` and `model`. After all retry agents return, spawn Batch Finalizer again with retry results. Include task prompt file path for further retry assembly. Repeat until no `retryTasks` remain or all failed tasks reach 3 attempts.
 
 #### 3e. Display Round Progress
 
-Using the final processor output (after all retries are resolved), display:
+Using final finalizer output (after retries): display `Round {roundNumber}: {completed}/{total_in_batch} tasks ({total_completed_overall}/{taskCount} overall)` + task statuses.
 
-```
-Round {roundNumber}: {completed}/{total_in_batch} tasks ({total_completed_overall}/{taskCount} overall)
-- Task {planIndex}: {subject} — {status}
-```
+#### 3f. Update Tracking State
 
-#### 3f. Update Plan State
+Update `completedResults` map with completed task results. Mark skipped tasks (from `skipList`) as completed in TaskList. Remove completed and skipped from pending set.
 
-Spawn the Plan Updater Subagent using the prompt template from Section C.
+#### 3g. Git Commit
 
-Assemble the updater's input data section by inserting:
+Stage and commit completed files: `git add {completedFiles} && git commit -m "{round summary}"`. Use finalizer's `completedFiles` field. Skip if no files (research-only tasks).
 
-- Round number
-- Total task count and whether it is 3 or fewer
-- Any surprises or decisions noted during the round
+#### 3h. Circuit Breaker
 
-The updater reads per-task results from `.design/processor-batch-{roundNumber}.json` — the lead does not relay them inline.
-
-Parse the final line of the updater's return value as JSON.
-
-**Fallback (minimal mode)**: Read `.design/plan.json` and `.design/processor-batch-{roundNumber}.json`. For each task result: update status, result, and attempts fields. Write the updated plan. Skip progressive trimming and cascading failure computation — defer to next round's updater. Return `{"updated": true, "skipList": [], "circuitBreaker": {"shouldAbort": false}}`. Log: "Updater subagent failed — executing inline (minimal mode)."
-
-#### 3g. Update Tracking State
-
-Using the processor's final output, update the `completedResults` map with completed task results. Using the updater's `skipList`, mark skipped tasks as `completed` in the TaskList (the detailed skipped status lives in `.design/plan.json`). Remove completed and skipped tasks from the pending set.
-
-#### 3h. Git Commit
-
-Stage and commit all completed tasks' files from this round:
-
-```
-git add {all metadata.files.create and metadata.files.modify from completed tasks}
-git commit -m "{round summary}"
-```
-
-Use the processor's `completedFiles` field to determine which files to stage. Skip git add and commit if no files were created or modified in this round (possible for research-only tasks).
-
-#### 3i. Circuit Breaker
-
-Using the updater's `circuitBreaker` field: if `shouldAbort` is true, ABORT execution. Display: "Circuit breaker triggered: {wouldBeSkipped}/{pendingCount} pending tasks would be skipped due to cascading failures." The updater has already written the skip statuses to `.design/plan.json`. Proceed to Step 4.
-
-For plans with 3 or fewer total tasks (`circuitBreaker.totalTasks <= 3`), ignore the circuit breaker — cascading failures are managed individually.
+If finalizer's `circuitBreaker.shouldAbort` is true, ABORT. Display: "Circuit breaker triggered: {wouldBeSkipped}/{pendingCount} pending tasks would be skipped due to cascading failures." Proceed to Step 4. Ignore circuit breaker for plans with ≤3 tasks.
 
 Increment `roundNumber` and continue the main loop.
 
@@ -580,7 +434,7 @@ After all rounds (or after circuit breaker abort or deadlock):
    - Skipped: {count} — {subjects}
    - Follow-up recommendations if any failures
 
-3. Clean up intermediate artifacts: `rm -f .design/tasks.json .design/worker-*.log .design/processor-batch-*.json`
+3. Clean up intermediate artifacts: `rm -f .design/tasks.json .design/worker-*.log`
 4. If fully successful: rename `.design/plan.json` to `.design/plan.done.json` for audit trail. Return "All {count} tasks completed."
 5. If partial: leave `.design/plan.json` for resume. Return "Execution incomplete. {done}/{total} completed."
 

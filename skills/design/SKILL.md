@@ -10,9 +10,7 @@ Thin-lead orchestrator: decompose a goal into `.design/plan.json` using a dynami
 
 **Do NOT use EnterPlanMode — this skill IS the plan.**
 
-### Conventions
-
-- **Signaling patterns**: Agents signal completion via TaskList and `SendMessage(type: "message")` to the lead. The lead parses JSON from message content.
+- **Signaling**: Agents signal completion via TaskList and `SendMessage(type: "message")` to the lead. The lead parses JSON from message content.
 
 **MANDATORY: Execute ALL steps (1–4) for EVERY invocation. The lead is a lifecycle manager — it spawns agents and manages the team. ALL analysis happens inside agents. The lead's ONLY tools are: `TeamCreate`, `TeamDelete`, `TaskCreate`, `TaskUpdate`, `TaskList`, `SendMessage`, `Task`, `AskUserQuestion`, `Bash` (cleanup/verification only), and `Read` (only `.design/goal-analysis.json` during Complexity Branching). No other tools — no MCP tools, no `Grep`, no `Glob`, no `LSP`, no source file reads. The ONLY valid output of this skill is `.design/plan.json` — produced by the agent team. This applies regardless of goal type, complexity, or apparent simplicity. Audits, reviews, research, one-line fixes — all go through the team. No exceptions exist. If you are tempted to "just do it directly," STOP — that impulse is the exact failure mode this rule prevents.**
 
@@ -27,18 +25,18 @@ Thin-lead orchestrator: decompose a goal into `.design/plan.json` using a dynami
 
 ## Step 1: Pre-flight
 
-1. Use `AskUserQuestion` to clarify only when reasonable developers would choose differently and the codebase doesn't answer it: scope boundaries, done-state, technical preferences, compatibility, priority.
+1. Use `AskUserQuestion` to clarify only when reasonable developers would choose differently and the codebase doesn't answer it.
 2. If >12 tasks likely needed, suggest phases. Design only phase 1.
-3. Check for existing `.design/plan.json`. If it exists with any non-pending task statuses, count task statuses and use `AskUserQuestion`: "Existing plan has {N completed}/{M failed}/{P pending} tasks. Overwrite and start fresh?" If user declines, output "Keeping existing plan. Run /do:execute to continue." and STOP.
+3. Check for existing `.design/plan.json`. If it exists with non-pending statuses, count task statuses and use `AskUserQuestion`: "Existing plan has {N completed}/{M failed}/{P pending} tasks. Overwrite?" If declined, output "Keeping existing plan. Run /do:execute to continue." and STOP.
 4. Clean up stale staging: `rm -rf .design/ && mkdir -p .design/`
 
 ## Step 2: Team + Goal Analyst
 
-Create the team and spawn a goal analyst as the first teammate. The analyst deeply understands the goal, explores the codebase, and recommends the expert team composition.
+Create the team and spawn a goal analyst as the first teammate.
 
-1. Attempt cleanup of any stale team: `TeamDelete(team_name: "do-design")` (ignore errors)
-2. `TeamCreate(team_name: "do-design")`. If TeamCreate fails, tell user: "Agent Teams is required for /do:design. Ensure your Claude Code version supports Agent Teams and retry." Then STOP.
-3. `TaskCreate` for the goal analyst (subject: "Analyze goal and recommend team composition")
+1. `TeamDelete(team_name: "do-design")` (ignore errors — cleanup of stale team)
+2. `TeamCreate(team_name: "do-design")`. If it fails, tell user: "Agent Teams is required for /do:design. Ensure your Claude Code version supports Agent Teams and retry." Then STOP.
+3. `TaskCreate` for goal analyst (subject: "Analyze goal and recommend team composition")
 4. Spawn the goal analyst:
 
 ```
@@ -53,92 +51,44 @@ Task:
 **Goal analyst prompt** — fill `{goal}`:
 
 ```
-You are the Goal Analyst on a planning team. Your job is to deeply understand the goal, explore the codebase, propose high-level approaches, and recommend the expert team composition.
+You are the Goal Analyst on a planning team. Deeply understand the goal, explore the codebase, propose approaches, and recommend the expert team.
 
 **Goal**: {goal}
 
 ## Instructions
 
-1. Use mcp__sequential-thinking__sequentialthinking (if available, otherwise inline numbered reasoning) to decompose the goal:
-   - What are the real sub-problems? Is the stated goal the actual goal?
-   - What known patterns, frameworks, or approaches does this map to?
-   - What prior art exists in the codebase or ecosystem?
-   - Is this simpler or more complex than stated?
+1. Use mcp__sequential-thinking__sequentialthinking (if available, otherwise inline numbered reasoning) to decompose the goal: identify real sub-problems vs stated goal, known patterns/frameworks this maps to, prior art in codebase/ecosystem, actual complexity vs stated.
 
-2. Explore the codebase for context:
-   - Read package.json / pyproject.toml / Cargo.toml / go.mod — identify stack, frameworks, build/test commands
-   - Read CLAUDE.md, linter/formatter configs — extract conventions
-   - Grep/Glob for modules, files, and patterns the goal touches
-   - LSP(documentSymbol) on a key source file if available
-   - Identify existing patterns relevant to the goal
+2. Explore the codebase: read project manifests (package.json/pyproject.toml/Cargo.toml/go.mod) for stack and build/test commands, read CLAUDE.md and linter configs for conventions, grep/glob for relevant modules and patterns, use LSP(documentSymbol) if available.
 
-3. Propose 2–3 high-level approaches to solving the goal. For each approach:
-   - name, description (1–2 sentences)
-   - pros and cons (concrete, not generic)
-   - effort estimate (low/medium/high)
-   - risk level (low/medium/high)
-   Mark one as recommended with a brief rationale. Consider: could this be solved differently than the obvious way? What would a pragmatist do vs a purist?
+3. Propose 2–3 high-level approaches. For each: name, description (1–2 sentences), concrete pros/cons, effort (low/medium/high), risk (low/medium/high). Mark one recommended with rationale. Consider: could this be solved differently than the obvious way?
 
-4. Assess goal complexity and determine the appropriate analysis tier:
-   - **minimal** — 1-3 tasks, single obvious approach, minimal uncertainty (e.g., update a config value, add a simple endpoint)
-   - **standard** — 4-8 tasks, some design decisions, moderate uncertainty (e.g., add feature with multiple files, refactor a module)
-   - **full** — 9+ tasks, multiple viable approaches, cross-cutting concerns, significant uncertainty (e.g., architecture change, new subsystem, complex integration)
-   Output: `complexity` (minimal|standard|full) and `complexityRationale` (1-2 sentences explaining the classification).
-   For minimal goals: still output all fields, but `recommendedTeam` can be empty since no experts will be spawned.
+4. Assess complexity tier:
+   - **minimal** — 1-3 tasks, single obvious approach, minimal uncertainty
+   - **standard** — 4-8 tasks, some design decisions, moderate uncertainty
+   - **full** — 9+ tasks, multiple viable approaches, cross-cutting concerns
+   Output `complexity` (minimal|standard|full) and `complexityRationale` (1-2 sentences). For minimal: `recommendedTeam` can be empty.
 
-5. Based on your understanding, recommend 2–5 expert roles. Each expert has a **type**:
-   - `scanner` — analyzes the goal through a domain lens, produces findings and task recommendations. Use for well-understood domains where the main question is what needs to happen (test coverage, security review, API surface).
-   - `architect` — designs HOW to solve a specific sub-problem. Proposes 2–3 concrete implementation strategies with tradeoffs, recommends one. Use when the sub-problem has multiple viable solutions and the choice materially affects the plan (state management approach, data model design, integration pattern).
-   Aim for a mix — not all scanners, not all architects. The right ratio depends on how much of the goal is figuring out what to do vs figuring out how to do it.
-   For each expert: name, role, type (scanner|architect), model (opus for architecture/analysis, sonnet for implementation, haiku for verification), one-line mandate enriched with specific concepts and prior art you found.
+5. Recommend 2–5 expert roles. Each has a **type**: `scanner` (analyzes through a domain lens — what needs to happen) or `architect` (designs HOW to solve a sub-problem — proposes 2–3 strategies with tradeoffs, recommends one). Aim for a mix based on how much is figuring-out-what vs figuring-out-how. For each: name, role, type, model (opus for analysis, sonnet for implementation, haiku for verification), one-line mandate with specific concepts and prior art.
 
 ## Output
 
 Write to .design/goal-analysis.json:
 
-{
-  "goal": "{original goal}",
-  "refinedGoal": "{restated if different}",
-  "concepts": ["pattern/framework/approach names found"],
-  "priorArt": ["actual findings from codebase — libraries, patterns, existing code"],
-  "codebaseContext": {
-    "stack": "...",
-    "conventions": "...",
-    "testCommand": "...",
-    "buildCommand": "...",
-    "lsp": {"available": []},
-    "relevantModules": [],
-    "existingPatterns": []
-  },
-  "subProblems": ["decomposed sub-problems"],
-  "approaches": [
-    {"name": "...", "description": "...", "pros": ["..."], "cons": ["..."], "effort": "low|medium|high", "risk": "low|medium|high", "recommended": true|false, "rationale": "why recommended or not"}
-  ],
-  "complexity": "minimal|standard|full",
-  "complexityRationale": "1-2 sentences explaining the classification",
-  "scopeNotes": "refinements or hidden complexity",
-  "recommendedTeam": [
-    {"name": "...", "role": "...", "type": "scanner|architect", "model": "opus|sonnet|haiku", "mandate": "..."}
-  ]
-}
+{"goal": "{original}", "refinedGoal": "{restated if different}", "concepts": [], "priorArt": [], "codebaseContext": {"stack": "", "conventions": "", "testCommand": "", "buildCommand": "", "lsp": {"available": []}, "relevantModules": [], "existingPatterns": []}, "subProblems": [], "approaches": [{"name": "", "description": "", "pros": [], "cons": [], "effort": "", "risk": "", "recommended": false, "rationale": ""}], "complexity": "minimal|standard|full", "complexityRationale": "", "scopeNotes": "", "recommendedTeam": [{"name": "", "role": "", "type": "scanner|architect", "model": "", "mandate": ""}]}
 
-Claim your task from the task list and mark completed when done.
+Claim your task and mark completed. Read ~/.claude/teams/do-design/config.json for the lead's name, then:
 
-Read ~/.claude/teams/do-design/config.json to discover the team lead's name. Send your result to the lead using SendMessage:
-
-    type:      message
-    recipient: {lead-name}
-    content:   ANALYST_COMPLETE
-    summary:   Goal analysis complete
+    SendMessage(type: "message", recipient: {lead-name}, content: "ANALYST_COMPLETE", summary: "Goal analysis complete")
 ```
 
 **Lead waits** for the analyst's `SendMessage`. Once received, proceed to Complexity Branching.
 
-**Fallback**: If the analyst fails to produce `.design/goal-analysis.json`, the lead performs minimal inline analysis: read package.json for stack, identify 2–3 obvious domains from the goal text, compose a default team. Log: "Analyst failed — using minimal team composition."
+**Fallback**: If the analyst fails to produce `.design/goal-analysis.json`, the lead performs minimal inline analysis: read package.json for stack, identify 2–3 obvious domains, compose a default team. Log: "Analyst failed — using minimal team composition."
 
 ## Complexity Branching
 
-Read `.design/goal-analysis.json` — extract `complexity`, `complexityRationale`, and `recommendedTeam`. Echo progress:
+Read `.design/goal-analysis.json` — extract `complexity`, `complexityRationale`, and `recommendedTeam`. Echo:
 
 ```
 Complexity: {complexity} — {complexityRationale}
@@ -149,9 +99,9 @@ Branch based on `complexity`:
 
 ### Minimal Path
 
-Skip Step 3 entirely. Echo: `"Spawning lightweight plan-writer (minimal mode)"`
+Skip Step 3. Echo: `"Spawning lightweight plan-writer (minimal mode)"`
 
-Spawn a single plan-writer **Task subagent** (NOT a teammate) to generate the plan directly from the analyst's output:
+Spawn a single plan-writer **Task subagent** (NOT a teammate):
 
 ```
 Task:
@@ -163,34 +113,17 @@ Task:
 **Minimal plan-writer prompt** — fill `{goal}`:
 
 ```
-You are a lightweight plan writer. Generate .design/plan.json for a minimal-complexity goal using only the analyst's output — no expert files, no critic.
+You are a lightweight plan writer. Generate .design/plan.json for a minimal-complexity goal using only the analyst's output.
 
 **Goal**: {goal}
 
 ## Instructions
 
-1. Read .design/goal-analysis.json for goal decomposition, codebase context, approaches, and scope notes.
-
-2. Using the analyst's recommended approach and sub-problems, generate a task list (1–3 tasks). For each task include all required fields:
-   - subject, description, activeForm, status (pending), result (null), attempts (0), blockedBy (array of indices)
-   - metadata: type (research|implementation|testing|configuration), files {create:[], modify:[]}, reads
-   - agent: role, model (opus for architecture/analysis, sonnet for implementation, haiku for verification), approach, contextFiles [{path, reason}], assumptions [{claim, verify (shell cmd), severity: blocking|warning}], acceptanceCriteria [{criterion, check (shell cmd)}], rollbackTriggers ["If X, STOP and return BLOCKED: reason"], constraints
-
-3. Description rule: explain WHY and how it connects to dependents — not just what. An executor with zero context must act on it.
-
-4. Auto-generate safety:
-   - File existence: for each path in metadata.files.modify, add blocking assumption `test -f {path}`
-   - Convert every blocking assumption to a rollback trigger
-
-5. Validate:
-   - Tasks array >= 1 task
-   - No concurrent file conflicts
-   - All blockedBy valid indices, no cycles
-   - Every task has >= 1 assumption and >= 1 rollback trigger
-   - Total tasks <= 3
-
-6. Write to .design/plan.json with schema:
-   {schemaVersion: 3, goal, context: {stack, conventions, testCommand, buildCommand, lsp}, progress: {completedTasks: [], surprises: [], decisions: []}, tasks: [...]}
+1. Read .design/goal-analysis.json for decomposition, codebase context, approaches, and scope notes.
+2. Generate 1–3 tasks from the recommended approach. Each task needs: subject, description (explain WHY and connection to dependents), activeForm, status (pending), result (null), attempts (0), blockedBy (array of indices), metadata: {type, files: {create:[], modify:[]}, reads}, agent: {role, model (opus/sonnet/haiku), approach, contextFiles [{path, reason}], assumptions [{claim, verify (shell cmd), severity: blocking|warning}], acceptanceCriteria [{criterion, check (shell cmd)}], rollbackTriggers ["If X, STOP and return BLOCKED: reason"], constraints}.
+3. Auto-generate safety: for each modify path add blocking assumption `test -f {path}`, convert blocking assumptions to rollback triggers.
+4. Validate: tasks >= 1, no concurrent file conflicts, all blockedBy valid (no cycles), every task has >= 1 assumption and >= 1 rollback trigger, total <= 3.
+5. Write .design/plan.json: {schemaVersion: 3, goal, context: {stack, conventions, testCommand, buildCommand, lsp}, progress: {completedTasks: [], surprises: [], decisions: []}, tasks: [...]}
 
 ## Output
 
@@ -210,38 +143,29 @@ Proceed to Step 4 (skip Step 3).
 
 Echo: `"Spawning {N} experts + plan-writer (no critic)"`
 
-Proceed to Step 3 with these modifications:
-
-- **Skip** critic task creation and critic agent spawning
-- Plan-writer `blockedBy` references all expert task IDs directly (not critic)
-- Plan-writer prompt: omit critic.json references (Phase 1 steps 4 and 6 are skipped — no critique to incorporate)
-
-Two-tier fallback applies if the team fails.
+Proceed to Step 3 with: skip critic, plan-writer `blockedBy` all expert task IDs directly, plan-writer prompt omits critic.json references. Two-tier fallback applies.
 
 ### Full Path
 
 Echo: `"Spawning {N} experts + critic + plan-writer"`
 
-Proceed to Step 3 unchanged. Two-tier fallback applies if the team fails.
+Proceed to Step 3 unchanged. Two-tier fallback applies.
 
 ## Step 3: Grow Team with Experts, Critic, and Plan-Writer (standard/full only)
 
-Read `.design/goal-analysis.json` to get the analyst's recommended team. Then grow the existing team by spawning experts, an optional critic, and a plan-writer. The pipeline ordering enforces: experts (parallel) → critic (full only) → plan-writer.
+Read `.design/goal-analysis.json` for `recommendedTeam` array (each entry has `type`: `scanner` or `architect`). Record array length as `{expectedExpertCount}`.
 
-1. Read `.design/goal-analysis.json` — extract `recommendedTeam` array (each entry has a `type` field: `scanner` or `architect`). Record the array length as `{expectedExpertCount}` for use in critic and plan-writer prompts.
-2. Create TaskList entries with dependencies:
-   - For each recommended expert: `TaskCreate` with mandate as subject
+1. Create TaskList entries with dependencies:
+   - For each expert: `TaskCreate` with mandate as subject
    - **Full only**: `TaskCreate` for critic (subject: "Challenge expert proposals and evaluate approach coherence")
    - `TaskCreate` for plan-writer (subject: "Merge expert analyses, validate, and write plan.json")
-   - Wire dependencies via `TaskUpdate(addBlockedBy)`:
-     - **Full**: critic blockedBy all expert task IDs, plan-writer blockedBy critic task ID
-     - **Standard**: plan-writer blockedBy all expert task IDs directly (no critic)
-3. Spawn all new agents in parallel via `Task(subagent_type: "general-purpose", team_name: "do-design", name: "{name}", model: "{model}")`:
-   - All expert agents from the recommendation (use scanner or architect prompt based on `type`)
+   - Wire via `TaskUpdate(addBlockedBy)`: **Full**: critic blockedBy all experts, plan-writer blockedBy critic. **Standard**: plan-writer blockedBy all experts.
+2. Spawn all agents in parallel via `Task(subagent_type: "general-purpose", team_name: "do-design", name: "{name}", model: "{model}")`:
+   - All experts (use scanner or architect prompt based on `type`)
    - **Full only**: `critic` (model: `opus`)
    - `plan-writer` (model: `opus`)
 
-**Scanner prompt** — for experts with `type: "scanner"`. Fill `{goal}`, `{name}`, `{role}`, `{mandate}`:
+**Scanner prompt** — fill `{goal}`, `{name}`, `{role}`, `{mandate}`:
 
 ```
 You are a {role} (domain scanner) on a planning team.
@@ -251,30 +175,23 @@ You are a {role} (domain scanner) on a planning team.
 **Your mandate**: {mandate}
 
 ## Context
-Read .design/goal-analysis.json for goal decomposition, codebase context, concept mapping, prior art, approaches, and scope notes. Use this to focus your analysis — the goal analyst has already explored the codebase and identified key patterns.
+Read .design/goal-analysis.json for goal decomposition, codebase context, approaches, and scope notes.
 
 ## Instructions
-
 1. Analyze the goal through your domain lens — ensure MECE coverage within your mandate.
-2. Gather additional context you need beyond what the analyst found: read specific source files, use LSP (documentSymbol, goToDefinition) when available, use WebSearch/WebFetch if external research is needed.
-3. Follow up on prior art relevant to your domain — verify the analyst's findings and dig deeper where needed.
+2. Gather additional context beyond the analyst's findings: read source files, use LSP if available, WebSearch/WebFetch for external research.
+3. Follow up on prior art relevant to your domain — verify and deepen the analyst's findings.
 4. Produce findings (risks, observations) and task recommendations.
 
 ## Task Recommendations
-
-For each task you recommend, include:
-- subject, description, type (research|implementation|testing|configuration)
-- files: {create: [], modify: []}
-- dependencies (which other tasks must complete first, by subject reference)
-- agent spec: role, model (opus for architecture/analysis, sonnet for implementation, haiku for verification), approach, contextFiles [{path, reason}], assumptions [{claim, verify (shell cmd), severity: blocking|warning}], acceptanceCriteria [{criterion, check (shell cmd)}], rollbackTriggers ["If X, STOP and return BLOCKED: reason"], constraints
+For each task: subject, description, type (research|implementation|testing|configuration), files {create:[], modify:[]}, dependencies (by subject reference), agent spec: {role, model (opus/sonnet/haiku), approach, contextFiles [{path, reason}], assumptions [{claim, verify (shell cmd), severity: blocking|warning}], acceptanceCriteria [{criterion, check (shell cmd)}], rollbackTriggers, constraints}.
 
 ## Output
-
-Write findings to .design/expert-{name}.json with findings array and tasks array.
-Claim your task from the task list and mark completed when done.
+Write to .design/expert-{name}.json with findings array and tasks array.
+Claim your task and mark completed.
 ```
 
-**Architect prompt** — for experts with `type: "architect"`. Fill `{goal}`, `{name}`, `{role}`, `{mandate}`:
+**Architect prompt** — fill `{goal}`, `{name}`, `{role}`, `{mandate}`:
 
 ```
 You are a {role} (approach architect) on a planning team.
@@ -284,176 +201,111 @@ You are a {role} (approach architect) on a planning team.
 **Your mandate**: {mandate}
 
 ## Context
-Read .design/goal-analysis.json for goal decomposition, codebase context, concept mapping, prior art, approaches, and scope notes. Pay special attention to the approaches array — the analyst has proposed high-level strategies. Your job is to drill into the sub-problem your mandate covers and design the concrete implementation approach.
+Read .design/goal-analysis.json for goal decomposition, codebase context, approaches, and scope notes. Focus on the approaches array — drill into your sub-problem and design the concrete implementation.
 
 ## Instructions
-
-1. For your sub-problem, propose 2–3 concrete implementation strategies. For each:
-   - Describe the approach in enough detail that an executor could act on it
-   - List concrete pros and cons (performance, maintainability, complexity, risk)
-   - Identify what assumptions each approach depends on
-   - Note compatibility with the analyst's recommended high-level approach
-2. Recommend one strategy with clear rationale. Explain what would change your recommendation.
-3. Gather evidence: read source files, check existing patterns, use LSP if available, use WebSearch/WebFetch for external best practices.
+1. For your sub-problem, propose 2–3 concrete strategies. For each: detailed approach, concrete pros/cons (performance, maintainability, complexity, risk), assumptions it depends on, compatibility with the analyst's recommended approach.
+2. Recommend one strategy with rationale. Explain what would change your recommendation.
+3. Gather evidence: read source files, check patterns, use LSP if available, WebSearch/WebFetch for best practices.
 4. Produce task recommendations for the chosen strategy.
 
 ## Task Recommendations
-
-For each task you recommend, include:
-- subject, description, type (research|implementation|testing|configuration)
-- files: {create: [], modify: []}
-- dependencies (which other tasks must complete first, by subject reference)
-- chosenApproach: brief name of the strategy this task implements
-- alternativesConsidered: names of rejected strategies (for the critic to review)
-- agent spec: role, model (opus for architecture/analysis, sonnet for implementation, haiku for verification), approach, contextFiles [{path, reason}], assumptions [{claim, verify (shell cmd), severity: blocking|warning}], acceptanceCriteria [{criterion, check (shell cmd)}], rollbackTriggers ["If X, STOP and return BLOCKED: reason"], constraints
+For each task: subject, description, type, files {create:[], modify:[]}, dependencies (by subject), chosenApproach, alternativesConsidered, agent spec: {role, model (opus/sonnet/haiku), approach, contextFiles [{path, reason}], assumptions [{claim, verify (shell cmd), severity: blocking|warning}], acceptanceCriteria [{criterion, check (shell cmd)}], rollbackTriggers, constraints}.
 
 ## Output
-
-Write findings to .design/expert-{name}.json with:
-- findings array (risks, observations)
-- approaches array (the 2–3 strategies you evaluated, with pros/cons/recommendation)
-- tasks array (for the chosen strategy)
-
-Claim your task from the task list and mark completed when done.
+Write to .design/expert-{name}.json with findings, approaches (2–3 evaluated strategies with pros/cons/recommendation), and tasks arrays.
+Claim your task and mark completed.
 ```
 
 **Critic teammate prompt** — fill `{goal}` and `{expectedExpertCount}`:
 
 ```
-You are the Critic on a planning team. Your job is to stress-test the experts' proposals before the plan-writer assembles the final plan.
+You are the Critic on a planning team. Stress-test expert proposals before the plan-writer assembles the final plan.
 
 **Goal**: {goal}
 **Expected expert count**: {expectedExpertCount}
 
-Your task in the TaskList is blocked by the expert agents. Once unblocked, proceed:
+Your task is blocked by experts. Once unblocked:
 
 ## Instructions
-
-1. Read .design/goal-analysis.json for the analyst's goal decomposition, approaches, and codebase context.
-2. Glob .design/expert-*.json and read each expert analysis. Expected {expectedExpertCount} expert files. If fewer found, report missing experts.
+1. Read .design/goal-analysis.json for the analyst's decomposition, approaches, and context.
+2. Glob .design/expert-*.json and read each. Expected {expectedExpertCount} files — report if fewer.
 3. For each expert output, challenge:
-   - **Assumptions**: Are they valid? Can they be verified? What if they are wrong?
-   - **Approach choices**: Did architects consider the right alternatives? Is the recommended approach actually the best one given the constraints? What are they optimizing for — is that the right thing to optimize?
-   - **Missing risks**: What failure modes are not covered? What happens at the boundaries?
-   - **Over-engineering**: Are any proposed tasks unnecessarily complex? Could simpler solutions work?
-   - **Under-engineering**: Are any areas getting too little attention? Are there hidden dependencies or edge cases being ignored?
-   - **Coherence**: Do the expert proposals fit together? Are there contradictions between experts?
-   - **Goal alignment**: Does the aggregate plan actually solve what the user asked for, or has scope drifted?
-4. Where you identify issues, propose specific adjustments (not vague concerns).
-5. Verify claims by reading source files or checking the codebase where feasible.
+   - **Assumptions & risks**: Valid? Verifiable? What failure modes are uncovered?
+   - **Approach choices**: Right alternatives considered? Right optimization target? Best given constraints?
+   - **Engineering calibration**: Over-engineered (simpler solution works)? Under-engineered (hidden deps/edge cases)?
+   - **Coherence & alignment**: Do proposals fit together? Contradictions? Does aggregate plan solve the stated goal?
+4. Propose specific adjustments for each issue (not vague concerns).
+5. Verify claims by reading source files or checking codebase where feasible.
 
 ## Output
-
-Write to .design/critic.json with:
-- challenges: [{expert, issue, severity (blocking|major|minor), recommendation}]
-- missingCoverage: areas not addressed by any expert
-- approachRisks: risks with the chosen approaches that experts did not flag
-- coherenceIssues: contradictions or gaps between expert proposals
-- verdict: overall assessment — proceed, proceed-with-changes, or major-rework-needed
-
-Claim your task from the task list and mark completed when done.
+Write to .design/critic.json: {challenges: [{expert, issue, severity (blocking|major|minor), recommendation}], missingCoverage: [], approachRisks: [], coherenceIssues: [], verdict: "proceed|proceed-with-changes|major-rework-needed"}
+Claim your task and mark completed.
 ```
 
 **Plan-writer teammate prompt** — fill `{goal}` and `{expectedExpertCount}`:
 
 ```
-You are the Plan Writer on a planning team. Merge expert analyses, incorporate critique, validate, enrich, and write .design/plan.json.
+You are the Plan Writer. Merge expert analyses, incorporate critique, validate, enrich, and write .design/plan.json.
 
 **Goal**: {goal}
 **Expected expert count**: {expectedExpertCount}
 
-Your task in the TaskList is blocked by expert tasks (and critic, if present). Once unblocked, proceed:
+Your task is blocked by experts (and critic, if present). Once unblocked:
 
 ## Phase 1: Context & Merge
-
-1. Read .design/goal-analysis.json for goal decomposition, codebase context, concepts, approaches, and prior art.
-2. Use the codebaseContext from goal-analysis.json as the basis for plan.json's context field. Supplement with additional scans if needed (package.json, CLAUDE.md, linter configs).
-3. Glob .design/expert-*.json and read each expert analysis. Expected {expectedExpertCount} expert files. If fewer found, report missing experts.
-4. If .design/critic.json exists, read it for the critique. (Standard tier has no critic — skip steps 4 and 6 if absent.)
-5. Merge expert task recommendations:
-   - Where experts converge, increase confidence
-   - Where they diverge, use the critic's assessment to break ties (or your own judgment if no critic)
-   - Deduplicate overlapping tasks
-   - Ensure MECE coverage — no gaps, no overlaps
-   - Resolve conflicting dependencies
-6. If critic output exists, address each challenge from the critic:
-   - Blocking issues: must be resolved before proceeding — adjust the plan accordingly
-   - Major issues: should be addressed — incorporate the critic's recommendation or document why not
-   - Minor issues: note in decisions array, address if low-cost
-   - Record each decision (accepted/rejected critique + rationale) in progress.decisions
+1. Read .design/goal-analysis.json for decomposition, codebase context, concepts, approaches, prior art. Use codebaseContext as basis for plan.json context field.
+2. Glob .design/expert-*.json and read each. Expected {expectedExpertCount} — report if fewer.
+3. If .design/critic.json exists, read it. (Standard tier has no critic — skip critic steps if absent.)
+4. Merge expert tasks: where they converge increase confidence, where they diverge use critic's assessment (or your judgment) to break ties, deduplicate, ensure MECE, resolve conflicting dependencies.
+5. If critic exists: address each challenge — blocking (must resolve), major (should address), minor (note in decisions). Record each decision in progress.decisions.
 
 ## Phase 2: Validate & Enrich
-
-For each task verify all required fields. Fill gaps:
-
-Required agent fields: role, model, approach, contextFiles [{path, reason, lines?}], assumptions [{claim, verify (shell cmd), severity: blocking|warning}], acceptanceCriteria [{criterion, check (shell cmd)}], rollbackTriggers ["If X, STOP and return BLOCKED: reason"], constraints. Optional: expertise, priorArt, fallback.
-Required metadata: type (research|implementation|testing|configuration), files {create:[], modify:[]}, reads.
-Required task fields: subject, description, activeForm, status (pending), result (null), attempts (0), blockedBy.
-
-Description rule: explain WHY and how it connects to dependents — not just what. An executor with zero context must act on it.
-Non-code goals: acceptance criteria may use content-based checks (grep). Rollback triggers reference content expectations.
-Design artifacts: add `.design/goal-analysis.json` to every task's contextFiles with reason "design phase codebase analysis and approach decisions." For tasks originating from a specific expert, also add `.design/expert-{name}.json` with reason "expert domain analysis for this task."
-Count gaps filled as gapsFilled.
+For each task, verify all required fields and fill gaps:
+- Task: subject, description (WHY + connection to dependents), activeForm, status (pending), result (null), attempts (0), blockedBy
+- Metadata: type (research|implementation|testing|configuration), files {create:[], modify:[]}, reads
+- Agent: role, model, approach, contextFiles [{path, reason, lines?}], assumptions [{claim, verify (shell cmd), severity: blocking|warning}], acceptanceCriteria [{criterion, check (shell cmd)}], rollbackTriggers ["If X, STOP and return BLOCKED: reason"], constraints
+- Non-code goals: acceptance criteria may use content checks (grep), rollback triggers reference content expectations
+- Design artifacts: add .design/goal-analysis.json to every task's contextFiles (reason: "design phase codebase analysis and approach decisions"). For expert-originated tasks, add .design/expert-{name}.json.
 
 ## Phase 3: Auto-generate Safety
-
-- File existence: for each path in metadata.files.modify, add blocking assumption `test -f {path}`
-- Cross-task deps: if task B modifies/creates files overlapping task A (in blockedBy transitive closure), add blocking assumption `test -f {file}`
+- File existence: for each modify path, add blocking assumption `test -f {path}`
+- Cross-task deps: if task B modifies/creates files overlapping task A (in blockedBy closure), add blocking assumption
 - Convert every blocking assumption to a rollback trigger
 
-## Phase 4: Validate Plan (7 checks)
-
-1. Tasks array >= 1 task. If 0, return error.
-2. No two concurrent tasks share files in create or modify. Concurrent = neither transitively depends on the other via blockedBy.
-3. No task reads overlap a concurrent task's creates/modifies.
-4. All blockedBy valid indices. Topological sort — cycles → restructure.
-5. Every task has >= 1 assumption and >= 1 rollback trigger.
-6. Total tasks <= 12.
-7. Critical path length <= 4 (longest chain in blockedBy DAG). Restructure for parallelism if exceeded.
+## Phase 4: Validate (7 checks)
+1. Tasks >= 1. 2. No concurrent file conflicts (create/modify). 3. No read/write overlaps between concurrent tasks. 4. All blockedBy valid, no cycles. 5. Every task has >= 1 assumption and >= 1 rollback trigger. 6. Total tasks <= 12. 7. Critical path <= 4 (restructure for parallelism if exceeded).
 Self-repair: fix and re-validate. After 2 attempts, include in validationIssues and proceed.
 
 ## Phase 5: Write .design/plan.json
-
 Schema (schemaVersion 3): {schemaVersion: 3, goal, context: {stack, conventions, testCommand, buildCommand, lsp}, progress: {completedTasks: [], surprises: [], decisions: []}, tasks: [...]}
-Each task uses the schema from Phase 2.
-
-Schema rules: tasks ordered (index = ID, 0-based), blockedBy references indices, status: pending|in_progress|completed|failed|blocked|skipped.
-
-Write to .design/plan.json.
+Each task uses the schema from Phase 2. Tasks ordered (index = ID, 0-based), blockedBy references indices, status: pending|in_progress|completed|failed|blocked|skipped.
 
 ## Output
+Claim your task and mark completed. Read ~/.claude/teams/do-design/config.json for the lead's name, then:
 
-Claim your task from the task list and mark completed when done.
+    SendMessage(type: "message", recipient: {lead-name}, content: <FINAL-line JSON below>, summary: "Plan written")
 
-Read ~/.claude/teams/do-design/config.json to discover the team lead's name. Send your result to the lead using SendMessage:
-
-    type:      message
-    recipient: {lead-name}
-    content:   <FINAL-line JSON below>
-    summary:   Plan written
-
-JSON schema: {"taskCount": N, "maxDepth": N, "gapsFilled": N, "critiqueResolutions": N, "validationIssues": [], "depthSummary": {"1": ["Task 0: subject"], ...}}
-Depth computation (display-only, not stored in plan.json): depth = 1 for tasks with empty blockedBy, otherwise 1 + max(depth of blockedBy tasks).
-On unresolvable error, send JSON with error (string) and validationIssues (array) keys instead.
+FINAL-line JSON: {"taskCount": N, "maxDepth": N, "gapsFilled": N, "critiqueResolutions": N, "validationIssues": [], "depthSummary": {"1": ["Task 0: subject"], ...}}
+Depth: 1 for empty blockedBy, else 1 + max(depth of blockedBy tasks). On unresolvable error, send {error: "...", validationIssues: []} instead.
 ```
 
-**Lead wait pattern**: After spawning all agents, the lead waits. The plan-writer's `SendMessage` is delivered automatically as a conversation turn. Parse the JSON from the message content.
+**Lead wait pattern**: After spawning all agents, wait. The plan-writer's `SendMessage` is delivered automatically. Parse JSON from message content.
 
 **Timeout protection**: If agents haven't completed after a reasonable period, proceed with available results. Note which agents timed out.
 
 After receiving the plan-writer's message: `SendMessage(type: "shutdown_request")` to each teammate, wait for confirmations, `TeamDelete(team_name: "do-design")`.
 
-**Two-tier fallback** (standard/full only) — triggered when the team fails to produce `.design/plan.json` (plan-writer message not received, teammate stall, or team infrastructure error):
+**Two-tier fallback** (standard/full only) — triggered when the team fails to produce `.design/plan.json`:
 
-- **Tier 1 — Sequential retry**: Shut down the team (`SendMessage(type: "shutdown_request")` to all, then `TeamDelete`). Spawn a single plan-writer Task subagent (not teammate) with the plan-writer prompt above. It reads the same `.design/expert-*.json` files and `.design/critic.json` (full tier only).
-- **Tier 2 — Inline with context minimization**: If the sequential retry also fails, perform merge and plan writing inline. Process one `.design/expert-*.json` file at a time, extract only the tasks array from each, merge incrementally into a combined task list. Read `.design/critic.json` for blocking issues only (full tier). Execute Phases 2–5 sequentially with reduced scope.
+- **Tier 1**: Shut down team. Spawn single plan-writer Task subagent (not teammate) with the prompt above, reading `.design/expert-*.json` and `.design/critic.json` (full only).
+- **Tier 2**: If retry fails, merge inline with context minimization — process one expert file at a time, extract tasks arrays, merge incrementally. Read critic for blocking issues only (full). Execute Phases 2–5 with reduced scope.
 
 ## Step 4: Cleanup & Summary
 
-1. **Lightweight verification** (lead): Run `python3 -c "import json; p=json.load(open('.design/plan.json')); assert p.get('schemaVersion') == 3, 'schemaVersion must be 3'"` to confirm schemaVersion. Use the plan-writer's stored `taskCount` and `maxDepth` from its SendMessage for verification (no need to re-extract).
-2. **Clean up TaskList**: Delete all tasks created during planning so `/do:execute` starts with a clean TaskList.
-
-4. **Output summary** using stored plan-writer data (`depthSummary`, `taskCount`, `maxDepth`):
+1. **Verify**: `python3 -c "import json; p=json.load(open('.design/plan.json')); assert p.get('schemaVersion') == 3, 'schemaVersion must be 3'"`. Use stored `taskCount`/`maxDepth` from plan-writer's SendMessage.
+2. **Clean up TaskList**: Delete all tasks created during planning so `/do:execute` starts clean.
+3. **Output summary** using stored plan-writer data:
 
 ```
 Plan: {goal}
