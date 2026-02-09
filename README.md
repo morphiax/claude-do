@@ -10,8 +10,8 @@
 
 The `do` plugin adds two powerful skills to Claude Code:
 
-- **/do:design** — Spawns a dynamic planning team (2-5 specialists tailored to your goal) that analyzes the problem from multiple angles, then synthesizes their findings into a structured `.plan.json` with enriched agent specifications, safety checks, and wave-based execution strategy
-- **/do:execute** — Reads `.plan.json`, creates a task list for progress tracking, spawns Task subagents wave-by-wave, and coordinates parallel execution with retry budgets, circuit breakers, and git checkpoints
+- **/do:design** — Spawns a dynamic planning team (2-5 specialists tailored to your goal) that analyzes the problem from multiple angles, then synthesizes their findings into a structured `.design/plan.json` with enriched agent specifications, safety checks, and wave-based execution strategy
+- **/do:execute** — Reads `.design/plan.json`, creates a task list for progress tracking, spawns Task subagents wave-by-wave, and coordinates parallel execution with retry budgets, circuit breakers, and git checkpoints
 
 Plans are self-contained execution blueprints that include task dependencies, agent role specialization, assumption verification, acceptance criteria, and rollback triggers.
 
@@ -55,7 +55,7 @@ claude --plugin-dir ./claude-do
 /do:design implement user authentication with JWT tokens
 ```
 
-This spawns a planning team that analyzes your codebase from multiple angles, validates the goal, decomposes it into tasks, and writes `.plan.json`.
+This spawns a planning team that analyzes your codebase from multiple angles, validates the goal, decomposes it into tasks, and writes `.design/plan.json`.
 
 ### 2. Execute the Plan
 
@@ -63,7 +63,7 @@ This spawns a planning team that analyzes your codebase from multiple angles, va
 /do:execute
 ```
 
-This reads `.plan.json`, creates a task list for progress tracking, and spawns Task subagents wave-by-wave. Subagents return results; the lead verifies acceptance criteria, handles retries (max 3), and commits per wave. Cascading failures and circuit breakers prevent runaway execution.
+This reads `.design/plan.json`, creates a task list for progress tracking, and spawns Task subagents wave-by-wave. Subagents return results; the lead verifies acceptance criteria, handles retries (max 3), and commits per wave. Cascading failures and circuit breakers prevent runaway execution.
 
 ### Example Flow
 
@@ -72,7 +72,7 @@ This reads `.plan.json`, creates a task list for progress tracking, and spawns T
 /do:design add a REST API endpoint for user profiles
 
 # Review the plan (optional)
-cat .plan.json
+cat .design/plan.json
 
 # Execute
 /do:execute
@@ -89,22 +89,21 @@ cat .plan.json
 
 ## How It Works
 
-1. **/do:design** uses a delegation architecture for context-efficient planning:
-   - Context scan is delegated to an Explore subagent to keep codebase exploration out of the lead's context
-   - Lead uses sequential-thinking to determine specialist roles needed (2-5 agents)
-   - Planning team agents analyze the entire goal in parallel through their domain lens
-   - Lead synthesizes all findings using sequential-thinking
-   - Plan Writer subagent handles validation, safety generation, and `.plan.json` writing
-   - Lead only handles user-facing interactions (overwrite confirmation)
+1. **/do:design** uses a unified team pipeline (6 steps):
+   - Context scan delegated to a subagent that writes `.design/context.json`
+   - Lead performs lightweight domain-to-role mapping (2-5 specialists)
+   - A single Agent Team contains experts + synthesizer + plan-writer, pipeline-ordered via TaskList dependencies
+   - Experts self-read mandates from `.design/team-briefing.json` (bootstrap prompt pattern)
+   - Plan-writer sends result JSON to lead via SendMessage upon completion
+   - Two-tier fallback: retry with sequential subagents, then inline with context minimization
 
 2. **/do:execute** uses a thin-lead delegation architecture:
-   - Setup Subagent reads `.plan.json`, creates TaskList, computes file overlaps, assembles worker prompts
-   - Lead spawns one Task subagent per task in each wave (workers return COMPLETED/FAILED/BLOCKED)
-   - Wave Processor Subagent parses results, spot-checks files, runs acceptance criteria, determines retries
-   - Lead commits completed wave files with a single wave summary commit
-   - Plan Updater Subagent applies results to `.plan.json`, computes cascading failures, performs progressive trimming
-   - Circuit breaker aborts if >50% of remaining tasks would be skipped
-   - All delegation subagents have fallback to inline execution if they fail
+   - Setup Subagent reads `.design/plan.json`, creates TaskList, computes file overlaps, assembles worker prompts into per-wave files (`.design/wave-{N}.json`)
+   - Workers self-read full instructions from wave files via bootstrap template, return COMPLETED/FAILED/BLOCKED
+   - Wave Processor reads worker logs, spot-checks files, runs acceptance criteria, writes results to `.design/processor-wave-{N}.json`
+   - Plan Updater reads processor output from file, applies results to `.design/plan.json`, performs progressive trimming
+   - Lead only handles: worker spawning, git commits, circuit breaker, user interaction
+   - All subagents have scoped minimal-mode fallbacks if they fail
 
 ## Contributing
 
