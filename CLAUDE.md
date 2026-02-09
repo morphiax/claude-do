@@ -43,20 +43,19 @@ The two skills communicate through `.design/plan.json` (schemaVersion 2) written
 - `.design/plan.json` is the authoritative state; the TaskList is a derived view
 - Schema version 2 is required
 - Progressive trimming: completed tasks are stripped of verbose agent fields to reduce plan size as execution proceeds
-- Intermediate artifacts (context.json, expert-\*.json, tasks.json) are cleaned up after plan generation
+- Intermediate artifacts (expert-\*.json, expert-\*.log) are cleaned up after plan generation
 
 ### Execution Model
 
 `/do:design` uses a thin-lead delegation architecture for context-efficient planning:
 
-- **Lead responsibilities** (never delegated): goal validation, overwrite check (via AskUserQuestion), team composition, team spawning (TeamCreate, SendMessage, shutdown), lightweight verification, summary output
-- **Pipeline**: context scan → expert-to-plan team (6 steps total). Files carry data between stages via `.design/` directory
-- **Context scan** is delegated to an Explore subagent that writes `.design/context.json`
-- **Domain-driven team composition** uses `sequential-thinking` (fallback: inline reasoning) to design a team of 2–5 specialist agents based on which domains the goal touches
-- **Expanded role taxonomy**: system-architect, API-designer, frontend-specialist, backend-engineer, test-strategist, security-analyst, devops-engineer, online-researcher, prompt-engineer, and more — roles are invented as the goal demands
-- **Unified expert-to-plan team**: A single Agent Team contains domain experts, a synthesizer, and a plan-writer. Pipeline ordering is enforced via TaskList dependencies (synthesizer blockedBy all experts, plan-writer blockedBy synthesizer). Expert agents self-read their mandates from `.design/team-briefing.json` via a bootstrap prompt pattern. The lead waits for one SendMessage from the plan-writer containing the result JSON.
-- **Two-tier fallback**: If the team fails to produce `.design/plan.json` (1) retry with sequential Task subagents (synthesis then plan-writer), or (2) perform synthesis/writing inline with context minimization (process expert files one at a time)
-- The lead never reads raw expert analyses or synthesis output — data flows through file-based artifacts
+- **Lead responsibilities** (never delegated): goal validation + pre-flight, team composition, team spawning (TeamCreate, SendMessage, shutdown), lightweight verification, summary output
+- **Pipeline**: experts → plan-writer (4 steps total). Files carry data between stages via `.design/` directory
+- **No separate context scan**: experts gather their own context (source files, configs, web research) as part of their domain analysis
+- **Domain-driven team composition**: lightweight inline mapping of goal domains to 2–5 specialist roles. Roles are invented as the goal demands (system-architect, codebase-archaeologist, online-researcher, etc.)
+- **Unified expert-to-plan team**: A single Agent Team contains domain experts and a plan-writer. Pipeline ordering is enforced via TaskList dependencies (plan-writer blockedBy all experts). Expert agents receive self-contained prompts with goal + mandate inline. The plan-writer merges expert analyses, validates, enriches, extracts codebase context, and writes plan.json. The lead waits for one SendMessage from the plan-writer containing the result JSON.
+- **Two-tier fallback**: If the team fails to produce `.design/plan.json` (1) retry with a single plan-writer Task subagent, or (2) perform merge and plan writing inline with context minimization (process expert files one at a time)
+- The lead never reads raw expert analyses — data flows through file-based artifacts
 
 `/do:execute` uses a thin-lead delegation architecture:
 
@@ -77,7 +76,7 @@ The two skills communicate through `.design/plan.json` (schemaVersion 2) written
 
 - Claude Code 1.0.33+
 - Agent Teams enabled (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`) — required for `/do:design` only
-- `sequential-thinking` MCP server — recommended for `/do:design` team composition (fallback to inline reasoning if unavailable)
+- `sequential-thinking` MCP server — recommended for complex merge/synthesis reasoning (fallback to inline reasoning if unavailable)
 
 ## Commit Conventions
 
