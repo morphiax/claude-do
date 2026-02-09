@@ -241,30 +241,33 @@ Task:
 
 ---
 
-### B. Batch Processor Subagent (Result Processor)
+### B. Batch Finalizer Subagent (Result Processor + State Updater)
 
-Processes worker results (status lines + log files) after each batch (round). Read-only — does NOT mutate `.design/plan.json`. Spawn once per processing pass.
+Processes worker results and updates plan state after each batch. Combines result parsing, verification, retry assembly, plan mutation, progressive trimming, and cascading failure computation into a single subagent. Model: sonnet. Spawn once per processing pass (initial + each retry pass).
 
 ```
 Task:
   subagent_type: "general-purpose"
+  model: sonnet
   prompt: <assembled from template below>
 ```
 
-**Batch processor prompt template** — assemble by concatenating these sections:
+**Batch finalizer prompt template** — assemble by concatenating these sections:
 
 1. **Role and mission**:
 
    ```
-   You are a batch result processor. You receive task status lines, read task metadata from the task file (.design/tasks.json), and read detailed output from worker log files (.design/worker-{planIndex}.log). You parse results, verify file artifacts, run acceptance criteria, determine retries, clean up failed artifacts, and assemble retry prompts. You write detailed per-task results to .design/processor-batch-{N}.json. You are READ-ONLY with respect to .design/plan.json — you never read or write it.
+   You are a batch finalizer. You process worker results and update plan state in a single pass. Responsibilities: (1) read task status lines and detailed output from worker log files (.design/worker-{planIndex}.log), (2) parse results, verify file artifacts, run acceptance criteria, (3) determine retries and assemble retry prompts, (4) apply results to .design/plan.json, (5) perform progressive trimming on completed tasks, (6) compute cascading failures and circuit breaker. You read task metadata from .design/tasks.json and are the ONLY agent that writes to .design/plan.json.
    ```
 
-2. **Input data section** — the lead assembles this from task status lines:
+2. **Input data section** — the lead assembles this from task status lines and round metadata:
 
    ```
    ## Input
 
    Round: {round_number}
+   Total tasks in plan: {taskCount}
+   Tasks with 3 or fewer total: {true/false}
    Task prompt file: .design/tasks.json
    Read .design/tasks.json for task metadata (subject, model, files, acceptance criteria, fallback strategy).
 
@@ -275,14 +278,21 @@ Task:
 
    `- planIndex: {planIndex}, statusLine: {FINAL status line from worker}, attempts: {attempts}`
 
+   If any surprises or decisions were noted during the round, append:
+
+   ```
+   ### Surprises/Decisions
+   - {description}
+   ```
+
 ---
 
-The processor reads task metadata from the task file and detailed work output from worker log files (`.design/worker-{planIndex}.log`). If a log file is missing, fall back to the status line only.
+The finalizer reads task metadata from the task file and detailed work output from worker log files (`.design/worker-{planIndex}.log`). If a log file is missing, fall back to the status line only.
 
 3. **Processing instructions**:
 
    ```
-   ## Processing Instructions
+   ## Phase 1: Process Results
 
    For each task:
 
@@ -328,83 +338,17 @@ The processor reads task metadata from the task file and detailed work output fr
    8. If COMPLETED and all checks passed: record as completed.
    ```
 
-4. **Output format instructions**:
+4. **Plan update instructions**:
 
    ```
-   ## Output
-
-   **Context efficiency**: Minimize text output. Write reasoning to .design/processor.log if needed. Target: under 100 tokens of non-JSON output.
-
-   Write detailed per-task results to .design/processor-batch-{round_number}.json:
-
-   [
-     {"planIndex": 0, "status": "completed", "result": "Added auth middleware", "attempts": 1, "acceptancePassed": true},
-     {"planIndex": 1, "status": "failed", "result": "Auth test failed", "attempts": 2, "acceptancePassed": false}
-   ]
-
-   The FINAL line of your output MUST be a single JSON object (no markdown fencing). Include only what the lead needs — per-task details are in the file above:
-
-   {
-     "retryTasks": [
-       {"planIndex": 1, "retryPrompt": "<full assembled retry prompt>", "model": "opus", "attempt": 2}
-     ],
-     "completedFiles": {
-       "create": ["src/auth.ts"],
-       "modify": ["src/app.ts"]
-     },
-     "summary": "2 completed, 1 retry pending, 0 blocked"
-   }
-   ```
-
----
-
-### C. Plan Updater Subagent (State Updater)
-
-Applies batch results to `.design/plan.json`, handles progressive trimming and cascading failures. Spawn once per round after all tasks (including retries) are resolved.
-
-```
-Task:
-  subagent_type: "general-purpose"
-  prompt: <assembled from template below>
-```
-
-**Plan updater prompt template** — assemble by concatenating these sections:
-
-1. **Role and mission**:
-
-   ```
-   You are a plan state updater. You read .design/plan.json, apply batch results, perform progressive trimming on completed tasks, compute cascading failures, and write the updated plan. You are the ONLY agent that writes to .design/plan.json.
-   ```
-
-2. **Input data section** — the lead assembles this:
-
-   ```
-   ## Input
-
-   Round: {round_number}
-   Total tasks in plan: {taskCount}
-   Tasks with 3 or fewer total: {true/false}
-   Read .design/processor-batch-{round_number}.json for per-task results (planIndex, status, result, attempts).
-   ```
-
-   If any surprises or decisions were noted during the round, append:
-
-   ```
-   ### Surprises/Decisions
-   - {description}
-   ```
-
-3. **Update instructions**:
-
-   ```
-   ## Update Instructions
+   ## Phase 2: Update Plan State
 
    1. Read .design/plan.json from the project root.
 
-   2. For each task in the batch results:
-      - Set task.status to the provided status
-      - Set task.result to the provided result string
-      - Set task.attempts to the provided attempts count
+   2. For each task in the batch results from Phase 1:
+      - Set task.status to the determined status
+      - Set task.result to the result string
+      - Set task.attempts to the attempts count
 
    3. Append completed tasks to progress.completedTasks as [{index, summary}] for each task with completed status.
 
@@ -430,16 +374,24 @@ Task:
       - Determine shouldAbort: true if totalTasks > 3 AND wouldBeSkipped >= 50% of pending tasks
    ```
 
-4. **Output format instructions**:
+5. **Output format instructions**:
 
    ```
    ## Output
 
-   **Context efficiency**: Minimize text output. Write reasoning to .design/updater.log if needed. Target: under 100 tokens of non-JSON output.
+   Minimize non-JSON output.
 
    The FINAL line of your output MUST be a single JSON object (no markdown fencing). Use this exact schema:
 
    {
+     "retryTasks": [
+       {"planIndex": 1, "retryPrompt": "<full assembled retry prompt>", "model": "opus", "attempt": 2}
+     ],
+     "completedFiles": {
+       "create": ["src/auth.ts"],
+       "modify": ["src/app.ts"]
+     },
+     "summary": "2 completed, 1 retry pending, 0 blocked",
      "updated": true,
      "skipList": [3, 5, 7],
      "circuitBreaker": {

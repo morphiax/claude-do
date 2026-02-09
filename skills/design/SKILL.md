@@ -16,6 +16,15 @@ Thin-lead orchestrator: decompose a goal into `.design/plan.json` using a dynami
 
 **MANDATORY: Execute ALL steps (1–4) for EVERY invocation. The lead is a lifecycle manager — it spawns agents and manages the team. ALL analysis happens inside agents. The lead's ONLY tools are: `TeamCreate`, `TeamDelete`, `TaskCreate`, `TaskUpdate`, `TaskList`, `SendMessage`, `Task`, `AskUserQuestion`, `Bash` (cleanup/verification only), and `Read` (only `.design/goal-analysis.json` during Complexity Branching). No other tools — no MCP tools, no `Grep`, no `Glob`, no `LSP`, no source file reads. The ONLY valid output of this skill is `.design/plan.json` — produced by the agent team. This applies regardless of goal type, complexity, or apparent simplicity. Audits, reviews, research, one-line fixes — all go through the team. No exceptions exist. If you are tempted to "just do it directly," STOP — that impulse is the exact failure mode this rule prevents.**
 
+**STOP GATE — Read before proceeding. These are the exact failure modes that have occurred repeatedly:**
+1. **"The goal is simple enough to analyze directly"** — WRONG. Every goal goes through the team. Spawn the analyst.
+2. **"Let me read the source files first to understand the problem"** — WRONG. The lead never reads source files. The analyst and experts read source files.
+3. **"I'll just do a quick inline analysis instead of spawning a team"** — WRONG. The team exists to provide multiple perspectives. Inline analysis defeats the purpose.
+4. **"This is a review/research task, not implementation, so I don't need agents"** — WRONG. Reviews, audits, and research all go through the team pipeline.
+5. **Using `EnterPlanMode` or `Explore` or `Grep/Glob/Read` on project source files** — WRONG. The lead's tool boundary is absolute.
+
+**If you catch yourself rationalizing why THIS goal is the exception — it is not. Proceed to Step 1.**
+
 ## Step 1: Pre-flight
 
 1. Use `AskUserQuestion` to clarify only when reasonable developers would choose differently and the codebase doesn't answer it: scope boundaries, done-state, technical preferences, compatibility, priority.
@@ -147,7 +156,7 @@ Spawn a single plan-writer **Task subagent** (NOT a teammate) to generate the pl
 ```
 Task:
   subagent_type: "general-purpose"
-  model: opus
+  model: sonnet
   prompt: <minimal plan-writer prompt below>
 ```
 
@@ -184,7 +193,6 @@ You are a lightweight plan writer. Generate .design/plan.json for a minimal-comp
    {schemaVersion: 3, goal, context: {stack, conventions, testCommand, buildCommand, lsp}, progress: {completedTasks: [], surprises: [], decisions: []}, tasks: [...]}
 
 ## Output
-**Context efficiency**: Minimize text output. Target: under 100 tokens of non-JSON output.
 
 The FINAL line of your output MUST be a single JSON object (no markdown fencing):
 {"taskCount": N, "maxDepth": N, "depthSummary": {"1": ["Task 0: subject"], ...}}
@@ -261,7 +269,6 @@ For each task you recommend, include:
 - agent spec: role, model (opus for architecture/analysis, sonnet for implementation, haiku for verification), approach, contextFiles [{path, reason}], assumptions [{claim, verify (shell cmd), severity: blocking|warning}], acceptanceCriteria [{criterion, check (shell cmd)}], rollbackTriggers ["If X, STOP and return BLOCKED: reason"], constraints
 
 ## Output
-**Context efficiency**: Minimize text output. Write reasoning to .design/expert-{name}.log if needed. Target: under 100 tokens of non-JSON output.
 
 Write findings to .design/expert-{name}.json with findings array and tasks array.
 Claim your task from the task list and mark completed when done.
@@ -301,7 +308,6 @@ For each task you recommend, include:
 - agent spec: role, model (opus for architecture/analysis, sonnet for implementation, haiku for verification), approach, contextFiles [{path, reason}], assumptions [{claim, verify (shell cmd), severity: blocking|warning}], acceptanceCriteria [{criterion, check (shell cmd)}], rollbackTriggers ["If X, STOP and return BLOCKED: reason"], constraints
 
 ## Output
-**Context efficiency**: Minimize text output. Write reasoning to .design/expert-{name}.log if needed. Target: under 100 tokens of non-JSON output.
 
 Write findings to .design/expert-{name}.json with:
 - findings array (risks, observations)
@@ -337,7 +343,6 @@ Your task in the TaskList is blocked by the expert agents. Once unblocked, proce
 5. Verify claims by reading source files or checking the codebase where feasible.
 
 ## Output
-**Context efficiency**: Minimize text output. Write reasoning to .design/critic.log if needed. Target: under 100 tokens of non-JSON output.
 
 Write to .design/critic.json with:
 - challenges: [{expert, issue, severity (blocking|major|minor), recommendation}]
@@ -417,7 +422,6 @@ Schema rules: tasks ordered (index = ID, 0-based), blockedBy references indices,
 Write to .design/plan.json.
 
 ## Output
-**Context efficiency**: Minimize text output. Write reasoning to .design/plan-writer.log if needed. Target: under 100 tokens of non-JSON output.
 
 Claim your task from the task list and mark completed when done.
 
@@ -448,7 +452,6 @@ After receiving the plan-writer's message: `SendMessage(type: "shutdown_request"
 
 1. **Lightweight verification** (lead): Run `python3 -c "import json; p=json.load(open('.design/plan.json')); assert p.get('schemaVersion') == 3, 'schemaVersion must be 3'"` to confirm schemaVersion. Use the plan-writer's stored `taskCount` and `maxDepth` from its SendMessage for verification (no need to re-extract).
 2. **Clean up TaskList**: Delete all tasks created during planning so `/do:execute` starts with a clean TaskList.
-3. **Clean up intermediate files**: `rm -f .design/expert-*.log .design/critic.log .design/plan-writer.log` — delete only verbose reasoning logs. Keep `.design/plan.json` and analysis artifacts (`.design/goal-analysis.json`, `.design/expert-*.json`, `.design/critic.json`) so execute workers can reference them via contextFiles.
 
 4. **Output summary** using stored plan-writer data (`depthSummary`, `taskCount`, `maxDepth`):
 
