@@ -4,7 +4,7 @@
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Version](https://img.shields.io/badge/version-1.0.0-green.svg)
-![Claude Code](https://img.shields.io/badge/Claude%20Code-1.0.33%2B-orange.svg)
+![Claude Code](https://img.shields.io/badge/Claude%20Code-2.1.32%2B-orange.svg)
 
 ## What It Does
 
@@ -83,7 +83,7 @@ cat .design/plan.json
 
 ## Requirements
 
-- **Claude Code** 1.0.33 or later
+- **Claude Code** 2.1.32 or later
 - **sequential-thinking MCP server** — recommended for /do:design (has fallback to inline reasoning)
 
 ## How It Works

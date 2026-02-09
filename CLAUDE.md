@@ -80,7 +80,7 @@ The two skills communicate through `.design/plan.json` (schemaVersion 3) written
 
 ## Requirements
 
-- Claude Code 1.0.33+
+- Claude Code 2.1.32+ with `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`
 - `sequential-thinking` MCP server — used by the goal analyst for deep goal reasoning (fallback to inline reasoning if unavailable)
 
 ## Commit Conventions
