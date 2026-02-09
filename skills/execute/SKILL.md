@@ -435,7 +435,7 @@ After all rounds (or after circuit breaker abort or deadlock):
    - Follow-up recommendations if any failures
 
 3. Clean up intermediate artifacts: `rm -f .design/tasks.json .design/worker-*.log`
-4. If fully successful: rename `.design/plan.json` to `.design/plan.done.json` for audit trail. Return "All {count} tasks completed."
+4. If fully successful: archive completed plan to history: `mkdir -p .design/history && mv .design/plan.json ".design/history/$(date -u +%Y%m%dT%H%M%SZ)-plan.json"`. Return "All {count} tasks completed."
 5. If partial: leave `.design/plan.json` for resume. Return "Execution incomplete. {done}/{total} completed."
 
 **Arguments**: $ARGUMENTS

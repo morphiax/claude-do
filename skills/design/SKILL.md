@@ -28,7 +28,7 @@ Thin-lead orchestrator: decompose a goal into `.design/plan.json` using a dynami
 1. Use `AskUserQuestion` to clarify only when reasonable developers would choose differently and the codebase doesn't answer it.
 2. If >12 tasks likely needed, suggest phases. Design only phase 1.
 3. Check for existing `.design/plan.json`. If it exists with non-pending statuses, count task statuses and use `AskUserQuestion`: "Existing plan has {N completed}/{M failed}/{P pending} tasks. Overwrite?" If declined, output "Keeping existing plan. Run /do:execute to continue." and STOP.
-4. Clean up stale staging: `rm -rf .design/ && mkdir -p .design/`
+4. Clean up stale staging (preserve history): `mkdir -p .design/history && find .design -mindepth 1 -maxdepth 1 ! -name history -exec rm -rf {} +`
 
 ## Step 2: Team + Goal Analyst
 
