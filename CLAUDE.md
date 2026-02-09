@@ -45,6 +45,7 @@ The two skills communicate through `.design/plan.json` (schemaVersion 3) written
 - Tasks use dependency-only scheduling — no wave field in task schema, execute computes batches dynamically from `blockedBy`
 - Progressive trimming: completed tasks are stripped of verbose agent fields to reduce plan size as execution proceeds
 - Analysis artifacts (goal-analysis.json, expert-\*.json, critic.json) are preserved after plan generation for execute workers to reference via contextFiles
+- Plan history: completed plans are archived to `.design/history/{timestamp}-plan.json` on successful execution; design pre-flight preserves this subdirectory during cleanup
 
 ### Execution Model
 
@@ -75,7 +76,7 @@ The two skills communicate through `.design/plan.json` (schemaVersion 3) written
 - Retry budget: max 3 attempts per task with failure context passed to retries
 - Cascading failures: failed/blocked tasks automatically skip dependents
 - Circuit breaker: abort if >50% of remaining tasks would be skipped (plans with ≤3 tasks bypass this check)
-- Resume support: status-scan based (reset `in_progress` tasks to `pending` with artifact cleanup), no wave tracking needed
+- Resume support: status-scan based (reset `in_progress` tasks to `pending` with artifact cleanup), no wave tracking needed; successful completions archive plan to `.design/history/`
 
 ## Requirements
 
