@@ -10,7 +10,7 @@
 
 The `do` plugin adds two powerful skills to Claude Code:
 
-- **/do:design** — Spawns a dynamic planning team (2-5 specialists tailored to your goal) that analyzes the problem from multiple angles, then synthesizes their findings into a structured `.design/plan.json` with enriched agent specifications, safety checks, and wave-based execution strategy
+- **/do:design** — Uses Claude Code Agent Teams to spawn a dynamic planning team (2-5 specialists tailored to your goal) that analyzes the problem from multiple angles, then synthesizes their findings into a structured `.design/plan.json` with enriched agent specifications, safety checks, and wave-based execution strategy
 - **/do:execute** — Reads `.design/plan.json`, creates a task list for progress tracking, spawns Task subagents wave-by-wave, and coordinates parallel execution with retry budgets, circuit breakers, and git checkpoints
 
 Plans are self-contained execution blueprints that include task dependencies, agent role specialization, assumption verification, acceptance criteria, and rollback triggers.
@@ -20,7 +20,7 @@ Plans are self-contained execution blueprints that include task dependencies, ag
 - **Dynamic Multi-Agent Planning** — A situation-tailored team of 2-5 specialist agents collaborates to decompose goals, catching blind spots that single-agent planning misses
 - **Context-Efficient Delegation** — Mechanical work (plan reading, result parsing, state updates) is delegated to subagents, keeping the lead's context focused on orchestration
 - **Native Task Management** — Uses Claude Code's built-in task system (TaskCreate, TaskUpdate, TaskList) for structured tracking with automatic dependency resolution
-- **Agent Teams** — Planning uses Claude Code's agent teams for specialist collaboration; execution uses Task subagents for isolated parallel work
+- **Claude Code Agent Teams** — Planning uses Agent Teams (TeamCreate, SendMessage, TaskList) for specialist collaboration; execution uses Task subagents for isolated parallel work
 - **Agent Specialization** — Each task specifies role, expertise, model choice (opus/sonnet/haiku), approach, and context files
 - **Safety First** — Automatic assumption verification, acceptance criteria, and rollback triggers for every task
 - **Wave-Based Parallelism** — Tasks in the same wave execute concurrently unless they share files
@@ -92,7 +92,7 @@ cat .design/plan.json
 1. **/do:design** uses a unified team pipeline (6 steps):
    - Context scan delegated to a subagent that writes `.design/context.json`
    - Lead performs lightweight domain-to-role mapping (2-5 specialists)
-   - A single Agent Team contains experts + synthesizer + plan-writer, pipeline-ordered via TaskList dependencies
+   - A single Claude Code Agent Team contains experts + synthesizer + plan-writer, pipeline-ordered via TaskList dependencies
    - Experts self-read mandates from `.design/team-briefing.json` (bootstrap prompt pattern)
    - Plan-writer sends result JSON to lead via SendMessage upon completion
    - Two-tier fallback: retry with sequential subagents, then inline with context minimization
