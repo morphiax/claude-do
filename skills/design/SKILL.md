@@ -124,23 +124,114 @@ Read ~/.claude/teams/do-design/config.json to discover the team lead's name. Sen
     summary:   Goal analysis complete
 ```
 
-**Lead waits** for the analyst's `SendMessage`. Once received, proceed to Step 3.
+**Lead waits** for the analyst's `SendMessage`. Once received, proceed to Complexity Branching.
 
 **Fallback**: If the analyst fails to produce `.design/goal-analysis.json`, the lead performs minimal inline analysis: read package.json for stack, identify 2–3 obvious domains from the goal text, compose a default team. Log: "Analyst failed — using minimal team composition."
 
-## Step 3: Grow Team with Experts, Critic, and Plan-Writer
+## Complexity Branching
 
-Read `.design/goal-analysis.json` to get the analyst's recommended team. Then grow the existing team by spawning experts, a critic, and a plan-writer. The pipeline ordering enforces: experts (parallel) → critic → plan-writer.
+Read `.design/goal-analysis.json` — extract `complexity`, `complexityRationale`, and `recommendedTeam`. Echo progress:
+
+```
+Complexity: {complexity} — {complexityRationale}
+Experts recommended: {length of recommendedTeam}
+```
+
+Branch based on `complexity`:
+
+### Minimal Path
+
+Skip Step 3 entirely. Echo: `"Spawning lightweight plan-writer (minimal mode)"`
+
+Spawn a single plan-writer **Task subagent** (NOT a teammate) to generate the plan directly from the analyst's output:
+
+```
+Task:
+  subagent_type: "general-purpose"
+  model: opus
+  prompt: <minimal plan-writer prompt below>
+```
+
+**Minimal plan-writer prompt** — fill `{goal}`:
+
+```
+You are a lightweight plan writer. Generate .design/plan.json for a minimal-complexity goal using only the analyst's output — no expert files, no critic.
+
+**Goal**: {goal}
+
+## Instructions
+
+1. Read .design/goal-analysis.json for goal decomposition, codebase context, approaches, and scope notes.
+
+2. Using the analyst's recommended approach and sub-problems, generate a task list (1–3 tasks). For each task include all required fields:
+   - subject, description, activeForm, status (pending), result (null), attempts (0), blockedBy (array of indices)
+   - metadata: type (research|implementation|testing|configuration), files {create:[], modify:[]}, reads
+   - agent: role, model (opus for architecture/analysis, sonnet for implementation, haiku for verification), approach, contextFiles [{path, reason}], assumptions [{claim, verify (shell cmd), severity: blocking|warning}], acceptanceCriteria [{criterion, check (shell cmd)}], rollbackTriggers ["If X, STOP and return BLOCKED: reason"], constraints
+
+3. Description rule: explain WHY and how it connects to dependents — not just what. An executor with zero context must act on it.
+
+4. Auto-generate safety:
+   - File existence: for each path in metadata.files.modify, add blocking assumption `test -f {path}`
+   - Convert every blocking assumption to a rollback trigger
+
+5. Validate:
+   - Tasks array >= 1 task
+   - No concurrent file conflicts
+   - All blockedBy valid indices, no cycles
+   - Every task has >= 1 assumption and >= 1 rollback trigger
+   - Total tasks <= 3
+
+6. Write atomically to .design/plan.json with schema:
+   {schemaVersion: 3, goal, context: {stack, conventions, testCommand, buildCommand, lsp}, progress: {completedTasks: [], surprises: [], decisions: []}, tasks: [...]}
+
+## Output
+**Context efficiency**: Minimize text output. Target: under 100 tokens of non-JSON output.
+
+The FINAL line of your output MUST be a single JSON object (no markdown fencing):
+{"taskCount": N, "maxDepth": N, "depthSummary": {"1": ["Task 0: subject"], ...}}
+```
+
+Parse the FINAL line of the subagent's return value as JSON. Store `taskCount`, `maxDepth`, and `depthSummary`.
+
+**Quality gate**: Read `.design/plan.json` and check task count and max dependency depth. If taskCount > 3 or maxDepth > 2, echo: `"Plan generated in minimal mode has {taskCount} tasks (depth {maxDepth}) — consider re-running /do:design for full analysis."`
+
+**Minimal fallback**: If the Task subagent fails, perform plan writing inline: read `.design/goal-analysis.json`, extract sub-problems and recommended approach, write a 1–3 task plan directly to `.design/plan.json`. Log: "Minimal plan-writer failed — writing plan inline."
+
+Proceed to Step 4 (skip Step 3).
+
+### Standard Path
+
+Echo: `"Spawning {N} experts + plan-writer (no critic)"`
+
+Proceed to Step 3 with these modifications:
+
+- **Skip** critic task creation and critic agent spawning
+- Plan-writer `blockedBy` references all expert task IDs directly (not critic)
+- Plan-writer prompt: omit critic.json references (Phase 1 steps 4 and 6 are skipped — no critique to incorporate)
+
+Two-tier fallback applies if the team fails.
+
+### Full Path
+
+Echo: `"Spawning {N} experts + critic + plan-writer"`
+
+Proceed to Step 3 unchanged. Two-tier fallback applies if the team fails.
+
+## Step 3: Grow Team with Experts, Critic, and Plan-Writer (standard/full only)
+
+Read `.design/goal-analysis.json` to get the analyst's recommended team. Then grow the existing team by spawning experts, an optional critic, and a plan-writer. The pipeline ordering enforces: experts (parallel) → critic (full only) → plan-writer.
 
 1. Read `.design/goal-analysis.json` — extract `recommendedTeam` array (each entry has a `type` field: `scanner` or `architect`). Record the array length as `{expectedExpertCount}` for use in critic and plan-writer prompts.
 2. Create TaskList entries with dependencies:
    - For each recommended expert: `TaskCreate` with mandate as subject
-   - `TaskCreate` for critic (subject: "Challenge expert proposals and evaluate approach coherence")
-   - `TaskCreate` for plan-writer (subject: "Merge expert analyses with critique, validate, and write plan.json")
-   - Wire dependencies via `TaskUpdate(addBlockedBy)`: critic blockedBy all expert task IDs, plan-writer blockedBy critic task ID
+   - **Full only**: `TaskCreate` for critic (subject: "Challenge expert proposals and evaluate approach coherence")
+   - `TaskCreate` for plan-writer (subject: "Merge expert analyses, validate, and write plan.json")
+   - Wire dependencies via `TaskUpdate(addBlockedBy)`:
+     - **Full**: critic blockedBy all expert task IDs, plan-writer blockedBy critic task ID
+     - **Standard**: plan-writer blockedBy all expert task IDs directly (no critic)
 3. Spawn all new agents in parallel via `Task(subagent_type: "general-purpose", team_name: "do-design", name: "{name}", model: "{model}")`:
    - All expert agents from the recommendation (use scanner or architect prompt based on `type`)
-   - `critic` (model: `opus`)
+   - **Full only**: `critic` (model: `opus`)
    - `plan-writer` (model: `opus`)
 
 **Scanner prompt** — for experts with `type: "scanner"`. Fill `{goal}`, `{name}`, `{role}`, `{mandate}`:
@@ -267,21 +358,21 @@ You are the Plan Writer on a planning team. Merge expert analyses, incorporate c
 **Goal**: {goal}
 **Expected expert count**: {expectedExpertCount}
 
-Your task in the TaskList is blocked by the critic. Once unblocked, proceed:
+Your task in the TaskList is blocked by expert tasks (and critic, if present). Once unblocked, proceed:
 
 ## Phase 1: Context & Merge
 
 1. Read .design/goal-analysis.json for goal decomposition, codebase context, concepts, approaches, and prior art.
 2. Use the codebaseContext from goal-analysis.json as the basis for plan.json's context field. Supplement with additional scans if needed (package.json, CLAUDE.md, linter configs).
 3. Glob .design/expert-*.json and read each expert analysis. Expected {expectedExpertCount} expert files. If fewer found, report missing experts.
-4. Read .design/critic.json for the critique.
+4. If .design/critic.json exists, read it for the critique. (Standard tier has no critic — skip steps 4 and 6 if absent.)
 5. Merge expert task recommendations:
    - Where experts converge, increase confidence
-   - Where they diverge, use the critic's assessment to break ties
+   - Where they diverge, use the critic's assessment to break ties (or your own judgment if no critic)
    - Deduplicate overlapping tasks
    - Ensure MECE coverage — no gaps, no overlaps
    - Resolve conflicting dependencies
-6. Address each challenge from the critic:
+6. If critic output exists, address each challenge from the critic:
    - Blocking issues: must be resolved before proceeding — adjust the plan accordingly
    - Major issues: should be addressed — incorporate the critic's recommendation or document why not
    - Minor issues: note in decisions array, address if low-cost
@@ -348,10 +439,10 @@ On unresolvable error, send JSON with error (string) and validationIssues (array
 
 After receiving the plan-writer's message: `SendMessage(type: "shutdown_request")` to each teammate, wait for confirmations, `TeamDelete(team_name: "do-design")`.
 
-**Two-tier fallback** — triggered when the team fails to produce `.design/plan.json` (plan-writer message not received, teammate stall, or team infrastructure error):
+**Two-tier fallback** (standard/full only) — triggered when the team fails to produce `.design/plan.json` (plan-writer message not received, teammate stall, or team infrastructure error):
 
-- **Tier 1 — Sequential retry**: Shut down the team (`SendMessage(type: "shutdown_request")` to all, then `TeamDelete`). Spawn a single plan-writer Task subagent (not teammate) with the plan-writer prompt above. It reads the same `.design/expert-*.json` and `.design/critic.json` files.
-- **Tier 2 — Inline with context minimization**: If the sequential retry also fails, perform merge and plan writing inline. Process one `.design/expert-*.json` file at a time, extract only the tasks array from each, merge incrementally into a combined task list. Read `.design/critic.json` for blocking issues only. Execute Phases 2–5 sequentially with reduced scope.
+- **Tier 1 — Sequential retry**: Shut down the team (`SendMessage(type: "shutdown_request")` to all, then `TeamDelete`). Spawn a single plan-writer Task subagent (not teammate) with the plan-writer prompt above. It reads the same `.design/expert-*.json` files and `.design/critic.json` (full tier only).
+- **Tier 2 — Inline with context minimization**: If the sequential retry also fails, perform merge and plan writing inline. Process one `.design/expert-*.json` file at a time, extract only the tasks array from each, merge incrementally into a combined task list. Read `.design/critic.json` for blocking issues only (full tier). Execute Phases 2–5 sequentially with reduced scope.
 
 ## Step 4: Cleanup & Summary
 
@@ -363,7 +454,9 @@ After receiving the plan-writer's message: `SendMessage(type: "shutdown_request"
 
 ```
 Plan: {goal}
+Tier: {complexity}
 Tasks: {taskCount}, max depth {maxDepth}
+Models: {model distribution, for example: 2 opus, 3 sonnet, 1 haiku}
 
 Depth 1:
 - Task 0: {subject} ({model})
@@ -377,5 +470,7 @@ Test: {testCommand}
 
 Run /execute to begin.
 ```
+
+To compute model distribution: read `.design/plan.json`, count occurrences of each `agent.model` value across all tasks, format as `"{count} {model}"` joined by commas.
 
 **Goal**: $ARGUMENTS
