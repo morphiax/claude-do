@@ -43,16 +43,17 @@ The two skills communicate through `.design/plan.json` (schemaVersion 2) written
 - `.design/plan.json` is the authoritative state; the TaskList is a derived view
 - Schema version 2 is required
 - Progressive trimming: completed tasks are stripped of verbose agent fields to reduce plan size as execution proceeds
-- Intermediate artifacts (expert-\*.json, expert-\*.log) are cleaned up after plan generation
+- Intermediate artifacts (goal-analysis.json, expert-\*.json, expert-\*.log) are cleaned up after plan generation
 
 ### Execution Model
 
 `/do:design` uses a thin-lead delegation architecture for context-efficient planning:
 
-- **Lead responsibilities** (never delegated): goal validation + pre-flight, team composition, team spawning (TeamCreate, SendMessage, shutdown), lightweight verification, summary output
-- **Pipeline**: experts → plan-writer (4 steps total). Files carry data between stages via `.design/` directory
-- **No separate context scan**: experts gather their own context (source files, configs, web research) as part of their domain analysis
-- **Domain-driven team composition**: lightweight inline mapping of goal domains to 2–5 specialist roles. Roles are invented as the goal demands (system-architect, codebase-archaeologist, online-researcher, etc.)
+- **Lead responsibilities** (never delegated): goal understanding (sequential thinking), pre-flight, team composition, team spawning (TeamCreate, SendMessage, shutdown), lightweight verification, summary output
+- **Pipeline**: goal understanding → team composition → experts → plan-writer (4 steps total). Files carry data between stages via `.design/` directory
+- **Sequential thinking in Step 1**: The lead uses `sequential-thinking` for conceptual goal reasoning (no file reads, no commands) — decomposing the goal, mapping to known patterns/frameworks, identifying prior art hints, and refining scope. Output written to `.design/goal-analysis.json` and consumed by experts and plan-writer.
+- **No separate context scan**: experts gather their own context (source files, configs, web research) as part of their domain analysis, guided by prior art hints from the goal analysis
+- **Domain-driven team composition**: informed by goal analysis domains and concepts, maps to 2–5 specialist roles with enriched mandates. Roles are invented as the goal demands (system-architect, codebase-archaeologist, online-researcher, etc.)
 - **Unified expert-to-plan team**: A single Agent Team contains domain experts and a plan-writer. Pipeline ordering is enforced via TaskList dependencies (plan-writer blockedBy all experts). Expert agents receive self-contained prompts with goal + mandate inline. The plan-writer merges expert analyses, validates, enriches, extracts codebase context, and writes plan.json. The lead waits for one SendMessage from the plan-writer containing the result JSON.
 - **Two-tier fallback**: If the team fails to produce `.design/plan.json` (1) retry with a single plan-writer Task subagent, or (2) perform merge and plan writing inline with context minimization (process expert files one at a time)
 - The lead never reads raw expert analyses — data flows through file-based artifacts
@@ -76,7 +77,7 @@ The two skills communicate through `.design/plan.json` (schemaVersion 2) written
 
 - Claude Code 1.0.33+
 - Agent Teams enabled (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`) — required for `/do:design` only
-- `sequential-thinking` MCP server — recommended for complex merge/synthesis reasoning (fallback to inline reasoning if unavailable)
+- `sequential-thinking` MCP server — used in `/do:design` Step 1 for goal understanding (fallback to inline reasoning if unavailable)
 
 ## Commit Conventions
 

@@ -6,7 +6,7 @@ argument-hint: "<goal description>"
 
 # Design
 
-Thin-lead orchestrator: decompose a goal into `.design/plan.json` using a team of specialist agents. The lead NEVER analyzes, reasons about, or evaluates the goal — it only orchestrates. All analytical work (context gathering, domain analysis, synthesis) happens inside the Agent Team (Step 3). Files carry data between pipeline stages — the lead never holds expert analyses or synthesis output (except during fallback recovery). **This skill only designs — it does NOT execute.**
+Thin-lead orchestrator: decompose a goal into `.design/plan.json` using a team of specialist agents. The lead orchestrates — all codebase analysis, implementation reasoning, and synthesis happens inside the Agent Team (Step 3). The ONE exception: the lead uses `sequential-thinking` in Step 1 for conceptual goal understanding (no file reads, no commands — pure reasoning). Files carry data between pipeline stages — the lead never holds expert analyses or synthesis output (except during fallback recovery). **This skill only designs — it does NOT execute.**
 
 **Do NOT use EnterPlanMode — this skill IS the plan.**
 
@@ -15,31 +15,56 @@ Thin-lead orchestrator: decompose a goal into `.design/plan.json` using a team o
 - **Atomic write**: Write to `{path}.tmp`, then rename to `{path}`. All file outputs in this skill use this pattern.
 - **Signaling patterns**: Expert teammates signal completion via TaskList (the lead does not parse their output). Plan-writer sends its structured return value (JSON) to the lead via `SendMessage(type: "message")`.
 
-**MANDATORY: Execute ALL steps (1–4) for EVERY invocation. Never skip steps, never answer the goal directly, never produce findings or analysis inline. Do NOT use `sequential-thinking`, `Read`, `Grep`, or any analytical tool to reason about the goal before Step 3 — the lead's job is pipeline orchestration, not analysis. The ONLY valid output of this skill is `.design/plan.json` — produced by the full pipeline including the Agent Team (Step 3). This applies regardless of goal type, complexity, or apparent simplicity. Audits, reviews, research, one-line fixes — all go through the team. No exceptions exist. If you are tempted to "just do it directly," STOP — that impulse is the exact failure mode this rule prevents.**
+**MANDATORY: Execute ALL steps (1–4) for EVERY invocation. Never skip steps, never answer the goal directly, never produce findings or analysis inline. Do NOT use `Read`, `Grep`, or any codebase tool to reason about the goal before Step 3. The lead uses `sequential-thinking` in Step 1 for conceptual reasoning ONLY — no file reads, no commands. The ONLY valid output of this skill is `.design/plan.json` — produced by the full pipeline including the Agent Team (Step 3). This applies regardless of goal type, complexity, or apparent simplicity. Audits, reviews, research, one-line fixes — all go through the team. No exceptions exist. If you are tempted to "just do it directly," STOP — that impulse is the exact failure mode this rule prevents.**
 
-## Step 1: Goal Validation + Pre-flight
+## Step 1: Goal Understanding + Pre-flight
 
-1. Use `AskUserQuestion` to clarify only when reasonable developers would choose differently and the codebase doesn't answer it: scope boundaries, done-state, technical preferences, compatibility, priority.
+Use `mcp__sequential-thinking__sequentialthinking` to deeply understand the goal before composing the team. This is conceptual reasoning only — do NOT read files, run commands, or touch the codebase. The thinking should cover:
 
-2. **Reframe analytical goals**: If the goal is an audit, review, or analysis, reframe it into concrete executable tasks ("audit X" becomes tasks that analyze specific areas, draft changes, and apply fixes). The output is always a plan.json that `/do:execute` can act on.
+1. **Problem decomposition** — What are the real sub-problems? Is the stated goal the actual goal, or is there a deeper problem?
+2. **Concept mapping** — What known patterns, frameworks, or well-known approaches does this map to? (e.g., "add auth" → OAuth2/JWT/session; "add caching" → Redis/in-memory/HTTP-cache; "refactor X" → strangler fig/branch by abstraction)
+3. **Prior art hints** — What should experts look for in the codebase or ecosystem? Existing libraries, similar implementations, framework conventions that already solve parts of this.
+4. **Domain identification** — Which domains does this actually touch? (feeds directly into Step 2)
+5. **Scope refinement** — Is this simpler or more complex than stated? Any hidden dependencies or gotchas?
+6. **Clarification needs** — Are there genuine ambiguities where reasonable developers would choose differently?
 
+Use multiple sequential-thinking rounds as needed. Fallback: if `sequential-thinking` is unavailable, perform the same reasoning inline with numbered steps (max 8 sentences total).
+
+Write the structured output atomically to `.design/goal-analysis.json`:
+
+```json
+{
+  "goal": "{original goal}",
+  "refinedGoal": "{restated goal if different from original, otherwise same}",
+  "concepts": ["pattern/framework/approach names"],
+  "priorArtHints": ["what to look for in codebase or ecosystem"],
+  "domains": ["backend", "security", "testing"],
+  "subProblems": ["decomposed sub-problems"],
+  "scopeNotes": "any refinements or hidden complexity",
+  "clarifications": ["questions for user, if any"]
+}
+```
+
+Then:
+
+1. If `clarifications` is non-empty, use `AskUserQuestion` to resolve them.
+2. **Reframe analytical goals**: If the goal is an audit, review, or analysis, reframe it into concrete executable tasks. The output is always a plan.json that `/do:execute` can act on.
 3. If >12 tasks likely needed, suggest phases. Design only phase 1.
-
 4. Check for existing `.design/plan.json`. If it exists with `progress.currentWave > 0` or any non-pending task statuses, use `AskUserQuestion` to confirm overwrite — execution may be in progress. Record `overwriteApproved` flag.
-
-5. Clean up stale staging: `rm -rf .design/ && mkdir -p .design/`
+5. Clean up stale staging: `rm -rf .design/ && mkdir -p .design/` — then re-write `.design/goal-analysis.json` (since cleanup removes it).
 
 ## Step 2: Team Composition
 
-Lightweight domain→role mapping. This step is a bounded exception to the no-analysis rule — perform lightweight domain mapping (max 3 sentences). Do NOT use `sequential-thinking` here — save deep analysis for the expert agents.
+Map the domains and concepts from `.design/goal-analysis.json` to specialist roles. The goal analysis has already identified domains, concepts, and prior art — team composition is now a focused mapping exercise.
 
-1. List the domains the goal touches (frontend, backend, data, security, infra, testing, etc.)
+1. Read the `domains` and `concepts` from the goal analysis.
 2. Pick 2–5 roles to cover those domains. Examples: system-architect, API-designer, frontend-specialist, backend-engineer, test-strategist, security-analyst, devops-engineer, online-researcher, prompt-engineer, codebase-archaeologist. Invent roles as needed. Each expert gathers its own context — no separate scanner role needed.
 3. Drop any role whose mandate overlaps >70% with another.
+4. Enrich each expert's mandate with relevant concepts and prior art hints from the goal analysis.
 
 **Models**: `opus` for architecture/analysis, `sonnet` for implementation planning, `haiku` for verification-only.
 
-For each agent define: name, role, model, one-line mandate. Keep mandates brief — the experts will determine their own analytical depth.
+For each agent define: name, role, model, one-line mandate (enriched with relevant concepts/prior-art from goal analysis).
 
 ## Step 3: Agent Team
 
@@ -64,11 +89,15 @@ You are a {role} on a planning team.
 **Your name**: {name}
 **Your mandate**: {mandate}
 
+## Context
+Read .design/goal-analysis.json for goal decomposition, concept mapping, prior art hints, and scope notes. Use this to focus your analysis — don't rediscover what's already been identified.
+
 ## Instructions
 
 1. Analyze the goal through your domain lens — ensure MECE coverage within your mandate.
 2. Gather the context you need: read relevant source files, configs, project structure, CLAUDE.md — whatever your domain requires. Use LSP (documentSymbol, goToDefinition) when available. Use WebSearch/WebFetch if external research is needed.
-3. Produce findings (risks, observations) and task recommendations.
+3. Follow up on prior art hints relevant to your domain — check if suggested libraries, patterns, or existing code actually exist and apply.
+4. Produce findings (risks, observations) and task recommendations.
 
 ## Task Recommendations
 
@@ -99,9 +128,10 @@ Your task in the TaskList is blocked by the expert agents. Once unblocked, proce
 
 ## Phase 1: Context & Merge
 
-1. Scan the codebase for project context: read package.json / pyproject.toml / Cargo.toml / go.mod for stack info, CLAUDE.md for conventions, linter/formatter configs. Build a context object: {stack, conventions, testCommand, buildCommand, lsp: {available: []}}. If LSP is available (try documentSymbol on a key source file), record it.
-2. Glob .design/expert-*.json and read each expert analysis.
-3. Merge expert task recommendations:
+1. Read .design/goal-analysis.json for goal decomposition, concepts, and prior art hints.
+2. Scan the codebase for project context: read package.json / pyproject.toml / Cargo.toml / go.mod for stack info, CLAUDE.md for conventions, linter/formatter configs. Build a context object: {stack, conventions, testCommand, buildCommand, lsp: {available: []}}. If LSP is available (try documentSymbol on a key source file), record it.
+3. Glob .design/expert-*.json and read each expert analysis.
+4. Merge expert task recommendations:
    - Where experts converge, increase confidence
    - Where they diverge, investigate and choose the strongest position
    - Deduplicate overlapping tasks
@@ -178,7 +208,7 @@ After receiving the plan-writer's message: `SendMessage(type: "shutdown_request"
 
 1. **Lightweight verification** (lead): Run `python3 -c "import json; p=json.load(open('.design/plan.json')); assert p.get('schemaVersion') == 2, 'schemaVersion must be 2'"` to confirm schemaVersion. Use the plan-writer's stored `taskCount` and `waveCount` from its SendMessage for verification (no need to re-extract).
 2. **Clean up TaskList**: Delete all tasks created during planning so `/do:execute` starts with a clean TaskList.
-3. **Clean up intermediate files**: `rm -f .design/expert-*.json .design/expert-*.log .design/plan-writer.log` — keep only `.design/plan.json`.
+3. **Clean up intermediate files**: `rm -f .design/goal-analysis.json .design/expert-*.json .design/expert-*.log .design/plan-writer.log` — keep only `.design/plan.json`.
 
 4. **Output summary** using stored plan-writer data (`waveSummary`, `taskCount`, `waveCount`):
 
