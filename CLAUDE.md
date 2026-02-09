@@ -48,17 +48,20 @@ The two skills communicate through `.design/plan.json` (schemaVersion 3) written
 
 ### Execution Model
 
-`/do:design` uses a thin-lead delegation architecture for context-efficient planning:
+`/do:design` uses a thin-lead delegation architecture with adaptive complexity scaling:
 
-- **Lead responsibilities** (never delegated): pre-flight, team lifecycle (TeamCreate, SendMessage, shutdown), reading analyst's team recommendation, spawning experts, lightweight verification, summary output. The lead NEVER analyzes the goal or reads source files.
-- **Dynamically growing team**: The team starts with a single goal analyst, then grows with experts, a critic, and a plan-writer based on the analyst's recommendation. One team (`do-design`), dynamic membership.
-- **Pipeline**: pre-flight → analyst → experts (parallel) → critic → plan-writer (4 steps total). Files carry data between stages via `.design/` directory.
-- **Goal analyst** (Step 2): First teammate spawned. Uses `sequential-thinking` MCP (if available) + codebase exploration to deeply understand the goal, propose 2–3 high-level approaches with tradeoffs, and recommend 2–5 expert roles with enriched mandates. Experts are typed as `scanner` (domain analysis) or `architect` (approach design). Writes `.design/goal-analysis.json` including `codebaseContext`, `approaches`, and `recommendedTeam`.
-- **Expert agents** (Step 3): Two types based on analyst's recommendation. **Scanners** analyze from a domain lens — what needs to happen. **Architects** design how to solve specific sub-problems — propose 2–3 concrete strategies with tradeoffs and recommend one. Each writes `.design/expert-{name}.json`.
-- **Critic** (Step 3): blockedBy all experts. Stress-tests proposals: challenges assumptions, evaluates approach coherence, identifies missing risks, flags over/under-engineering, checks goal alignment. Writes `.design/critic.json` with challenges and a verdict.
-- **Plan-writer** (Step 3): blockedBy critic. Merges expert analyses, incorporates critique (must address each challenge), validates, enriches. Records approach decisions in `progress.decisions`. Writes `.design/plan.json`.
-- **Two-tier fallback**: If the team fails to produce `.design/plan.json` (1) retry with a single plan-writer Task subagent, or (2) perform merge and plan writing inline with context minimization (process expert files one at a time)
-- The lead never reads raw expert analyses — data flows through file-based artifacts. The ONE file the lead reads is `.design/goal-analysis.json` (for the `recommendedTeam` array only).
+- **Lead responsibilities** (never delegated): pre-flight, team lifecycle (TeamCreate, SendMessage, shutdown), reading analyst's output (`complexity` and `recommendedTeam`), spawning agents, lightweight verification, summary output. The lead NEVER analyzes the goal or reads source files.
+- **Dynamically growing team**: The team starts with a single goal analyst, then grows based on goal complexity. One team (`do-design`), dynamic membership.
+- **Goal analyst** (Step 2): First teammate spawned. Uses `sequential-thinking` MCP (if available) + codebase exploration to deeply understand the goal, propose 2–3 high-level approaches with tradeoffs, assess complexity, and recommend expert team composition. Experts are typed as `scanner` (domain analysis) or `architect` (approach design). Writes `.design/goal-analysis.json` including `complexity`, `complexityRationale`, `codebaseContext`, `approaches`, and `recommendedTeam`.
+- **Complexity tiers** (analyst's `complexity` field determines pipeline):
+  - **Minimal** (1-3 tasks, single obvious approach): skip expert/critic/plan-writer teammates. Spawn single lightweight plan-writer Task subagent reading only `goal-analysis.json`. Quality gate warns if plan exceeds 3 tasks or depth 2.
+  - **Standard** (4-8 tasks, some design decisions): spawn experts + plan-writer (skip critic). Plan-writer blockedBy experts directly.
+  - **Full** (9+ tasks, multiple approaches, cross-cutting concerns): spawn experts + critic + plan-writer. Critic blockedBy experts, plan-writer blockedBy critic.
+- **Expert agents** (Step 3, standard/full only): Two types. **Scanners** analyze from a domain lens — what needs to happen. **Architects** design how to solve specific sub-problems — propose 2–3 concrete strategies with tradeoffs and recommend one. Each writes `.design/expert-{name}.json`.
+- **Critic** (Step 3, full only): blockedBy all experts. Stress-tests proposals: challenges assumptions, evaluates approach coherence, identifies missing risks, flags over/under-engineering, checks goal alignment. Writes `.design/critic.json` with challenges and a verdict.
+- **Plan-writer** (Step 3, standard/full only): teammate blockedBy critic (full) or experts (standard). Merges expert analyses, incorporates critique (full only), validates, enriches. Records approach decisions in `progress.decisions`. Writes `.design/plan.json`.
+- **Two-tier fallback** (standard/full only): If the team fails to produce `.design/plan.json` (1) retry with a single plan-writer Task subagent, or (2) perform merge and plan writing inline with context minimization (process expert files one at a time)
+- The lead never reads raw expert analyses — data flows through file-based artifacts. The ONE file the lead reads is `.design/goal-analysis.json` (for `complexity` and `recommendedTeam` only).
 
 `/do:execute` uses a thin-lead delegation architecture:
 
