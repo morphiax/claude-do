@@ -1,12 +1,12 @@
 ---
 name: execute
-description: "Execute a plan from /design with validation, wave-by-wave agents, and single-file state tracking."
+description: "Execute a plan from /design with validation, dependency-graph scheduling, and single-file state tracking."
 argument-hint: ""
 ---
 
 # Execute
 
-Execute a `.design/plan.json` wave-by-wave using Task subagents. The lead is a thin orchestrator: it delegates mechanical work to three specialized subagents (setup, wave processor, plan updater) and retains only user interaction, worker spawning, git commits, and abort decisions.
+Execute a `.design/plan.json` using dependency-graph scheduling with Task subagents. The lead computes ready-sets dynamically from `blockedBy` dependencies, spawning each batch of ready tasks as a round. The lead is a thin orchestrator: it delegates mechanical work to three specialized subagents (setup, batch processor, plan updater) and retains only user interaction, worker spawning, git commits, and abort decisions.
 
 **Workflow guard**: Execute the Orchestration Flow (Steps 1-4) as written. Do NOT use `EnterPlanMode` — this skill IS the execution plan. Proceed directly to Step 1: Setup.
 
@@ -16,12 +16,13 @@ Execute a `.design/plan.json` wave-by-wave using Task subagents. The lead is a t
 - `git add` + `git commit` (user-visible side effects)
 - `AskUserQuestion` (user interaction)
 - Circuit breaker evaluation (orchestration judgment)
+- Compute ready-sets and manage round progression
 - Display progress to user
 
 **Delegated to subagents** (lead never reads raw `.design/plan.json`, except during fallback recovery):
 
-- Plan reading, validation, TaskList creation, prompt assembly, per-wave file writing → Setup Subagent
-- Result parsing (from worker log files), spot-checks, acceptance checks, retry prompt assembly → Wave Processor Subagent
+- Plan reading, validation, TaskList creation, prompt assembly, task file writing → Setup Subagent
+- Result parsing (from worker log files), spot-checks, acceptance checks, retry prompt assembly → Batch Processor Subagent
 - `.design/plan.json` mutation, progress tracking, cascading failures, trimming → Plan Updater Subagent
 
 **Fallback rule**: If any delegation subagent fails (non-zero exit, malformed JSON output, or missing required fields), the lead performs that step's scoped minimal-mode fallback inline. Each step (Setup, Processor, Updater) defines its own fallback with reduced scope — see the **Fallback (minimal mode)** block at each step. Never abort execution due to a subagent infrastructure failure.
@@ -64,7 +65,7 @@ Task:
    - If found: parse JSON.
      - If schemaVersion is not 2: return JSON with error field set to schema_version and version set to the actual version number
      - If tasks array is empty: return JSON with error field set to empty_tasks
-     - If progress.currentWave > 0: this is a resume. Reset any tasks with status in_progress back to pending (increment their attempts count). For each in_progress task being reset, clean up partial artifacts: revert uncommitted changes to metadata.files.modify files via git checkout -- {files} and delete partially created metadata.files.create files via rm -f {files}. For each completed task on resume, verify its metadata.files.create entries exist and its metadata.files.modify entries are committed. If verification fails, reset to pending. Write the updated plan back atomically to .design/plan.json.
+     - Resume detection: if any task has status other than pending (e.g., completed, failed, blocked, skipped, in_progress), this is a resume. Reset any tasks with status in_progress back to pending (increment their attempts count). For each in_progress task being reset, clean up partial artifacts: revert uncommitted changes to metadata.files.modify files via git checkout -- {files} and delete partially created metadata.files.create files via rm -f {files}. For each completed task on resume, verify its metadata.files.create entries exist and its metadata.files.modify entries are committed. If verification fails, reset to pending. Write the updated plan back atomically to .design/plan.json.
    ```
 
 3. **Validation instructions**:
@@ -105,7 +106,7 @@ Task:
      taskId: {planIndex-to-taskId map[task index]}
      addBlockedBy: [planIndex-to-taskId map[dep] for dep in task.blockedBy]
 
-   If resuming (progress.currentWave > 0): mark already-completed tasks as completed via TaskUpdate.
+   If resuming: mark already-completed tasks as completed via TaskUpdate.
    ```
 
 5. **File overlap computation instructions**:
@@ -113,7 +114,11 @@ Task:
    ```
    ## Step 4: Compute File Overlap Matrix
 
-   For each wave, build a set of all file paths from each task's metadata.files.create and metadata.files.modify. Check for intersections between any two tasks' file sets within the same wave. Record which task indices conflict.
+   Build a global concurrency-aware file overlap matrix. Two tasks can run concurrently if neither transitively depends on the other through blockedBy chains.
+
+   For each pair of tasks that can run concurrently, build a set of all file paths from each task's metadata.files.create and metadata.files.modify. Check for intersections between the two tasks' file sets. Record which task indices conflict.
+
+   The result is a mapping from each planIndex to an array of other planIndices that have file conflicts AND can run concurrently with it.
    ```
 
 6. **Worker prompt assembly instructions** — builds the 9-section worker prompt:
@@ -157,7 +162,7 @@ Task:
    `## After implementing` / `1. Verify acceptance criteria:`
    + agent.acceptanceCriteria as checklist: `- [ ] {criterion}: \`{check}\``
    + `   Fix failures before proceeding.`
-   + `2. Do NOT stage or commit — the lead handles git after the wave completes.`
+   + `2. Do NOT stage or commit — the lead handles git after the batch completes.`
 
    **S9: Output format** [always] (substitute {planIndex} with actual plan index)
    Emit verbatim:
@@ -177,12 +182,12 @@ Task:
       ...writing log.\nBLOCKED: Required package pg not installed
    ```
 
-7. **Per-wave file writing instructions**:
+7. **Task file writing instructions**:
 
    ```
-   ## Step 6: Write Per-Wave Prompt Files
+   ## Step 6: Write Task Prompt File
 
-   For each wave number N, collect all task objects for that wave and write them to `.design/wave-{N}.json` as a JSON array.
+   Collect all task objects and write them to a single `.design/tasks.json` as a JSON array.
 
    Each task object in the array:
 
@@ -200,7 +205,7 @@ Task:
      }
    ]
 
-   Write atomically to `.design/wave-{N}.json`.
+   Write atomically to `.design/tasks.json`.
    ```
 
 8. **Output format instructions**:
@@ -215,7 +220,7 @@ Task:
    {
      "goal": "Add user authentication",
      "contextSummary": "Next.js + Prisma | ESLint + Prettier | test: npm test",
-     "resumeWave": 0,
+     "isResume": false,
      "validation": {
        "gitClean": true,
        "gitStatus": "",
@@ -224,20 +229,22 @@ Task:
        "missingContextFiles": []
      },
      "taskIdMapping": {"0": "task-abc", "1": "task-def"},
-     "waveSummary": {"1": [{"planIndex": 0, "taskId": "task-abc", "subject": "Setup auth module"}]},
-     "fileOverlapMatrix": {"0": [1]},  // plan indices with file conflicts
+     "fileOverlapMatrix": {"0": [1]},
      "taskCount": 5,
-     "waveCount": 2
+     "maxDepth": 3,
+     "depthSummary": {"1": [0, 1], "2": [2, 3], "3": [4]}
    }
 
-   Prompts are NOT included in the output — they live in the per-wave files written in Step 6.
+   depthSummary groups planIndices by dependency depth for display purposes (depth = 1 for tasks with empty blockedBy, otherwise 1 + max(depth of blockedBy tasks)). This is informational only — it does not determine execution order.
+
+   Prompts are NOT included in the output — they live in the task file written in Step 6.
    ```
 
 ---
 
-### B. Wave Processor Subagent (Result Processor)
+### B. Batch Processor Subagent (Result Processor)
 
-Processes worker results (status lines + log files) after each wave or retry batch. Read-only — does NOT mutate `.design/plan.json`. Spawn once per processing pass.
+Processes worker results (status lines + log files) after each batch (round). Read-only — does NOT mutate `.design/plan.json`. Spawn once per processing pass.
 
 ```
 Task:
@@ -245,12 +252,12 @@ Task:
   prompt: <assembled from template below>
 ```
 
-**Wave processor prompt template** — assemble by concatenating these sections:
+**Batch processor prompt template** — assemble by concatenating these sections:
 
 1. **Role and mission**:
 
    ```
-   You are a wave result processor. You receive task status lines, read task metadata from the wave file (.design/wave-{N}.json), and read detailed output from worker log files (.design/worker-{planIndex}.log). You parse results, verify file artifacts, run acceptance criteria, determine retries, clean up failed artifacts, and assemble retry prompts. You write detailed per-task results to .design/processor-wave-{N}.json. You are READ-ONLY with respect to .design/plan.json — you never read or write it.
+   You are a batch result processor. You receive task status lines, read task metadata from the task file (.design/tasks.json), and read detailed output from worker log files (.design/worker-{planIndex}.log). You parse results, verify file artifacts, run acceptance criteria, determine retries, clean up failed artifacts, and assemble retry prompts. You write detailed per-task results to .design/processor-batch-{N}.json. You are READ-ONLY with respect to .design/plan.json — you never read or write it.
    ```
 
 2. **Input data section** — the lead assembles this from task status lines:
@@ -258,9 +265,9 @@ Task:
    ```
    ## Input
 
-   Wave: {wave_number}
-   Wave prompt file: .design/wave-{wave_number}.json
-   Read .design/wave-{wave_number}.json for task metadata (subject, model, files, acceptance criteria, fallback strategy).
+   Round: {round_number}
+   Task prompt file: .design/tasks.json
+   Read .design/tasks.json for task metadata (subject, model, files, acceptance criteria, fallback strategy).
 
    ### Task Results
    ```
@@ -271,7 +278,7 @@ Task:
 
 ---
 
-The processor reads task metadata from the wave file and detailed work output from worker log files (`.design/worker-{planIndex}.log`). If a log file is missing, fall back to the status line only.
+The processor reads task metadata from the task file and detailed work output from worker log files (`.design/worker-{planIndex}.log`). If a log file is missing, fall back to the status line only.
 
 3. **Processing instructions**:
 
@@ -286,7 +293,7 @@ The processor reads task metadata from the wave file and detailed work output fr
    2. Spot-check files:
       - For each path in files to modify: run `git diff --name-only` and verify the path appears
       - For each path in files to create: run `test -f {path}`
-      - Unexpected file detection: run `git diff --name-only` for the full wave and flag any modified files not listed in any task's files to create/modify. Include unexpected files in the result summary as warnings.
+      - Unexpected file detection: run `git diff --name-only` for the full batch and flag any modified files not listed in any task's files to create/modify. Include unexpected files in the result summary as warnings.
 
    3. If spot-check fails but agent reported COMPLETED: override to FAILED with reason describing which file verification failed
 
@@ -299,7 +306,7 @@ The processor reads task metadata from the wave file and detailed work output fr
       - Clean up partial artifacts: revert uncommitted changes to files-to-modify via `git checkout -- {files}` and delete partially created files-to-create via `rm -f {files}`.
       - Delete the stale worker log: `rm -f .design/worker-{planIndex}.log`
       - Assemble a retry prompt by concatenating:
-        a. The original worker prompt (read from the wave prompt file at the path given in Original prompt source, extracting the entry matching the task's planIndex).
+        a. The original worker prompt (read from .design/tasks.json, extracting the entry matching the task's planIndex).
         b. A retry context block:
 
            ## Retry context
@@ -329,7 +336,7 @@ The processor reads task metadata from the wave file and detailed work output fr
 
    **Context efficiency**: Minimize text output. Write reasoning to .design/processor.log if needed. Target: under 100 tokens of non-JSON output.
 
-   Write detailed per-task results to .design/processor-wave-{wave_number}.json atomically:
+   Write detailed per-task results to .design/processor-batch-{round_number}.json atomically:
 
    [
      {"planIndex": 0, "status": "completed", "result": "Added auth middleware", "attempts": 1, "acceptancePassed": true},
@@ -354,7 +361,7 @@ The processor reads task metadata from the wave file and detailed work output fr
 
 ### C. Plan Updater Subagent (State Updater)
 
-Applies wave results to `.design/plan.json`, handles progressive trimming and cascading failures. Spawn once per wave after all tasks (including retries) are resolved.
+Applies batch results to `.design/plan.json`, handles progressive trimming and cascading failures. Spawn once per round after all tasks (including retries) are resolved.
 
 ```
 Task:
@@ -367,7 +374,7 @@ Task:
 1. **Role and mission**:
 
    ```
-   You are a plan state updater. You read .design/plan.json, apply wave results, perform progressive trimming on completed tasks, compute cascading failures, and write the updated plan atomically. You are the ONLY agent that writes to .design/plan.json.
+   You are a plan state updater. You read .design/plan.json, apply batch results, perform progressive trimming on completed tasks, compute cascading failures, and write the updated plan atomically. You are the ONLY agent that writes to .design/plan.json.
    ```
 
 2. **Input data section** — the lead assembles this:
@@ -375,13 +382,13 @@ Task:
    ```
    ## Input
 
-   Wave: {wave_number}
+   Round: {round_number}
    Total tasks in plan: {taskCount}
    Tasks with 3 or fewer total: {true/false}
-   Read .design/processor-wave-{wave_number}.json for per-task results (planIndex, status, result, attempts).
+   Read .design/processor-batch-{round_number}.json for per-task results (planIndex, status, result, attempts).
    ```
 
-   If any surprises or decisions were noted during the wave, append:
+   If any surprises or decisions were noted during the round, append:
 
    ```
    ### Surprises/Decisions
@@ -395,33 +402,30 @@ Task:
 
    1. Read .design/plan.json from the project root.
 
-   2. For each task in the wave results:
+   2. For each task in the batch results:
       - Set task.status to the provided status
       - Set task.result to the provided result string
       - Set task.attempts to the provided attempts count
 
-   3. Update progress.currentWave to {wave_number}.
+   3. Append completed tasks to progress.completedTasks as [{index, summary}] for each task with completed status.
 
-   4. Append completed tasks to progress.completedTasks as [{index, summary, wave}] for each task with completed status.
+   4. Append any surprises to progress.surprises and decisions to progress.decisions.
 
-   5. Append any surprises to progress.surprises and decisions to progress.decisions.
-
-   6. Apply progressive plan trimming: for every task with completed status, strip verbose agent fields — keep ONLY these fields on the task object:
+   5. Apply progressive plan trimming: for every task with completed status, strip verbose agent fields — keep ONLY these fields on the task object:
       - subject
       - status
       - result
       - metadata.files (the full files object with create and modify)
-      - wave
       - blockedBy
       - agent.role
       - agent.model
       Remove all other agent subfields (approach, priorArt, fallback, contextFiles, assumptions, acceptanceCriteria, rollbackTriggers, constraints, expertise) and all other task-level fields (description, activeForm, attempts, metadata.type, metadata.reads) from completed tasks. This reduces plan size progressively as execution proceeds.
 
-   7. Compute cascading failure skip list: for tasks in later waves whose blockedBy includes any task with failed or blocked status, set their status to skipped and result to a message indicating which dependency caused the skip.
+   6. Compute cascading failure skip list: for tasks whose blockedBy includes any task with failed or blocked status (following transitive blockedBy chains), set their status to skipped and result to a message indicating which dependency caused the skip.
 
-   8. Write atomically to .design/plan.json.
+   7. Write atomically to .design/plan.json.
 
-   9. Compute circuit breaker evaluation:
+   8. Compute circuit breaker evaluation:
       - Count all tasks still in pending status
       - Count how many of those pending tasks would be skipped due to cascading failures (their blockedBy chain leads to a failed/blocked task)
       - Determine shouldAbort: true if totalTasks > 3 AND wouldBeSkipped >= 50% of pending tasks
@@ -459,7 +463,7 @@ Spawn the Setup Subagent using the prompt template from Section A.
 
 Parse the final line of the subagent's return value as JSON.
 
-**Fallback (minimal mode)**: Read `.design/plan.json`, validate schemaVersion is 2, create TaskList entries with dependencies. Write `.design/wave-{N}.json` files with simplified prompts — skip file overlap computation (set `fileOverlaps` to empty arrays). Include in each prompt: role, task context, acceptance criteria, and FINAL-line format. Return a setup JSON with `fileOverlapMatrix` set to `{}`. Log: "Setup subagent failed — executing inline (minimal mode)."
+**Fallback (minimal mode)**: Read `.design/plan.json`, validate schemaVersion is 2, create TaskList entries with dependencies. Write `.design/tasks.json` with simplified prompts — skip file overlap computation (set `fileOverlaps` to empty arrays). Include in each prompt: role, task context, acceptance criteria, and FINAL-line format. Return a setup JSON with `fileOverlapMatrix` set to `{}`. Log: "Setup subagent failed — executing inline (minimal mode)."
 
 **Error handling from setup output**:
 
@@ -467,9 +471,9 @@ Parse the final line of the subagent's return value as JSON.
 - If error is `schema_version`: tell user the plan uses an unsupported schema version and v2 is required, then stop.
 - If error is `empty_tasks`: tell user the plan contains no tasks and to re-run `/design`, then stop.
 
-Store the setup output for use throughout execution. The lead never reads `.design/plan.json` directly — all plan data comes through the setup output or updater responses. Worker prompts are stored in per-wave files (`.design/wave-{N}.json`), not in the setup output — workers self-read their prompts at execution time via the bootstrap template.
+Store the setup output for use throughout execution. The lead never reads `.design/plan.json` directly — all plan data comes through the setup output or updater responses. Worker prompts are stored in `.design/tasks.json`, not in the setup output — workers self-read their prompts at execution time via the bootstrap template.
 
-**Resume-nothing-to-do check**: If resuming (`resumeWave > 0`) and the setup output shows no pending tasks remain (all tasks are already completed, failed, blocked, or skipped), tell the user "All tasks are already resolved — nothing to do." and stop.
+**Resume-nothing-to-do check**: If resuming (`isResume` is true) and the setup output shows no pending tasks remain (all tasks are already completed, failed, blocked, or skipped), tell the user "All tasks are already resolved — nothing to do." and stop.
 
 ### Step 2: Report Validation
 
@@ -477,7 +481,7 @@ Using the setup output's `validation` field, display to the user:
 
 ```
 Executing: {goal}
-Tasks: {taskCount} across {waveCount} waves
+Tasks: {taskCount} (max dependency depth: {maxDepth})
 Validation: {pass_count}/{total_count} blocking checks passed
 ```
 
@@ -485,74 +489,75 @@ If `validation.gitClean` is false, warn about uncommitted changes.
 
 If any blocking checks failed, show them and use `AskUserQuestion` to let the user fix or proceed anyway.
 
-If `resumeWave` > 0, report: "Resuming from wave {resumeWave}."
+If `isResume` is true, report: "Resuming execution."
 
-### Step 3: Execute Wave-by-Wave
+### Step 3: Execute by Ready-Set Rounds
 
-For each wave (starting from `resumeWave + 1` if resuming, otherwise 1):
+Initialize `roundNumber` to 1. Maintain a `completedResults` map (planIndex → result string) across all rounds.
 
-#### 3a. Collect Wave Tasks
+**Main loop**: While there are tasks with `pending` status in the setup output's `taskIdMapping`:
 
-Use `TaskList` to find tasks for this wave that are `pending` and have all `blockedBy` resolved. Read `.design/wave-{N}.json` for task metadata only (planIndex, taskId, subject, model, fileOverlaps) — do NOT read prompt fields into lead context. Workers self-read their prompts.
+#### 3a. Compute Ready Set
+
+Compute the ready set: tasks that are `pending` AND all tasks in their `blockedBy` are `completed` (check against the `completedResults` map and prior updater `skipList` responses).
+
+**Deadlock detection**: If the ready set is empty but pending tasks remain, this indicates either a dependency cycle or all remaining pending tasks are blocked by failed/skipped tasks. Abort execution with message: "Deadlock detected: {pendingCount} tasks remain but none are ready. Remaining tasks depend on failed or blocked predecessors." Proceed to Step 4.
+
+Read `.design/tasks.json` for task metadata only (planIndex, taskId, subject, model, fileOverlaps) — do NOT read prompt fields into lead context. Workers self-read their prompts.
 
 #### 3b. Spawn Task Subagents
 
-For each task in the wave:
+For each task in the ready set:
 
 1. Mark as in progress: `TaskUpdate(taskId: {ID}, status: "in_progress")`
-2. **Assemble dependency results**: If the task has `blockedBy` entries, build a dependency results block from the lead's completed task results map:
+2. **Assemble dependency results**: If the task has `blockedBy` entries, build a dependency results block from the `completedResults` map:
 
    ```
    Dependency results (from prior tasks):
-   - Task {index}: {result from the updater or processor output for that completed task}
+   - Task {index}: {result from the completedResults map for that task}
    ```
 
-   The lead maintains a map of completed task results from prior waves' processor outputs.
-
-3. Spawn a Task subagent with a bootstrap prompt — workers self-read their full instructions from the wave file:
+3. Spawn a Task subagent with a bootstrap prompt — workers self-read their full instructions from the task file:
 
 ```
 Task:
   subagent_type: "general-purpose"
-  model: {task.model from wave file}
+  model: {task.model from task file}
   prompt: <bootstrap prompt assembled from template below>
 ```
 
-**Worker bootstrap template** — substitute `{N}` and `{planIndex}`, then append dependency results if present:
+**Worker bootstrap template** — substitute `{planIndex}`, then append dependency results if present:
 
 ```
 ## Bootstrap — Self-Read Instructions
 
-1. Read `.design/wave-{N}.json` and extract the entry where `planIndex` equals {planIndex}.
+1. Read `.design/tasks.json` and extract the entry where `planIndex` equals {planIndex}.
 2. Your full task instructions are in the `prompt` field of that entry.
 3. If dependency results appear below, find the placeholder line `[Dependency results — deferred: lead appends actual results at spawn time]` in the prompt and replace it with the dependency results section below.
 4. Execute the task instructions from the prompt field.
-
-Wave file: `.design/wave-{N}.json`
-Plan index: {planIndex}
 ```
 
 If the task has dependency results (from point 2 above), append them directly after the bootstrap template.
 
-**Parallel safety**: Check the setup output's `fileOverlapMatrix`. If any tasks in this wave have file overlaps, run those conflicting tasks sequentially. Spawn all non-conflicting tasks in parallel in a single response.
+**Parallel safety**: Check the setup output's `fileOverlapMatrix`. If any tasks in this ready set have file overlaps with each other, run those conflicting tasks sequentially. Spawn all non-conflicting tasks in parallel in a single response.
 
 #### 3c. Process Results
 
-After all wave workers return, extract the FINAL status line from each worker's return value. The FINAL line is the last line of output and must match the format `COMPLETED:|FAILED:|BLOCKED:`. Discard all preceding output — only the FINAL status line is retained for processing.
+After all batch workers return, extract the FINAL status line from each worker's return value. The FINAL line is the last line of output and must match the format `COMPLETED:|FAILED:|BLOCKED:`. Discard all preceding output — only the FINAL status line is retained for processing.
 
-Spawn the Wave Processor Subagent using the prompt template from Section B.
+Spawn the Batch Processor Subagent using the prompt template from Section B.
 
 Assemble the processor's input data section by inserting:
 
-- The wave number and wave prompt file path (`.design/wave-{N}.json`)
+- The round number and task prompt file path (`.design/tasks.json`)
 - For each task: its planIndex, the **status line only** (FINAL line from worker return value), and current attempts count
-- For retry processing: include the wave prompt file path so the processor can read original prompts
+- For retry processing: include the task prompt file path so the processor can read original prompts
 
 The lead does NOT embed raw return values or full worker output — the processor reads detailed output from worker log files directly.
 
 Parse the final line of the processor's return value as JSON.
 
-**Fallback (minimal mode)**: Parse worker status lines against `^(COMPLETED|FAILED|BLOCKED): .+`. For COMPLETED tasks, verify primary output files exist (`test -f` for creates, `git diff --name-only` for modifies). Skip acceptance criteria checks — retry catches regressions. For FAILED tasks with attempts < 3, read original prompt from `.design/wave-{N}.json` by planIndex, append retry context, assemble retry prompt. Write results to `.design/processor-wave-{N}.json`. Log: "Processor subagent failed — executing inline (minimal mode)."
+**Fallback (minimal mode)**: Parse worker status lines against `^(COMPLETED|FAILED|BLOCKED): .+`. For COMPLETED tasks, verify primary output files exist (`test -f` for creates, `git diff --name-only` for modifies). Skip acceptance criteria checks — retry catches regressions. For FAILED tasks with attempts < 3, read original prompt from `.design/tasks.json` by planIndex, append retry context, assemble retry prompt. Write results to `.design/processor-batch-{roundNumber}.json`. Log: "Processor subagent failed — executing inline (minimal mode)."
 
 #### 3d. Handle Retries
 
@@ -560,16 +565,16 @@ If the processor output contains `retryTasks`:
 
 For each retry task, spawn a new Task subagent using the processor-provided `retryPrompt` and `model`. Collect return values.
 
-After all retry agents return, spawn the Wave Processor Subagent again with the retry results (status lines and worker log file paths). Include the wave prompt file path so the processor can read original prompts for further retry assembly if needed.
+After all retry agents return, spawn the Batch Processor Subagent again with the retry results (status lines and worker log file paths). Include the task prompt file path so the processor can read original prompts for further retry assembly if needed.
 
 Repeat until no `retryTasks` remain or all failed tasks have reached 3 attempts. Each retry pass processes only the tasks that were marked for retry in the previous pass.
 
-#### 3e. Display Wave Progress
+#### 3e. Display Round Progress
 
 Using the final processor output (after all retries are resolved), display:
 
 ```
-Wave {N} complete: {completed}/{total_in_wave} tasks
+Round {roundNumber}: {completed}/{total_in_batch} tasks ({total_completed_overall}/{taskCount} overall)
 - Task {planIndex}: {subject} — {status}
 ```
 
@@ -579,30 +584,30 @@ Spawn the Plan Updater Subagent using the prompt template from Section C.
 
 Assemble the updater's input data section by inserting:
 
-- Wave number
+- Round number
 - Total task count and whether it is 3 or fewer
-- Any surprises or decisions noted during the wave
+- Any surprises or decisions noted during the round
 
-The updater reads per-task results from `.design/processor-wave-{N}.json` -- the lead does not relay them inline.
+The updater reads per-task results from `.design/processor-batch-{roundNumber}.json` — the lead does not relay them inline.
 
 Parse the final line of the updater's return value as JSON.
 
-**Fallback (minimal mode)**: Read `.design/plan.json` and `.design/processor-wave-{N}.json`. For each task result: update status, result, and attempts fields. Set `progress.currentWave` to the wave number. Write atomically. Skip progressive trimming and cascading failure computation — defer to next wave's updater. Return `{"updated": true, "skipList": [], "circuitBreaker": {"shouldAbort": false}}`. Log: "Updater subagent failed — executing inline (minimal mode)."
+**Fallback (minimal mode)**: Read `.design/plan.json` and `.design/processor-batch-{roundNumber}.json`. For each task result: update status, result, and attempts fields. Write atomically. Skip progressive trimming and cascading failure computation — defer to next round's updater. Return `{"updated": true, "skipList": [], "circuitBreaker": {"shouldAbort": false}}`. Log: "Updater subagent failed — executing inline (minimal mode)."
 
-#### 3g. Update TaskList for Skipped Tasks
+#### 3g. Update Tracking State
 
-Using the updater's `skipList`, mark skipped tasks as `completed` in the TaskList (the detailed skipped status lives in `.design/plan.json`).
+Using the processor's final output, update the `completedResults` map with completed task results. Using the updater's `skipList`, mark skipped tasks as `completed` in the TaskList (the detailed skipped status lives in `.design/plan.json`). Remove completed and skipped tasks from the pending set.
 
 #### 3h. Git Commit
 
-Stage and commit all completed tasks' files from this wave:
+Stage and commit all completed tasks' files from this round:
 
 ```
 git add {all metadata.files.create and metadata.files.modify from completed tasks}
-git commit -m "{wave summary}"
+git commit -m "{round summary}"
 ```
 
-Use the processor's `completedFiles` field to determine which files to stage. Skip git add and commit if no files were created or modified in this wave (possible for research-only tasks).
+Use the processor's `completedFiles` field to determine which files to stage. Skip git add and commit if no files were created or modified in this round (possible for research-only tasks).
 
 #### 3i. Circuit Breaker
 
@@ -610,9 +615,11 @@ Using the updater's `circuitBreaker` field: if `shouldAbort` is true, ABORT exec
 
 For plans with 3 or fewer total tasks (`circuitBreaker.totalTasks <= 3`), ignore the circuit breaker — cascading failures are managed individually.
 
+Increment `roundNumber` and continue the main loop.
+
 ### Step 4: Complete
 
-After all waves (or after circuit breaker abort):
+After all rounds (or after circuit breaker abort or deadlock):
 
 1. `TaskList` to confirm final statuses
 2. Summary:
@@ -622,7 +629,7 @@ After all waves (or after circuit breaker abort):
    - Skipped: {count} — {subjects}
    - Follow-up recommendations if any failures
 
-3. Clean up intermediate artifacts: `rm -f .design/wave-*.json .design/worker-*.log .design/processor-wave-*.json`
+3. Clean up intermediate artifacts: `rm -f .design/tasks.json .design/worker-*.log .design/processor-batch-*.json`
 4. If fully successful: rename `.design/plan.json` to `.design/plan.done.json` for audit trail. Return "All {count} tasks completed."
 5. If partial: leave `.design/plan.json` for resume. Return "Execution incomplete. {done}/{total} completed."
 

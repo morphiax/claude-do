@@ -21,7 +21,7 @@ Thin-lead orchestrator: decompose a goal into `.design/plan.json` using a dynami
 
 1. Use `AskUserQuestion` to clarify only when reasonable developers would choose differently and the codebase doesn't answer it: scope boundaries, done-state, technical preferences, compatibility, priority.
 2. If >12 tasks likely needed, suggest phases. Design only phase 1.
-3. Check for existing `.design/plan.json`. If it exists with `progress.currentWave > 0` or any non-pending task statuses, use `AskUserQuestion` to confirm overwrite — execution may be in progress. Record `overwriteApproved` flag.
+3. Check for existing `.design/plan.json`. If it exists with any non-pending task statuses, use `AskUserQuestion` to confirm overwrite — execution may be in progress. Record `overwriteApproved` flag.
 4. Clean up stale staging: `rm -rf .design/ && mkdir -p .design/`
 
 ## Step 2: Team + Goal Analyst
@@ -145,7 +145,6 @@ Read .design/goal-analysis.json for goal decomposition, codebase context, concep
 For each task you recommend, include:
 - subject, description, type (research|implementation|testing|configuration)
 - files: {create: [], modify: []}
-- wave assignment (1 = no deps, 2+ = depends on earlier waves)
 - dependencies (which other tasks must complete first, by subject reference)
 - agent spec: role, model (opus for architecture/analysis, sonnet for implementation, haiku for verification), approach, contextFiles [{path, reason}], assumptions [{claim, verify (shell cmd), severity: blocking|warning}], acceptanceCriteria [{criterion, check (shell cmd)}], rollbackTriggers ["If X, STOP and return BLOCKED: reason"], constraints
 
@@ -177,7 +176,7 @@ Your task in the TaskList is blocked by the expert agents. Once unblocked, proce
    - Where they diverge, investigate and choose the strongest position
    - Deduplicate overlapping tasks
    - Ensure MECE coverage — no gaps, no overlaps
-   - Resolve conflicting wave assignments and dependencies
+   - Resolve conflicting dependencies
 
 ## Phase 2: Validate & Enrich
 
@@ -185,7 +184,7 @@ For each task verify all required fields. Fill gaps:
 
 Required agent fields: role, model, approach, contextFiles [{path, reason, lines?}], assumptions [{claim, verify (shell cmd), severity: blocking|warning}], acceptanceCriteria [{criterion, check (shell cmd)}], rollbackTriggers ["If X, STOP and return BLOCKED: reason"], constraints. Optional: expertise, priorArt, fallback.
 Required metadata: type (research|implementation|testing|configuration), files {create:[], modify:[]}, reads.
-Required task fields: subject, description, activeForm, status (pending), result (null), attempts (0), wave, blockedBy.
+Required task fields: subject, description, activeForm, status (pending), result (null), attempts (0), blockedBy.
 
 Description rule: explain WHY and how it connects to dependents — not just what. An executor with zero context must act on it.
 Non-code goals: acceptance criteria may use content-based checks (grep). Rollback triggers reference content expectations.
@@ -194,27 +193,26 @@ Count gaps filled as gapsFilled.
 ## Phase 3: Auto-generate Safety
 
 - File existence: for each path in metadata.files.modify, add blocking assumption `test -f {path}`
-- Cross-task deps: if task B modifies/creates files overlapping task A (same/earlier wave), add blocking assumption `test -f {file}`
+- Cross-task deps: if task B modifies/creates files overlapping task A (in blockedBy transitive closure), add blocking assumption `test -f {file}`
 - Convert every blocking assumption to a rollback trigger
 
-## Phase 4: Validate Plan (8 checks)
+## Phase 4: Validate Plan (7 checks)
 
 1. Tasks array >= 1 task. If 0, return error.
-2. No two same-wave tasks share files in create or modify.
-3. No task reads overlaps same-wave task creates/modifies.
+2. No two concurrent tasks share files in create or modify. Concurrent = neither transitively depends on the other via blockedBy.
+3. No task reads overlap a concurrent task's creates/modifies.
 4. All blockedBy valid indices. Topological sort — cycles → restructure.
-5. Wave = 1 + max(blockedBy waves). Recalculate if mismatched.
-6. Every task has >= 1 assumption and >= 1 rollback trigger.
-7. Total tasks <= 12.
-8. Max wave <= 4 (restructure for parallelism if exceeded).
+5. Every task has >= 1 assumption and >= 1 rollback trigger.
+6. Total tasks <= 12.
+7. Critical path length <= 4 (longest chain in blockedBy DAG). Restructure for parallelism if exceeded.
 Self-repair: fix and re-validate. After 2 attempts, include in validationIssues and proceed.
 
 ## Phase 5: Write .design/plan.json
 
-Schema (schemaVersion 2): {schemaVersion: 2, goal, context: {stack, conventions, testCommand, buildCommand, lsp}, progress: {currentWave: 0, completedTasks: [], surprises: [], decisions: []}, tasks: [...]}
+Schema (schemaVersion 2): {schemaVersion: 2, goal, context: {stack, conventions, testCommand, buildCommand, lsp}, progress: {completedTasks: [], surprises: [], decisions: []}, tasks: [...]}
 Each task uses the schema from Phase 2.
 
-Schema rules: tasks ordered (index = ID, 0-based), blockedBy references indices, wave: 1 = no deps / 2+ = 1+max(blockedBy waves), status: pending|in_progress|completed|failed|blocked|skipped.
+Schema rules: tasks ordered (index = ID, 0-based), blockedBy references indices, status: pending|in_progress|completed|failed|blocked|skipped.
 
 Write atomically to .design/plan.json.
 
@@ -230,7 +228,8 @@ Read ~/.claude/teams/do-design/config.json to discover the team lead's name. Sen
     content:   <FINAL-line JSON below>
     summary:   Plan written
 
-JSON schema: {"taskCount": N, "waveCount": N, "gapsFilled": N, "validationIssues": [], "waveSummary": {"1": ["Task 0: subject"], ...}}
+JSON schema: {"taskCount": N, "maxDepth": N, "gapsFilled": N, "validationIssues": [], "depthSummary": {"1": ["Task 0: subject"], ...}}
+Depth computation (display-only, not stored in plan.json): depth = 1 for tasks with empty blockedBy, otherwise 1 + max(depth of blockedBy tasks).
 On unresolvable error, send JSON with error (string) and validationIssues (array) keys instead.
 ```
 
@@ -247,21 +246,21 @@ After receiving the plan-writer's message: `SendMessage(type: "shutdown_request"
 
 ## Step 4: Cleanup & Summary
 
-1. **Lightweight verification** (lead): Run `python3 -c "import json; p=json.load(open('.design/plan.json')); assert p.get('schemaVersion') == 2, 'schemaVersion must be 2'"` to confirm schemaVersion. Use the plan-writer's stored `taskCount` and `waveCount` from its SendMessage for verification (no need to re-extract).
+1. **Lightweight verification** (lead): Run `python3 -c "import json; p=json.load(open('.design/plan.json')); assert p.get('schemaVersion') == 2, 'schemaVersion must be 2'"` to confirm schemaVersion. Use the plan-writer's stored `taskCount` and `maxDepth` from its SendMessage for verification (no need to re-extract).
 2. **Clean up TaskList**: Delete all tasks created during planning so `/do:execute` starts with a clean TaskList.
 3. **Clean up intermediate files**: `rm -f .design/goal-analysis.json .design/expert-*.json .design/expert-*.log .design/plan-writer.log` — keep only `.design/plan.json`.
 
-4. **Output summary** using stored plan-writer data (`waveSummary`, `taskCount`, `waveCount`):
+4. **Output summary** using stored plan-writer data (`depthSummary`, `taskCount`, `maxDepth`):
 
 ```
 Plan: {goal}
-Tasks: {taskCount} across {waveCount} waves
+Tasks: {taskCount}, max depth {maxDepth}
 
-Wave 1:
+Depth 1:
 - Task 0: {subject} ({model})
 - Task 1: {subject} ({model})
 
-Wave 2:
+Depth 2:
 - Task 2: {subject} ({model}) [blocked by: 0, 1]
 
 Context: {stack}
