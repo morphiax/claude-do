@@ -44,18 +44,19 @@ The two skills communicate through `.design/plan.json` (schemaVersion 3) written
 - Schema version 3 is required
 - Tasks use dependency-only scheduling — no wave field in task schema, execute computes batches dynamically from `blockedBy`
 - Progressive trimming: completed tasks are stripped of verbose agent fields to reduce plan size as execution proceeds
-- Intermediate artifacts (goal-analysis.json, expert-\*.json, expert-\*.log) are cleaned up after plan generation
+- Intermediate artifacts (goal-analysis.json, expert-\*.json, expert-\*.log, critic.json, critic.log) are cleaned up after plan generation
 
 ### Execution Model
 
 `/do:design` uses a thin-lead delegation architecture for context-efficient planning:
 
 - **Lead responsibilities** (never delegated): pre-flight, team lifecycle (TeamCreate, SendMessage, shutdown), reading analyst's team recommendation, spawning experts, lightweight verification, summary output. The lead NEVER analyzes the goal or reads source files.
-- **Dynamically growing team**: The team starts with a single goal analyst, then grows with experts and a plan-writer based on the analyst's recommendation. One team (`do-design`), dynamic membership.
-- **Pipeline**: pre-flight → analyst → experts → plan-writer (4 steps total). Files carry data between stages via `.design/` directory.
-- **Goal analyst** (Step 2): First teammate spawned. Uses `sequential-thinking` MCP (if available) + codebase exploration to deeply understand the goal, map to known concepts/frameworks, find prior art, and recommend 2–5 expert roles with enriched mandates. Writes `.design/goal-analysis.json` including `codebaseContext` and `recommendedTeam`.
-- **Expert agents** (Step 3): Spawned based on analyst's recommendation. Read `.design/goal-analysis.json` for context, then do focused domain analysis. Each writes `.design/expert-{name}.json`.
-- **Plan-writer** (Step 3): blockedBy all experts. Merges expert analyses, validates, enriches, uses analyst's `codebaseContext` for plan.json's context field. Writes `.design/plan.json`.
+- **Dynamically growing team**: The team starts with a single goal analyst, then grows with experts, a critic, and a plan-writer based on the analyst's recommendation. One team (`do-design`), dynamic membership.
+- **Pipeline**: pre-flight → analyst → experts (parallel) → critic → plan-writer (4 steps total). Files carry data between stages via `.design/` directory.
+- **Goal analyst** (Step 2): First teammate spawned. Uses `sequential-thinking` MCP (if available) + codebase exploration to deeply understand the goal, propose 2–3 high-level approaches with tradeoffs, and recommend 2–5 expert roles with enriched mandates. Experts are typed as `scanner` (domain analysis) or `architect` (approach design). Writes `.design/goal-analysis.json` including `codebaseContext`, `approaches`, and `recommendedTeam`.
+- **Expert agents** (Step 3): Two types based on analyst's recommendation. **Scanners** analyze from a domain lens — what needs to happen. **Architects** design how to solve specific sub-problems — propose 2–3 concrete strategies with tradeoffs and recommend one. Each writes `.design/expert-{name}.json`.
+- **Critic** (Step 3): blockedBy all experts. Stress-tests proposals: challenges assumptions, evaluates approach coherence, identifies missing risks, flags over/under-engineering, checks goal alignment. Writes `.design/critic.json` with challenges and a verdict.
+- **Plan-writer** (Step 3): blockedBy critic. Merges expert analyses, incorporates critique (must address each challenge), validates, enriches. Records approach decisions in `progress.decisions`. Writes `.design/plan.json`.
 - **Two-tier fallback**: If the team fails to produce `.design/plan.json` (1) retry with a single plan-writer Task subagent, or (2) perform merge and plan writing inline with context minimization (process expert files one at a time)
 - The lead never reads raw expert analyses — data flows through file-based artifacts. The ONE file the lead reads is `.design/goal-analysis.json` (for the `recommendedTeam` array only).
 
@@ -78,7 +79,6 @@ The two skills communicate through `.design/plan.json` (schemaVersion 3) written
 ## Requirements
 
 - Claude Code 1.0.33+
-- Agent Teams enabled (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`) — required for `/do:design` only
 - `sequential-thinking` MCP server — used by the goal analyst for deep goal reasoning (fallback to inline reasoning if unavailable)
 
 ## Commit Conventions

@@ -468,7 +468,7 @@ Parse the final line of the subagent's return value as JSON.
 **Error handling from setup output**:
 
 - If error is `no_plan`: tell user "No plan found. Run `/design <goal>` first." and stop.
-- If error is `schema_version`: tell user the plan uses an unsupported schema version and v2 is required, then stop.
+- If error is `schema_version`: tell user the plan uses an unsupported schema version and v3 is required, then stop.
 - If error is `empty_tasks`: tell user the plan contains no tasks and to re-run `/design`, then stop.
 
 Store the setup output for use throughout execution. The lead never reads `.design/plan.json` directly — all plan data comes through the setup output or updater responses. Worker prompts are stored in `.design/tasks.json`, not in the setup output — workers self-read their prompts at execution time via the bootstrap template.

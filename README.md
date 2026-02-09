@@ -1,6 +1,6 @@
 # do - Claude Code Plugin
 
-> Structured planning and wave-based execution for Claude Code
+> Structured planning and dependency-graph execution for Claude Code
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Version](https://img.shields.io/badge/version-1.0.0-green.svg)
@@ -10,8 +10,8 @@
 
 The `do` plugin adds two powerful skills to Claude Code:
 
-- **/do:design** — Uses Claude Code Agent Teams to spawn a dynamic planning team (2-5 specialists tailored to your goal) that analyzes the problem from multiple angles, then synthesizes their findings into a structured `.design/plan.json` with enriched agent specifications, safety checks, and wave-based execution strategy
-- **/do:execute** — Reads `.design/plan.json`, creates a task list for progress tracking, spawns Task subagents wave-by-wave, and coordinates parallel execution with retry budgets, circuit breakers, and git checkpoints
+- **/do:design** — Uses Claude Code Agent Teams to spawn a dynamic planning team (2-5 specialists tailored to your goal) that analyzes the problem from multiple angles, then synthesizes their findings into a structured `.design/plan.json` with enriched agent specifications, safety checks, and dependency-graph execution strategy
+- **/do:execute** — Reads `.design/plan.json`, creates a task list for progress tracking, spawns Task subagents in dependency-based batches, and coordinates parallel execution with retry budgets, circuit breakers, and git checkpoints
 
 Plans are self-contained execution blueprints that include task dependencies, agent role specialization, assumption verification, acceptance criteria, and rollback triggers.
 
@@ -23,13 +23,13 @@ Plans are self-contained execution blueprints that include task dependencies, ag
 - **Claude Code Agent Teams** — Planning uses Agent Teams (TeamCreate, SendMessage, TaskList) for specialist collaboration; execution uses Task subagents for isolated parallel work
 - **Agent Specialization** — Each task specifies role, expertise, model choice (opus/sonnet/haiku), approach, and context files
 - **Safety First** — Automatic assumption verification, acceptance criteria, and rollback triggers for every task
-- **Wave-Based Parallelism** — Tasks in the same wave execute concurrently unless they share files
+- **Dependency-Based Parallelism** — Tasks in the same batch execute concurrently unless they share files
 - **Retry Budget** — Each task gets 3 attempts with failure context passed to retries
 - **Cascading Failure Handling** — Failed/blocked tasks automatically skip dependent tasks
 - **Circuit Breaker** — Execution aborts if >50% of remaining tasks would be skipped
 - **Progressive Plan Trimming** — Completed tasks are stripped of verbose fields to reduce plan size as execution proceeds
-- **Git Checkpoints** — Each completed wave gets a commit for rollback capability
-- **Resume Support** — Partially completed plans can be resumed from the last wave
+- **Git Checkpoints** — Each completed batch gets a commit for rollback capability
+- **Resume Support** — Partially completed plans can be resumed from the last batch
 
 ## Installation
 
@@ -63,7 +63,7 @@ This spawns a planning team that analyzes your codebase from multiple angles, va
 /do:execute
 ```
 
-This reads `.design/plan.json`, creates a task list for progress tracking, and spawns Task subagents wave-by-wave. Subagents return results; the lead verifies acceptance criteria, handles retries (max 3), and commits per wave. Cascading failures and circuit breakers prevent runaway execution.
+This reads `.design/plan.json`, creates a task list for progress tracking, and spawns Task subagents in dependency-based batches. Subagents return results; the lead verifies acceptance criteria, handles retries (max 3), and commits per batch. Cascading failures and circuit breakers prevent runaway execution.
 
 ### Example Flow
 
@@ -84,7 +84,6 @@ cat .design/plan.json
 ## Requirements
 
 - **Claude Code** 1.0.33 or later
-- **Agent Teams** enabled (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` in settings) — required for /do:design
 - **sequential-thinking MCP server** — recommended for /do:design (has fallback to inline reasoning)
 
 ## How It Works
@@ -98,9 +97,9 @@ cat .design/plan.json
    - Two-tier fallback: retry with sequential subagents, then inline with context minimization
 
 2. **/do:execute** uses a thin-lead delegation architecture:
-   - Setup Subagent reads `.design/plan.json`, creates TaskList, computes file overlaps, assembles worker prompts into per-wave files (`.design/wave-{N}.json`)
-   - Workers self-read full instructions from wave files via bootstrap template, return COMPLETED/FAILED/BLOCKED
-   - Wave Processor reads worker logs, spot-checks files, runs acceptance criteria, writes results to `.design/processor-wave-{N}.json`
+   - Setup Subagent reads `.design/plan.json`, creates TaskList, computes file overlaps, assembles worker prompts (`.design/tasks.json`)
+   - Workers self-read full instructions via bootstrap template, return COMPLETED/FAILED/BLOCKED
+   - Batch Processor reads worker logs, spot-checks files, runs acceptance criteria, writes results to `.design/processor-batch-{N}.json`
    - Plan Updater reads processor output from file, applies results to `.design/plan.json`, performs progressive trimming
    - Lead only handles: worker spawning, git commits, circuit breaker, user interaction
    - All subagents have scoped minimal-mode fallbacks if they fail
