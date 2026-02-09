@@ -29,7 +29,6 @@ Execute a `.design/plan.json` using dependency-graph scheduling with Task subage
 
 ### Conventions
 
-- **Atomic write**: Write to `{path}.tmp`, then rename to `{path}`. All file outputs in this skill use this pattern.
 - **FINAL-line**: Every subagent's last line of output is its structured return value (JSON object, no markdown fencing). The lead parses only this line.
 
 ---
@@ -65,7 +64,7 @@ Task:
    - If found: parse JSON.
      - If schemaVersion is not 3: return JSON with error field set to schema_version and version set to the actual version number
      - If tasks array is empty: return JSON with error field set to empty_tasks
-     - Resume detection: if any task has status other than pending (e.g., completed, failed, blocked, skipped, in_progress), this is a resume. Reset any tasks with status in_progress back to pending (increment their attempts count). For each in_progress task being reset, clean up partial artifacts: revert uncommitted changes to metadata.files.modify files via git checkout -- {files} and delete partially created metadata.files.create files via rm -f {files}. For each completed task on resume, verify its metadata.files.create entries exist and its metadata.files.modify entries are committed. If verification fails, reset to pending. Write the updated plan back atomically to .design/plan.json.
+     - Resume detection: if any task has status other than pending (e.g., completed, failed, blocked, skipped, in_progress), this is a resume. Reset any tasks with status in_progress back to pending (increment their attempts count). For each in_progress task being reset, clean up partial artifacts: revert uncommitted changes to metadata.files.modify files via git checkout -- {files} and delete partially created metadata.files.create files via rm -f {files}. For each completed task on resume, verify its metadata.files.create entries exist and its metadata.files.modify entries are committed. If verification fails, reset to pending. Write the updated plan back to .design/plan.json.
    ```
 
 3. **Validation instructions**:
@@ -205,7 +204,7 @@ Task:
      }
    ]
 
-   Write atomically to `.design/tasks.json`.
+   Write to `.design/tasks.json`.
    ```
 
 8. **Output format instructions**:
@@ -336,7 +335,7 @@ The processor reads task metadata from the task file and detailed work output fr
 
    **Context efficiency**: Minimize text output. Write reasoning to .design/processor.log if needed. Target: under 100 tokens of non-JSON output.
 
-   Write detailed per-task results to .design/processor-batch-{round_number}.json atomically:
+   Write detailed per-task results to .design/processor-batch-{round_number}.json:
 
    [
      {"planIndex": 0, "status": "completed", "result": "Added auth middleware", "attempts": 1, "acceptancePassed": true},
@@ -374,7 +373,7 @@ Task:
 1. **Role and mission**:
 
    ```
-   You are a plan state updater. You read .design/plan.json, apply batch results, perform progressive trimming on completed tasks, compute cascading failures, and write the updated plan atomically. You are the ONLY agent that writes to .design/plan.json.
+   You are a plan state updater. You read .design/plan.json, apply batch results, perform progressive trimming on completed tasks, compute cascading failures, and write the updated plan. You are the ONLY agent that writes to .design/plan.json.
    ```
 
 2. **Input data section** — the lead assembles this:
@@ -423,7 +422,7 @@ Task:
 
    6. Compute cascading failure skip list: for tasks whose blockedBy includes any task with failed or blocked status (following transitive blockedBy chains), set their status to skipped and result to a message indicating which dependency caused the skip.
 
-   7. Write atomically to .design/plan.json.
+   7. Write to .design/plan.json.
 
    8. Compute circuit breaker evaluation:
       - Count all tasks still in pending status
@@ -592,7 +591,7 @@ The updater reads per-task results from `.design/processor-batch-{roundNumber}.j
 
 Parse the final line of the updater's return value as JSON.
 
-**Fallback (minimal mode)**: Read `.design/plan.json` and `.design/processor-batch-{roundNumber}.json`. For each task result: update status, result, and attempts fields. Write atomically. Skip progressive trimming and cascading failure computation — defer to next round's updater. Return `{"updated": true, "skipList": [], "circuitBreaker": {"shouldAbort": false}}`. Log: "Updater subagent failed — executing inline (minimal mode)."
+**Fallback (minimal mode)**: Read `.design/plan.json` and `.design/processor-batch-{roundNumber}.json`. For each task result: update status, result, and attempts fields. Write the updated plan. Skip progressive trimming and cascading failure computation — defer to next round's updater. Return `{"updated": true, "skipList": [], "circuitBreaker": {"shouldAbort": false}}`. Log: "Updater subagent failed — executing inline (minimal mode)."
 
 #### 3g. Update Tracking State
 

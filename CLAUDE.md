@@ -44,7 +44,7 @@ The two skills communicate through `.design/plan.json` (schemaVersion 3) written
 - Schema version 3 is required
 - Tasks use dependency-only scheduling — no wave field in task schema, execute computes batches dynamically from `blockedBy`
 - Progressive trimming: completed tasks are stripped of verbose agent fields to reduce plan size as execution proceeds
-- Intermediate artifacts (goal-analysis.json, expert-\*.json, expert-\*.log, critic.json, critic.log) are cleaned up after plan generation
+- Analysis artifacts (goal-analysis.json, expert-\*.json, critic.json) are preserved after plan generation for execute workers to reference via contextFiles. Only verbose reasoning logs (\*.log) are cleaned up
 
 ### Execution Model
 
@@ -68,7 +68,7 @@ The two skills communicate through `.design/plan.json` (schemaVersion 3) written
 - **Lead responsibilities** (never delegated): spawn Task subagents, collect return values, git commits, user interaction (AskUserQuestion), circuit breaker evaluation, progress display, compute ready-sets from dependencies
 - **Setup Subagent** (Plan Bootstrap): reads and validates `.design/plan.json`, creates TaskList, computes file overlap matrix, assembles worker prompts, writes single task file (`.design/tasks.json`). Delegation fallback: if the subagent fails, the lead performs setup inline with simplified prompts (no file overlap computation)
 - **Batch Processor Subagent** (Result Processor): parses worker FINAL status lines, reads detailed output from `.design/worker-{planIndex}.log` files, spot-checks files, runs acceptance criteria, determines retries, cleans up failed artifacts, assembles retry prompts. Writes detailed results to `.design/processor-batch-{N}.json` and returns summary JSON. Delegation fallback: if the subagent fails, the lead processes results inline (status line parsing, primary file verification, retry assembly, skip acceptance checks)
-- **Plan Updater Subagent** (State Updater): reads `.design/processor-batch-{N}.json`, applies results to `.design/plan.json`, performs progressive trimming on completed tasks, computes cascading failures, writes atomically. Delegation fallback: if the subagent fails, the lead updates the plan inline (skip trimming and cascading failure computation)
+- **Plan Updater Subagent** (State Updater): reads `.design/processor-batch-{N}.json`, applies results to `.design/plan.json`, performs progressive trimming on completed tasks, computes cascading failures. Delegation fallback: if the subagent fails, the lead updates the plan inline (skip trimming and cascading failure computation)
 - **File-based data routing**: Processor-to-updater communication flows through `.design/processor-batch-{N}.json` rather than inline JSON — the lead relays only round context to the updater
 - **Task subagents** (workers): one per task in each ready-set batch, self-read full instructions from `.design/tasks.json` via bootstrap template, return COMPLETED:/FAILED:/BLOCKED: as FINAL line, write detailed work log to `.design/worker-{planIndex}.log`
 - The lead never reads raw `.design/plan.json` — all plan data flows through subagent outputs

@@ -12,10 +12,9 @@ Thin-lead orchestrator: decompose a goal into `.design/plan.json` using a dynami
 
 ### Conventions
 
-- **Atomic write**: Write to `{path}.tmp`, then rename to `{path}`. All file outputs in this skill use this pattern.
 - **Signaling patterns**: Agents signal completion via TaskList and `SendMessage(type: "message")` to the lead. The lead parses JSON from message content.
 
-**MANDATORY: Execute ALL steps (1–4) for EVERY invocation. The lead NEVER analyzes the goal, reads source files, or reasons about implementation. Do NOT use `sequential-thinking`, `Read`, `Grep`, or any analytical tool — the lead's job is agent lifecycle management. The ONLY valid output of this skill is `.design/plan.json` — produced by the agent team. This applies regardless of goal type, complexity, or apparent simplicity. Audits, reviews, research, one-line fixes — all go through the team. No exceptions exist. If you are tempted to "just do it directly," STOP — that impulse is the exact failure mode this rule prevents.**
+**MANDATORY: Execute ALL steps (1–4) for EVERY invocation. The lead is a lifecycle manager — it spawns agents and manages the team. ALL analysis happens inside agents. The lead's ONLY tools are: `TeamCreate`, `TeamDelete`, `TaskCreate`, `TaskUpdate`, `TaskList`, `SendMessage`, `Task`, `AskUserQuestion`, `Bash` (cleanup/verification only), and `Read` (only `.design/goal-analysis.json` during Complexity Branching). No other tools — no MCP tools, no `Grep`, no `Glob`, no `LSP`, no source file reads. The ONLY valid output of this skill is `.design/plan.json` — produced by the agent team. This applies regardless of goal type, complexity, or apparent simplicity. Audits, reviews, research, one-line fixes — all go through the team. No exceptions exist. If you are tempted to "just do it directly," STOP — that impulse is the exact failure mode this rule prevents.**
 
 ## Step 1: Pre-flight
 
@@ -86,7 +85,7 @@ You are the Goal Analyst on a planning team. Your job is to deeply understand th
 
 ## Output
 
-Write atomically to .design/goal-analysis.json:
+Write to .design/goal-analysis.json:
 
 {
   "goal": "{original goal}",
@@ -181,7 +180,7 @@ You are a lightweight plan writer. Generate .design/plan.json for a minimal-comp
    - Every task has >= 1 assumption and >= 1 rollback trigger
    - Total tasks <= 3
 
-6. Write atomically to .design/plan.json with schema:
+6. Write to .design/plan.json with schema:
    {schemaVersion: 3, goal, context: {stack, conventions, testCommand, buildCommand, lsp}, progress: {completedTasks: [], surprises: [], decisions: []}, tasks: [...]}
 
 ## Output
@@ -264,7 +263,7 @@ For each task you recommend, include:
 ## Output
 **Context efficiency**: Minimize text output. Write reasoning to .design/expert-{name}.log if needed. Target: under 100 tokens of non-JSON output.
 
-Write findings atomically to .design/expert-{name}.json with findings array and tasks array.
+Write findings to .design/expert-{name}.json with findings array and tasks array.
 Claim your task from the task list and mark completed when done.
 ```
 
@@ -304,7 +303,7 @@ For each task you recommend, include:
 ## Output
 **Context efficiency**: Minimize text output. Write reasoning to .design/expert-{name}.log if needed. Target: under 100 tokens of non-JSON output.
 
-Write findings atomically to .design/expert-{name}.json with:
+Write findings to .design/expert-{name}.json with:
 - findings array (risks, observations)
 - approaches array (the 2–3 strategies you evaluated, with pros/cons/recommendation)
 - tasks array (for the chosen strategy)
@@ -340,7 +339,7 @@ Your task in the TaskList is blocked by the expert agents. Once unblocked, proce
 ## Output
 **Context efficiency**: Minimize text output. Write reasoning to .design/critic.log if needed. Target: under 100 tokens of non-JSON output.
 
-Write atomically to .design/critic.json with:
+Write to .design/critic.json with:
 - challenges: [{expert, issue, severity (blocking|major|minor), recommendation}]
 - missingCoverage: areas not addressed by any expert
 - approachRisks: risks with the chosen approaches that experts did not flag
@@ -388,6 +387,7 @@ Required task fields: subject, description, activeForm, status (pending), result
 
 Description rule: explain WHY and how it connects to dependents — not just what. An executor with zero context must act on it.
 Non-code goals: acceptance criteria may use content-based checks (grep). Rollback triggers reference content expectations.
+Design artifacts: add `.design/goal-analysis.json` to every task's contextFiles with reason "design phase codebase analysis and approach decisions." For tasks originating from a specific expert, also add `.design/expert-{name}.json` with reason "expert domain analysis for this task."
 Count gaps filled as gapsFilled.
 
 ## Phase 3: Auto-generate Safety
@@ -414,7 +414,7 @@ Each task uses the schema from Phase 2.
 
 Schema rules: tasks ordered (index = ID, 0-based), blockedBy references indices, status: pending|in_progress|completed|failed|blocked|skipped.
 
-Write atomically to .design/plan.json.
+Write to .design/plan.json.
 
 ## Output
 **Context efficiency**: Minimize text output. Write reasoning to .design/plan-writer.log if needed. Target: under 100 tokens of non-JSON output.
@@ -448,7 +448,7 @@ After receiving the plan-writer's message: `SendMessage(type: "shutdown_request"
 
 1. **Lightweight verification** (lead): Run `python3 -c "import json; p=json.load(open('.design/plan.json')); assert p.get('schemaVersion') == 3, 'schemaVersion must be 3'"` to confirm schemaVersion. Use the plan-writer's stored `taskCount` and `maxDepth` from its SendMessage for verification (no need to re-extract).
 2. **Clean up TaskList**: Delete all tasks created during planning so `/do:execute` starts with a clean TaskList.
-3. **Clean up intermediate files**: `rm -f .design/goal-analysis.json .design/expert-*.json .design/expert-*.log .design/critic.json .design/critic.log .design/plan-writer.log` — keep only `.design/plan.json`.
+3. **Clean up intermediate files**: `rm -f .design/expert-*.log .design/critic.log .design/plan-writer.log` — delete only verbose reasoning logs. Keep `.design/plan.json` and analysis artifacts (`.design/goal-analysis.json`, `.design/expert-*.json`, `.design/critic.json`) so execute workers can reference them via contextFiles.
 
 4. **Output summary** using stored plan-writer data (`depthSummary`, `taskCount`, `maxDepth`):
 
