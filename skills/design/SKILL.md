@@ -6,78 +6,119 @@ argument-hint: "<goal description>"
 
 # Design
 
-Thin-lead orchestrator: decompose a goal into `.design/plan.json` using a team of specialist agents. The lead orchestrates — all codebase analysis, implementation reasoning, and synthesis happens inside the Agent Team (Step 3). The ONE exception: the lead uses `sequential-thinking` in Step 1 for conceptual goal understanding (no file reads, no commands — pure reasoning). Files carry data between pipeline stages — the lead never holds expert analyses or synthesis output (except during fallback recovery). **This skill only designs — it does NOT execute.**
+Thin-lead orchestrator: decompose a goal into `.design/plan.json` using a dynamically growing team of specialist agents. The lead is purely mechanical — it spawns agents, relays messages, and manages team lifecycle. ALL analytical work (goal understanding, codebase exploration, domain analysis, synthesis, plan writing) happens inside agents. **This skill only designs — it does NOT execute.**
 
 **Do NOT use EnterPlanMode — this skill IS the plan.**
 
 ### Conventions
 
 - **Atomic write**: Write to `{path}.tmp`, then rename to `{path}`. All file outputs in this skill use this pattern.
-- **Signaling patterns**: Expert teammates signal completion via TaskList (the lead does not parse their output). Plan-writer sends its structured return value (JSON) to the lead via `SendMessage(type: "message")`.
+- **Signaling patterns**: Agents signal completion via TaskList and `SendMessage(type: "message")` to the lead. The lead parses JSON from message content.
 
-**MANDATORY: Execute ALL steps (1–4) for EVERY invocation. Never skip steps, never answer the goal directly, never produce findings or analysis inline. Do NOT use `Read`, `Grep`, or any codebase tool to reason about the goal before Step 3. The lead uses `sequential-thinking` in Step 1 for conceptual reasoning ONLY — no file reads, no commands. The ONLY valid output of this skill is `.design/plan.json` — produced by the full pipeline including the Agent Team (Step 3). This applies regardless of goal type, complexity, or apparent simplicity. Audits, reviews, research, one-line fixes — all go through the team. No exceptions exist. If you are tempted to "just do it directly," STOP — that impulse is the exact failure mode this rule prevents.**
+**MANDATORY: Execute ALL steps (1–4) for EVERY invocation. The lead NEVER analyzes the goal, reads source files, or reasons about implementation. Do NOT use `sequential-thinking`, `Read`, `Grep`, or any analytical tool — the lead's job is agent lifecycle management. The ONLY valid output of this skill is `.design/plan.json` — produced by the agent team. This applies regardless of goal type, complexity, or apparent simplicity. Audits, reviews, research, one-line fixes — all go through the team. No exceptions exist. If you are tempted to "just do it directly," STOP — that impulse is the exact failure mode this rule prevents.**
 
-## Step 1: Goal Understanding + Pre-flight
+## Step 1: Pre-flight
 
-Use `mcp__sequential-thinking__sequentialthinking` to deeply understand the goal before composing the team. This is conceptual reasoning only — do NOT read files, run commands, or touch the codebase. The thinking should cover:
+1. Use `AskUserQuestion` to clarify only when reasonable developers would choose differently and the codebase doesn't answer it: scope boundaries, done-state, technical preferences, compatibility, priority.
+2. If >12 tasks likely needed, suggest phases. Design only phase 1.
+3. Check for existing `.design/plan.json`. If it exists with `progress.currentWave > 0` or any non-pending task statuses, use `AskUserQuestion` to confirm overwrite — execution may be in progress. Record `overwriteApproved` flag.
+4. Clean up stale staging: `rm -rf .design/ && mkdir -p .design/`
 
-1. **Problem decomposition** — What are the real sub-problems? Is the stated goal the actual goal, or is there a deeper problem?
-2. **Concept mapping** — What known patterns, frameworks, or well-known approaches does this map to? (e.g., "add auth" → OAuth2/JWT/session; "add caching" → Redis/in-memory/HTTP-cache; "refactor X" → strangler fig/branch by abstraction)
-3. **Prior art hints** — What should experts look for in the codebase or ecosystem? Existing libraries, similar implementations, framework conventions that already solve parts of this.
-4. **Domain identification** — Which domains does this actually touch? (feeds directly into Step 2)
-5. **Scope refinement** — Is this simpler or more complex than stated? Any hidden dependencies or gotchas?
-6. **Clarification needs** — Are there genuine ambiguities where reasonable developers would choose differently?
+## Step 2: Team + Goal Analyst
 
-Use multiple sequential-thinking rounds as needed. Fallback: if `sequential-thinking` is unavailable, perform the same reasoning inline with numbered steps (max 8 sentences total).
-
-Write the structured output atomically to `.design/goal-analysis.json`:
-
-```json
-{
-  "goal": "{original goal}",
-  "refinedGoal": "{restated goal if different from original, otherwise same}",
-  "concepts": ["pattern/framework/approach names"],
-  "priorArtHints": ["what to look for in codebase or ecosystem"],
-  "domains": ["backend", "security", "testing"],
-  "subProblems": ["decomposed sub-problems"],
-  "scopeNotes": "any refinements or hidden complexity",
-  "clarifications": ["questions for user, if any"]
-}
-```
-
-Then:
-
-1. If `clarifications` is non-empty, use `AskUserQuestion` to resolve them.
-2. **Reframe analytical goals**: If the goal is an audit, review, or analysis, reframe it into concrete executable tasks. The output is always a plan.json that `/do:execute` can act on.
-3. If >12 tasks likely needed, suggest phases. Design only phase 1.
-4. Check for existing `.design/plan.json`. If it exists with `progress.currentWave > 0` or any non-pending task statuses, use `AskUserQuestion` to confirm overwrite — execution may be in progress. Record `overwriteApproved` flag.
-5. Clean up stale staging: `rm -rf .design/ && mkdir -p .design/` — then re-write `.design/goal-analysis.json` (since cleanup removes it).
-
-## Step 2: Team Composition
-
-Map the domains and concepts from `.design/goal-analysis.json` to specialist roles. The goal analysis has already identified domains, concepts, and prior art — team composition is now a focused mapping exercise.
-
-1. Read the `domains` and `concepts` from the goal analysis.
-2. Pick 2–5 roles to cover those domains. Examples: system-architect, API-designer, frontend-specialist, backend-engineer, test-strategist, security-analyst, devops-engineer, online-researcher, prompt-engineer, codebase-archaeologist. Invent roles as needed. Each expert gathers its own context — no separate scanner role needed.
-3. Drop any role whose mandate overlaps >70% with another.
-4. Enrich each expert's mandate with relevant concepts and prior art hints from the goal analysis.
-
-**Models**: `opus` for architecture/analysis, `sonnet` for implementation planning, `haiku` for verification-only.
-
-For each agent define: name, role, model, one-line mandate (enriched with relevant concepts/prior-art from goal analysis).
-
-## Step 3: Agent Team
-
-Spawn a single Agent Team containing experts and a plan-writer. Pipeline ordering via TaskList: plan-writer blockedBy all experts. The lead waits for one `SendMessage` from the plan-writer containing the result JSON.
+Create the team and spawn a goal analyst as the first teammate. The analyst deeply understands the goal, explores the codebase, and recommends the expert team composition.
 
 1. Attempt cleanup of any stale team: `TeamDelete(team_name: "do-design")` (ignore errors)
 2. `TeamCreate(team_name: "do-design")`
-3. Create TaskList entries with dependencies:
-   - For each expert agent from Step 2: `TaskCreate` with mandate as subject
+3. `TaskCreate` for the goal analyst (subject: "Analyze goal and recommend team composition")
+4. Spawn the goal analyst:
+
+```
+Task:
+  subagent_type: "general-purpose"
+  team_name: "do-design"
+  name: "analyst"
+  model: opus
+  prompt: <analyst prompt below>
+```
+
+**Goal analyst prompt** — fill `{goal}`:
+
+```
+You are the Goal Analyst on a planning team. Your job is to deeply understand the goal, explore the codebase, and recommend what expert team should be spawned to design the plan.
+
+**Goal**: {goal}
+
+## Instructions
+
+1. Use mcp__sequential-thinking__sequentialthinking (if available, otherwise inline numbered reasoning) to decompose the goal:
+   - What are the real sub-problems? Is the stated goal the actual goal?
+   - What known patterns, frameworks, or approaches does this map to?
+   - What prior art exists in the codebase or ecosystem?
+   - Is this simpler or more complex than stated?
+
+2. Explore the codebase for context:
+   - Read package.json / pyproject.toml / Cargo.toml / go.mod — identify stack, frameworks, build/test commands
+   - Read CLAUDE.md, linter/formatter configs — extract conventions
+   - Grep/Glob for modules, files, and patterns the goal touches
+   - LSP(documentSymbol) on a key source file if available
+   - Identify existing patterns relevant to the goal
+
+3. Based on your understanding, recommend 2–5 expert roles to cover the goal's domains. For each expert:
+   - name, role, model (opus for architecture/analysis, sonnet for implementation, haiku for verification)
+   - one-line mandate enriched with specific concepts and prior art you found
+   - what they should focus on that you didn't fully resolve
+
+## Output
+
+Write atomically to .design/goal-analysis.json:
+
+{
+  "goal": "{original goal}",
+  "refinedGoal": "{restated if different}",
+  "concepts": ["pattern/framework/approach names found"],
+  "priorArt": ["actual findings from codebase — libraries, patterns, existing code"],
+  "codebaseContext": {
+    "stack": "...",
+    "conventions": "...",
+    "testCommand": "...",
+    "buildCommand": "...",
+    "lsp": {"available": []},
+    "relevantModules": [],
+    "existingPatterns": []
+  },
+  "subProblems": ["decomposed sub-problems"],
+  "scopeNotes": "refinements or hidden complexity",
+  "recommendedTeam": [
+    {"name": "...", "role": "...", "model": "opus|sonnet|haiku", "mandate": "..."}
+  ]
+}
+
+Claim your task from the task list and mark completed when done.
+
+Read ~/.claude/teams/do-design/config.json to discover the team lead's name. Send your result to the lead using SendMessage:
+
+    type:      message
+    recipient: {lead-name}
+    content:   ANALYST_COMPLETE
+    summary:   Goal analysis complete
+```
+
+**Lead waits** for the analyst's `SendMessage`. Once received, proceed to Step 3.
+
+**Fallback**: If the analyst fails to produce `.design/goal-analysis.json`, the lead performs minimal inline analysis: read package.json for stack, identify 2–3 obvious domains from the goal text, compose a default team. Log: "Analyst failed — using minimal team composition."
+
+## Step 3: Grow Team with Experts + Plan-Writer
+
+Read `.design/goal-analysis.json` to get the analyst's recommended team. Then grow the existing team by spawning experts and a plan-writer.
+
+1. Read `.design/goal-analysis.json` — extract `recommendedTeam` array.
+2. Create TaskList entries with dependencies:
+   - For each recommended expert: `TaskCreate` with mandate as subject
    - `TaskCreate` for plan-writer (subject: "Merge expert analyses, validate, and write plan.json")
    - Wire dependencies via `TaskUpdate(addBlockedBy)`: plan-writer blockedBy all expert task IDs
-4. Spawn all agents in parallel via `Task(subagent_type: "general-purpose", team_name: "do-design", name: "{name}", model: "{model}")`:
-   - All expert agents from Step 2
+3. Spawn all new agents in parallel via `Task(subagent_type: "general-purpose", team_name: "do-design", name: "{name}", model: "{model}")`:
+   - All expert agents from the recommendation
    - `plan-writer` (model: `opus`)
 
 **Expert bootstrap prompt** — fill `{goal}`, `{name}`, `{role}`, `{mandate}`:
@@ -90,13 +131,13 @@ You are a {role} on a planning team.
 **Your mandate**: {mandate}
 
 ## Context
-Read .design/goal-analysis.json for goal decomposition, concept mapping, prior art hints, and scope notes. Use this to focus your analysis — don't rediscover what's already been identified.
+Read .design/goal-analysis.json for goal decomposition, codebase context, concept mapping, prior art, and scope notes. Use this to focus your analysis — the goal analyst has already explored the codebase and identified key patterns.
 
 ## Instructions
 
 1. Analyze the goal through your domain lens — ensure MECE coverage within your mandate.
-2. Gather the context you need: read relevant source files, configs, project structure, CLAUDE.md — whatever your domain requires. Use LSP (documentSymbol, goToDefinition) when available. Use WebSearch/WebFetch if external research is needed.
-3. Follow up on prior art hints relevant to your domain — check if suggested libraries, patterns, or existing code actually exist and apply.
+2. Gather additional context you need beyond what the analyst found: read specific source files, use LSP (documentSymbol, goToDefinition) when available, use WebSearch/WebFetch if external research is needed.
+3. Follow up on prior art relevant to your domain — verify the analyst's findings and dig deeper where needed.
 4. Produce findings (risks, observations) and task recommendations.
 
 ## Task Recommendations
@@ -128,8 +169,8 @@ Your task in the TaskList is blocked by the expert agents. Once unblocked, proce
 
 ## Phase 1: Context & Merge
 
-1. Read .design/goal-analysis.json for goal decomposition, concepts, and prior art hints.
-2. Scan the codebase for project context: read package.json / pyproject.toml / Cargo.toml / go.mod for stack info, CLAUDE.md for conventions, linter/formatter configs. Build a context object: {stack, conventions, testCommand, buildCommand, lsp: {available: []}}. If LSP is available (try documentSymbol on a key source file), record it.
+1. Read .design/goal-analysis.json for goal decomposition, codebase context, concepts, and prior art.
+2. Use the codebaseContext from goal-analysis.json as the basis for plan.json's context field. Supplement with additional scans if needed (package.json, CLAUDE.md, linter configs).
 3. Glob .design/expert-*.json and read each expert analysis.
 4. Merge expert task recommendations:
    - Where experts converge, increase confidence

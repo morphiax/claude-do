@@ -49,14 +49,14 @@ The two skills communicate through `.design/plan.json` (schemaVersion 2) written
 
 `/do:design` uses a thin-lead delegation architecture for context-efficient planning:
 
-- **Lead responsibilities** (never delegated): goal understanding (sequential thinking), pre-flight, team composition, team spawning (TeamCreate, SendMessage, shutdown), lightweight verification, summary output
-- **Pipeline**: goal understanding → team composition → experts → plan-writer (4 steps total). Files carry data between stages via `.design/` directory
-- **Sequential thinking in Step 1**: The lead uses `sequential-thinking` for conceptual goal reasoning (no file reads, no commands) — decomposing the goal, mapping to known patterns/frameworks, identifying prior art hints, and refining scope. Output written to `.design/goal-analysis.json` and consumed by experts and plan-writer.
-- **No separate context scan**: experts gather their own context (source files, configs, web research) as part of their domain analysis, guided by prior art hints from the goal analysis
-- **Domain-driven team composition**: informed by goal analysis domains and concepts, maps to 2–5 specialist roles with enriched mandates. Roles are invented as the goal demands (system-architect, codebase-archaeologist, online-researcher, etc.)
-- **Unified expert-to-plan team**: A single Agent Team contains domain experts and a plan-writer. Pipeline ordering is enforced via TaskList dependencies (plan-writer blockedBy all experts). Expert agents receive self-contained prompts with goal + mandate inline. The plan-writer merges expert analyses, validates, enriches, extracts codebase context, and writes plan.json. The lead waits for one SendMessage from the plan-writer containing the result JSON.
+- **Lead responsibilities** (never delegated): pre-flight, team lifecycle (TeamCreate, SendMessage, shutdown), reading analyst's team recommendation, spawning experts, lightweight verification, summary output. The lead NEVER analyzes the goal or reads source files.
+- **Dynamically growing team**: The team starts with a single goal analyst, then grows with experts and a plan-writer based on the analyst's recommendation. One team (`do-design`), dynamic membership.
+- **Pipeline**: pre-flight → analyst → experts → plan-writer (4 steps total). Files carry data between stages via `.design/` directory.
+- **Goal analyst** (Step 2): First teammate spawned. Uses `sequential-thinking` MCP (if available) + codebase exploration to deeply understand the goal, map to known concepts/frameworks, find prior art, and recommend 2–5 expert roles with enriched mandates. Writes `.design/goal-analysis.json` including `codebaseContext` and `recommendedTeam`.
+- **Expert agents** (Step 3): Spawned based on analyst's recommendation. Read `.design/goal-analysis.json` for context, then do focused domain analysis. Each writes `.design/expert-{name}.json`.
+- **Plan-writer** (Step 3): blockedBy all experts. Merges expert analyses, validates, enriches, uses analyst's `codebaseContext` for plan.json's context field. Writes `.design/plan.json`.
 - **Two-tier fallback**: If the team fails to produce `.design/plan.json` (1) retry with a single plan-writer Task subagent, or (2) perform merge and plan writing inline with context minimization (process expert files one at a time)
-- The lead never reads raw expert analyses — data flows through file-based artifacts
+- The lead never reads raw expert analyses — data flows through file-based artifacts. The ONE file the lead reads is `.design/goal-analysis.json` (for the `recommendedTeam` array only).
 
 `/do:execute` uses a thin-lead delegation architecture:
 
@@ -77,7 +77,7 @@ The two skills communicate through `.design/plan.json` (schemaVersion 2) written
 
 - Claude Code 1.0.33+
 - Agent Teams enabled (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`) — required for `/do:design` only
-- `sequential-thinking` MCP server — used in `/do:design` Step 1 for goal understanding (fallback to inline reasoning if unavailable)
+- `sequential-thinking` MCP server — used by the goal analyst for deep goal reasoning (fallback to inline reasoning if unavailable)
 
 ## Commit Conventions
 
