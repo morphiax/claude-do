@@ -209,7 +209,7 @@ Self-repair: fix and re-validate. After 2 attempts, include in validationIssues 
 
 ## Phase 5: Write .design/plan.json
 
-Schema (schemaVersion 2): {schemaVersion: 2, goal, context: {stack, conventions, testCommand, buildCommand, lsp}, progress: {completedTasks: [], surprises: [], decisions: []}, tasks: [...]}
+Schema (schemaVersion 3): {schemaVersion: 3, goal, context: {stack, conventions, testCommand, buildCommand, lsp}, progress: {completedTasks: [], surprises: [], decisions: []}, tasks: [...]}
 Each task uses the schema from Phase 2.
 
 Schema rules: tasks ordered (index = ID, 0-based), blockedBy references indices, status: pending|in_progress|completed|failed|blocked|skipped.
@@ -246,7 +246,7 @@ After receiving the plan-writer's message: `SendMessage(type: "shutdown_request"
 
 ## Step 4: Cleanup & Summary
 
-1. **Lightweight verification** (lead): Run `python3 -c "import json; p=json.load(open('.design/plan.json')); assert p.get('schemaVersion') == 2, 'schemaVersion must be 2'"` to confirm schemaVersion. Use the plan-writer's stored `taskCount` and `maxDepth` from its SendMessage for verification (no need to re-extract).
+1. **Lightweight verification** (lead): Run `python3 -c "import json; p=json.load(open('.design/plan.json')); assert p.get('schemaVersion') == 3, 'schemaVersion must be 3'"` to confirm schemaVersion. Use the plan-writer's stored `taskCount` and `maxDepth` from its SendMessage for verification (no need to re-extract).
 2. **Clean up TaskList**: Delete all tasks created during planning so `/do:execute` starts with a clean TaskList.
 3. **Clean up intermediate files**: `rm -f .design/goal-analysis.json .design/expert-*.json .design/expert-*.log .design/plan-writer.log` — keep only `.design/plan.json`.
 

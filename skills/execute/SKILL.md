@@ -63,7 +63,7 @@ Task:
 
    - If not found: return JSON with error field set to no_plan
    - If found: parse JSON.
-     - If schemaVersion is not 2: return JSON with error field set to schema_version and version set to the actual version number
+     - If schemaVersion is not 3: return JSON with error field set to schema_version and version set to the actual version number
      - If tasks array is empty: return JSON with error field set to empty_tasks
      - Resume detection: if any task has status other than pending (e.g., completed, failed, blocked, skipped, in_progress), this is a resume. Reset any tasks with status in_progress back to pending (increment their attempts count). For each in_progress task being reset, clean up partial artifacts: revert uncommitted changes to metadata.files.modify files via git checkout -- {files} and delete partially created metadata.files.create files via rm -f {files}. For each completed task on resume, verify its metadata.files.create entries exist and its metadata.files.modify entries are committed. If verification fails, reset to pending. Write the updated plan back atomically to .design/plan.json.
    ```
@@ -463,7 +463,7 @@ Spawn the Setup Subagent using the prompt template from Section A.
 
 Parse the final line of the subagent's return value as JSON.
 
-**Fallback (minimal mode)**: Read `.design/plan.json`, validate schemaVersion is 2, create TaskList entries with dependencies. Write `.design/tasks.json` with simplified prompts — skip file overlap computation (set `fileOverlaps` to empty arrays). Include in each prompt: role, task context, acceptance criteria, and FINAL-line format. Return a setup JSON with `fileOverlapMatrix` set to `{}`. Log: "Setup subagent failed — executing inline (minimal mode)."
+**Fallback (minimal mode)**: Read `.design/plan.json`, validate schemaVersion is 3, create TaskList entries with dependencies. Write `.design/tasks.json` with simplified prompts — skip file overlap computation (set `fileOverlaps` to empty arrays). Include in each prompt: role, task context, acceptance criteria, and FINAL-line format. Return a setup JSON with `fileOverlapMatrix` set to `{}`. Log: "Setup subagent failed — executing inline (minimal mode)."
 
 **Error handling from setup output**:
 
