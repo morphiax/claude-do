@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Initial release of the `do` plugin for Claude Code
-- `/do:plan` skill for structured goal decomposition with enriched agent specifications
+- `/do:design` skill for structured goal decomposition with enriched agent specifications
 - `/do:execute` skill for wave-based execution with parallel agents and safety features
 - Marketplace support via `.claude-plugin/marketplace.json`
 - Full documentation (README, CONTRIBUTING, LICENSE)

@@ -23,7 +23,7 @@ Before submitting a PR, test your changes locally:
 claude --plugin-dir /path/to/your/fork/claude-do
 
 # Then try the skills
-/do:plan <some goal>
+/do:design <some goal>
 /do:execute
 ```
 
@@ -42,7 +42,7 @@ Do NOT use past tense (Added, Fixed, etc.) - use imperative present (Add, Fix, e
 
 ### Skill Modifications
 
-When modifying skill files (`skills/plan/SKILL.md` or `skills/execute/SKILL.md`):
+When modifying skill files (`skills/design/SKILL.md` or `skills/execute/SKILL.md`):
 
 - Preserve the YAML frontmatter (name, description, argument-hint)
 - Test the full workflow (plan generation and execution)

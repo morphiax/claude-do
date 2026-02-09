@@ -1,7 +1,7 @@
 {
   "name": "do",
   "version": "1.0.0",
-  "description": "Structured planning and wave-based execution for Claude Code — /do:plan and /do:execute",
+  "description": "Structured planning and wave-based execution for Claude Code — /do:design and /do:execute",
   "author": {
     "name": "morphiax",
     "url": "https://github.com/morphiax"
