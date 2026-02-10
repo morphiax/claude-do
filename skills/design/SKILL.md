@@ -123,7 +123,9 @@ You are a lightweight plan writer. Generate .design/plan.json for a minimal-comp
 2. Generate 1–3 tasks from the recommended approach. Each task needs: subject, description (explain WHY and connection to dependents), activeForm, status (pending), result (null), attempts (0), blockedBy (array of indices), metadata: {type, files: {create:[], modify:[]}, reads}, agent: {role, model (opus/sonnet/haiku), approach, contextFiles [{path, reason}], assumptions [{claim, verify (shell cmd), severity: blocking|warning}], acceptanceCriteria [{criterion, check (shell cmd)}], rollbackTriggers ["If X, STOP and return BLOCKED: reason"], constraints}.
 3. Auto-generate safety: for each modify path add blocking assumption `test -f {path}`, convert blocking assumptions to rollback triggers.
 4. Validate: tasks >= 1, no concurrent file conflicts, all blockedBy valid (no cycles), every task has >= 1 assumption and >= 1 rollback trigger, total <= 3.
-5. Write .design/plan.json: {schemaVersion: 3, goal, context: {stack, conventions, testCommand, buildCommand, lsp}, progress: {completedTasks: [], surprises: [], decisions: []}, tasks: [...]}
+5. Assemble worker prompts: for each task, build a prompt string using sections S1-S9: S1 (role + expertise), S2 (pre-flight assumptions checklist), S3 (context files + project info), S4 (task subject + description + files), S5 (approach/priorArt/fallback if any), S6 (dependency placeholder if blockedBy non-empty), S7 (rollback triggers), S8 (acceptance criteria + no-commit rule), S9 (worker log path `.design/worker-{planIndex}.log` + FINAL line format: COMPLETED:/FAILED:/BLOCKED:). Store in each task's `prompt` field.
+6. Compute file overlaps: for each pair of tasks that can run concurrently (neither transitively depends on the other), check for intersecting files in metadata.files.create and metadata.files.modify. Store in each task's `fileOverlaps` field (array of conflicting planIndex integers; empty if none).
+7. Write .design/plan.json: {schemaVersion: 3, goal, context: {stack, conventions, testCommand, buildCommand, lsp}, progress: {completedTasks: [], surprises: [], decisions: []}, tasks: [...]} — each task includes `prompt` and `fileOverlaps` fields.
 
 ## Output
 
@@ -277,9 +279,55 @@ For each task, verify all required fields and fill gaps:
 1. Tasks >= 1. 2. No concurrent file conflicts (create/modify). 3. No read/write overlaps between concurrent tasks. 4. All blockedBy valid, no cycles. 5. Every task has >= 1 assumption and >= 1 rollback trigger. 6. Total tasks <= 12. 7. Critical path <= 4 (restructure for parallelism if exceeded).
 Self-repair: fix and re-validate. After 2 attempts, include in validationIssues and proceed.
 
-## Phase 5: Write .design/plan.json
+## Phase 5: Assemble Worker Prompts
+
+For each task, concatenate sections S1-S9. Include conditional sections only when referenced field is non-empty.
+
+**S1: Role** [always] `You are a {agent.role}` + ` with expertise in {agent.expertise}` [if exists]
+
+**S2: Pre-flight** [always] `## Pre-flight` / `Verify before starting. If BLOCKING check fails, return BLOCKED: followed by the reason.` + agent.assumptions as checklist: `- [ ] [{severity}] {claim}: \`{verify}\``
+
+**S3: Context** [always] `## Context` / `Read before implementing:` + agent.contextFiles as `- {path} — {reason}` + `Project: {context.stack}. Conventions: {context.conventions}.` + `Test: {context.testCommand}` [if exists] + `Use LSP (goToDefinition, findReferences, hover) over Grep for {context.lsp.available}.` [if exists] + `Use WebSearch/WebFetch for current information. Prefer web tools over assumptions when external facts are needed.` [if metadata.type = research]
+
+**S4: Task** [always] `## Task: {task.subject}` / `{task.description}` / `Files to create: {metadata.files.create or "(none)"}` / `Files to modify: {metadata.files.modify or "(none)"}` + agent.constraints as bullets under `Constraints:`
+
+**S5: Strategy** [if any exists] `Approach: {agent.approach}` [if exists] / `Apply: {agent.priorArt}` [if exists] / `Fallback: {agent.fallback}` [if exists]
+
+**S6: Dependency placeholder** [if task.blockedBy non-empty] Emit: `[Dependency results — deferred: lead appends actual results at spawn time]`
+
+**S7: Rollback** [always] `Rollback triggers — STOP immediately if any occur:` + agent.rollbackTriggers as bullets
+
+**S8: Acceptance** [always] `## After implementing` / `1. Verify acceptance criteria:` + agent.acceptanceCriteria as `- [ ] {criterion}: \`{check}\`` + `   Fix failures before proceeding.` / `2. Do NOT stage or commit — the lead handles git after the batch completes.`
+
+**S9: Output format** [always] Emit verbatim (substitute {planIndex}):
+   ## After implementing (continued)
+   3. Write your full work log (reasoning, commands run, decisions made, issues encountered) to `.design/worker-{planIndex}.log` using the Write tool. This log is consumed by the result processor — include enough detail for verification.
+
+   ## Output format
+   The FINAL line of your output MUST be one of:
+   - COMPLETED: {one-line summary}
+   - FAILED: {one-line reason}
+   - BLOCKED: {reason}
+
+   Return ONLY the status line as your final output. All detailed work output goes in the log file above.
+
+   Example valid outputs:
+   ...writing log.\nCOMPLETED: Added user authentication middleware with JWT
+   ...writing log.\nBLOCKED: Required package pg not installed
+
+Store the assembled prompt string in each task's `prompt` field.
+
+## Phase 6: Compute File Overlap Matrix
+
+Build a global concurrency-aware file overlap matrix. Two tasks can run concurrently if neither transitively depends on the other through blockedBy chains.
+
+For each pair of tasks that can run concurrently, build a set of all file paths from each task's metadata.files.create and metadata.files.modify. Check for intersections between the two tasks' file sets. Record which task indices conflict.
+
+The result is a mapping from each planIndex to an array of other planIndices that have file conflicts AND can run concurrently with it. Store in each task's `fileOverlaps` field (array of planIndex integers; empty array if no conflicts).
+
+## Phase 7: Write .design/plan.json
 Schema (schemaVersion 3): {schemaVersion: 3, goal, context: {stack, conventions, testCommand, buildCommand, lsp}, progress: {completedTasks: [], surprises: [], decisions: []}, tasks: [...]}
-Each task uses the schema from Phase 2. Tasks ordered (index = ID, 0-based), blockedBy references indices, status: pending|in_progress|completed|failed|blocked|skipped.
+Each task uses the schema from Phase 2 plus: `prompt` (assembled worker prompt from Phase 5), `fileOverlaps` (array of conflicting planIndex integers from Phase 6). Tasks ordered (index = ID, 0-based), blockedBy references indices, status: pending|in_progress|completed|failed|blocked|skipped. Note: execute will strip `prompt` from completed tasks during progressive trimming to reduce plan size.
 
 ## Output
 Claim your task and mark completed. Read ~/.claude/teams/do-design/config.json for the lead's name, then:
