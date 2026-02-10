@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-`claude-do` is a Claude Code plugin providing two skills: `/do:design` (team-based goal decomposition into `.design/plan.json`) and `/do:execute` (dependency-graph execution with task subagents). It leverages Claude Code's native Agent Teams and Tasks features for multi-agent collaboration. It is a documentation-only plugin — no source code, no build step, no dependencies.
+`claude-do` is a Claude Code plugin providing two skills: `/do:design` (team-based goal decomposition into `.design/plan.json`) and `/do:execute` (dependency-graph execution with task subagents). It leverages Claude Code's native Agent Teams and Tasks features for multi-agent collaboration. Skills are implemented as SKILL.md prompts augmented with python3 helper scripts for deterministic operations.
 
 ## Testing
 
@@ -28,13 +28,24 @@ Both skills must be tested end-to-end. A change to one skill may affect the othe
 - `.claude-plugin/plugin.json` — Plugin manifest (name, version, metadata)
 - `.claude-plugin/marketplace.json` — Marketplace distribution config
 - `skills/design/SKILL.md` — `/do:design` skill definition
+- `skills/design/scripts/plan.py` — Design helper script (5 commands: validate, status-counts, summary, extract-fields, model-distribution)
 - `skills/execute/SKILL.md` — `/do:execute` skill definition
+- `skills/execute/scripts/plan.py` — Execute helper script (17 commands: 12 query, 2 mutation, 3 build)
 
 ### Skill Files Are the Implementation
 
-The SKILL.md files are imperative prompts that Claude interprets at runtime. They contain the entire logic: there is no backing source code. Changes to behavior mean editing these markdown files.
+The SKILL.md files are imperative prompts that Claude interprets at runtime. Deterministic operations (validation, dependency computation, plan manipulation) are delegated to per-skill python3 helper scripts. Each skill resolves its local `scripts/plan.py` path at runtime and invokes subcommands via `python3 $PLAN_CLI <command> [args]`. All script output follows JSON convention (`{ok: true/false, ...}`).
 
 Each SKILL.md has YAML frontmatter (`name`, `description`, `argument-hint`) that must be preserved.
+
+### Scripts
+
+Each skill has its own `scripts/plan.py` with argparse subcommands for deterministic operations:
+
+- **Design** (5 commands): validate, status-counts, summary, extract-fields, model-distribution. Plus 3 build commands: validate-structure, assemble-prompts, compute-overlaps.
+- **Execute** (17 commands): All design commands, plus overlap-matrix, tasklist-data, ready-set, extract-task, resume-reset, update-status, retry-candidates, collect-files, circuit-breaker. Execute includes mutation commands (resume-reset, update-status) that atomically modify plan.json and a prefilter command (extract-task) that writes per-worker `.design/worker-task-{N}.json` files to reduce context window usage.
+
+Scripts use python3 stdlib only (no dependencies), support Python 3.8+, and follow a consistent CLI pattern: `python3 plan.py <command> [plan_path] [options]`. All output is JSON to stdout with exit code 0 for success, 1 for errors.
 
 ### Data Contract: .design/plan.json
 
@@ -67,9 +78,8 @@ The two skills communicate through `.design/plan.json` (schemaVersion 3) written
 
 `/do:execute` uses a thin-lead delegation architecture:
 
-- **Lead responsibilities**: spawn Task subagents, collect return values, verify results (batched spot-checks + acceptance criteria), update `.design/plan.json` (status, trimming, cascading failures), git commits, user interaction (AskUserQuestion), circuit breaker evaluation, compute ready-sets from dependencies, assemble retry prompts
-- **Setup Subagent** (Plan Bootstrap): reads and validates `.design/plan.json`, performs batch validation of assumptions and context files, creates TaskList. Model: sonnet. Delegation fallback: if the subagent fails, the lead performs setup inline
-- **Task subagents** (workers): one per task in each ready-set batch, self-read full instructions from `.design/plan.json` via bootstrap template, return COMPLETED:/FAILED:/BLOCKED: as FINAL line
+- **Lead responsibilities**: plan reading/validation/TaskList creation (inline — purely mechanical, no subagent), spawn Task subagents, collect return values, verify results (batched spot-checks + acceptance criteria), update `.design/plan.json` (status, trimming, cascading failures), git commits, user interaction (AskUserQuestion), circuit breaker evaluation, compute ready-sets from dependencies, assemble retry prompts
+- **Task subagents** (workers): one per task in each ready-set batch, self-read full instructions from `.design/plan.json` via bootstrap template (with subject verification to prevent index misreads), return COMPLETED:/FAILED:/BLOCKED: as FINAL line
 - No finalizer subagent — the lead verifies results inline via one batched Bash script per round (spot-checks + acceptance criteria), then updates plan.json directly
 - **Dependency-graph scheduling**: orchestration uses ready-set loop (spawn all tasks whose `blockedBy` dependencies are completed), no pre-computed waves
 - Progressive trimming: completed tasks are stripped of verbose agent fields including `prompt` (keep only subject, status, result, metadata.files, blockedBy, agent.role, agent.model)
@@ -81,6 +91,7 @@ The two skills communicate through `.design/plan.json` (schemaVersion 3) written
 ## Requirements
 
 - Claude Code 2.1.32+ with `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`
+- python3 3.8+ (for helper scripts)
 - `sequential-thinking` MCP server — used by the goal analyst for deep goal reasoning (fallback to inline reasoning if unavailable)
 
 ## Commit Conventions
