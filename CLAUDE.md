@@ -43,7 +43,8 @@ The two skills communicate through `.design/plan.json` (schemaVersion 3) written
 - `.design/plan.json` is the authoritative state; the TaskList is a derived view
 - Schema version 3 is required
 - Tasks use dependency-only scheduling — no wave field in task schema, execute computes batches dynamically from `blockedBy`
-- Progressive trimming: completed tasks are stripped of verbose agent fields to reduce plan size as execution proceeds
+- Each task includes assembled worker prompts (`prompt` field) and file overlap analysis (`fileOverlaps` field) — design produces these during plan generation
+- Progressive trimming: completed tasks are stripped of verbose agent fields (including `prompt`) to reduce plan size as execution proceeds
 - Analysis artifacts (goal-analysis.json, expert-\*.json, critic.json) are preserved after plan generation for execute workers to reference via contextFiles
 - Plan history: completed plans are archived to `.design/history/{timestamp}-plan.json` on successful execution; design pre-flight preserves this subdirectory during cleanup
 
@@ -60,19 +61,19 @@ The two skills communicate through `.design/plan.json` (schemaVersion 3) written
   - **Full** (9+ tasks, multiple approaches, cross-cutting concerns): spawn experts + critic + plan-writer. Critic blockedBy experts, plan-writer blockedBy critic.
 - **Expert agents** (Step 3, standard/full only): Two types. **Scanners** analyze from a domain lens — what needs to happen. **Architects** design how to solve specific sub-problems — propose 2–3 concrete strategies with tradeoffs and recommend one. Each writes `.design/expert-{name}.json`.
 - **Critic** (Step 3, full only): blockedBy all experts. Stress-tests proposals: challenges assumptions, evaluates approach coherence, identifies missing risks, flags over/under-engineering, checks goal alignment. Writes `.design/critic.json` with challenges and a verdict.
-- **Plan-writer** (Step 3, standard/full only): teammate blockedBy critic (full) or experts (standard). Merges expert analyses, incorporates critique (full only), validates, enriches. Records approach decisions in `progress.decisions`. Writes `.design/plan.json`.
+- **Plan-writer** (Step 3, standard/full only): teammate blockedBy critic (full) or experts (standard). Merges expert analyses, incorporates critique (full only), validates, enriches. Assembles worker prompts (S1-S9 template) and computes file overlap matrix. Records approach decisions in `progress.decisions`. Writes `.design/plan.json` with fully assembled prompts.
 - **Two-tier fallback** (standard/full only): If the team fails to produce `.design/plan.json` (1) retry with a single plan-writer Task subagent, or (2) perform merge and plan writing inline with context minimization (process expert files one at a time)
 - The lead never reads raw expert analyses — data flows through file-based artifacts. The ONE file the lead reads is `.design/goal-analysis.json` (for `complexity` and `recommendedTeam` only).
 
 `/do:execute` uses a thin-lead delegation architecture:
 
 - **Lead responsibilities** (never delegated): spawn Task subagents, collect return values, git commits, user interaction (AskUserQuestion), circuit breaker evaluation, progress display, compute ready-sets from dependencies
-- **Setup Subagent** (Plan Bootstrap): reads and validates `.design/plan.json`, creates TaskList, computes file overlap matrix, assembles worker prompts, writes single task file (`.design/tasks.json`). Model: sonnet. Delegation fallback: if the subagent fails, the lead performs setup inline with simplified prompts (no file overlap computation)
+- **Setup Subagent** (Plan Bootstrap): reads and validates `.design/plan.json`, performs batch validation of assumptions and context files, creates TaskList. Simplified 3-step process (previously 6 steps). Model: sonnet. Delegation fallback: if the subagent fails, the lead performs setup inline with simplified validation (skip batch script, validate assumptions sequentially)
 - **Batch Finalizer Subagent**: Combines result processing and plan state updates in one agent. Parses worker FINAL status lines, reads detailed output from `.design/worker-{planIndex}.log` files, spot-checks files, runs acceptance criteria, determines retries, applies results to `.design/plan.json`, performs progressive trimming on completed tasks, and computes cascading failures. Returns unified JSON output. Model: sonnet. Delegation fallback: if the subagent fails, the lead processes results inline (status line parsing, primary file verification, retry assembly, plan updates — skip acceptance checks, progressive trimming, and cascading failure computation)
-- **Task subagents** (workers): one per task in each ready-set batch, self-read full instructions from `.design/tasks.json` via bootstrap template, return COMPLETED:/FAILED:/BLOCKED: as FINAL line, write detailed work log to `.design/worker-{planIndex}.log`
+- **Task subagents** (workers): one per task in each ready-set batch, self-read full instructions from `.design/plan.json` via bootstrap template, return COMPLETED:/FAILED:/BLOCKED: as FINAL line, write detailed work log to `.design/worker-{planIndex}.log`
 - The lead never reads raw `.design/plan.json` — all plan data flows through subagent outputs
 - **Dependency-graph scheduling**: orchestration uses ready-set loop (spawn all tasks whose `blockedBy` dependencies are completed), no pre-computed waves
-- Progressive trimming: completed tasks are stripped of verbose agent fields (keep only subject, status, result, metadata.files, blockedBy, agent.role, agent.model)
+- Progressive trimming: completed tasks are stripped of verbose agent fields including `prompt` (keep only subject, status, result, metadata.files, blockedBy, agent.role, agent.model)
 - Retry budget: max 3 attempts per task with failure context passed to retries
 - Cascading failures: failed/blocked tasks automatically skip dependents
 - Circuit breaker: abort if >50% of remaining tasks would be skipped (plans with ≤3 tasks bypass this check)
