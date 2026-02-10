@@ -86,3 +86,10 @@ The two skills communicate through `.design/plan.json` (schemaVersion 3) written
 ## Commit Conventions
 
 Conventional commits with imperative mood: `feat:`, `fix:`, `chore:`, `refactor:`, `docs:`, `test:`. Example: `feat: add retry context to agent prompt`.
+
+## Pre-commit Checklist
+
+Before every commit and push:
+
+1. **Update docs**: If SKILL.md changes affect architecture, update `CLAUDE.md` (Architecture section) and `README.md` to match. These three must stay in sync.
+2. **Bump version**: Increment the patch version in `.claude-plugin/plugin.json` (and the version badge in `README.md`) for every functional change. Use semver: patch for fixes/refactors, minor for new features, major for breaking changes.
