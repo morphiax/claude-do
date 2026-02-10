@@ -17,7 +17,6 @@ Execute a `.design/plan.json` using dependency-graph scheduling with Task subage
 - `AskUserQuestion` (user interaction)
 - Circuit breaker evaluation (orchestration judgment)
 - Compute ready-sets and manage round progression
-- Display progress to user
 
 **Delegated to subagents** (lead never reads raw `.design/plan.json`, except during fallback recovery):
 
@@ -266,6 +265,8 @@ If `isResume` is true, report: "Resuming execution."
 ### Step 3: Execute by Ready-Set Rounds
 
 Initialize `roundNumber` to 1. Maintain a `completedResults` map (planIndex → result string) across all rounds.
+
+**Silent execution**: Do NOT narrate worker progress. No per-worker status updates, no "waiting for tasks", no "Task X completed". The ONLY user-facing output is the round summary at Step 3e after the finalizer runs. Between spawning workers and receiving all results, output nothing.
 
 **Main loop**: While there are tasks with `pending` status in the setup output's `taskIdMapping`:
 
