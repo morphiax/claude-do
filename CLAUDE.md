@@ -67,11 +67,10 @@ The two skills communicate through `.design/plan.json` (schemaVersion 3) written
 
 `/do:execute` uses a thin-lead delegation architecture:
 
-- **Lead responsibilities** (never delegated): spawn Task subagents, collect return values, git commits, user interaction (AskUserQuestion), circuit breaker evaluation, progress display, compute ready-sets from dependencies
-- **Setup Subagent** (Plan Bootstrap): reads and validates `.design/plan.json`, performs batch validation of assumptions and context files, creates TaskList. Simplified 3-step process (previously 6 steps). Model: sonnet. Delegation fallback: if the subagent fails, the lead performs setup inline with simplified validation (skip batch script, validate assumptions sequentially)
-- **Batch Finalizer Subagent**: Combines result processing and plan state updates in one agent. Parses worker FINAL status lines, spot-checks files, runs acceptance criteria, determines retries, applies results to `.design/plan.json`, performs progressive trimming on completed tasks, and computes cascading failures. Returns unified JSON output. Model: sonnet. Delegation fallback: if the subagent fails, the lead processes results inline (status line parsing, primary file verification, retry assembly, plan updates — skip acceptance checks, progressive trimming, and cascading failure computation)
+- **Lead responsibilities**: spawn Task subagents, collect return values, verify results (batched spot-checks + acceptance criteria), update `.design/plan.json` (status, trimming, cascading failures), git commits, user interaction (AskUserQuestion), circuit breaker evaluation, compute ready-sets from dependencies, assemble retry prompts
+- **Setup Subagent** (Plan Bootstrap): reads and validates `.design/plan.json`, performs batch validation of assumptions and context files, creates TaskList. Model: sonnet. Delegation fallback: if the subagent fails, the lead performs setup inline
 - **Task subagents** (workers): one per task in each ready-set batch, self-read full instructions from `.design/plan.json` via bootstrap template, return COMPLETED:/FAILED:/BLOCKED: as FINAL line
-- The lead never reads raw `.design/plan.json` — all plan data flows through subagent outputs
+- No finalizer subagent — the lead verifies results inline via one batched Bash script per round (spot-checks + acceptance criteria), then updates plan.json directly
 - **Dependency-graph scheduling**: orchestration uses ready-set loop (spawn all tasks whose `blockedBy` dependencies are completed), no pre-computed waves
 - Progressive trimming: completed tasks are stripped of verbose agent fields including `prompt` (keep only subject, status, result, metadata.files, blockedBy, agent.role, agent.model)
 - Retry budget: max 3 attempts per task with failure context passed to retries

@@ -6,36 +6,34 @@ argument-hint: ""
 
 # Execute
 
-Execute a `.design/plan.json` using dependency-graph scheduling with Task subagents. The lead computes ready-sets dynamically from `blockedBy` dependencies, spawning each batch of ready tasks as a round. The lead is a thin orchestrator: it delegates mechanical work to three specialized subagents (setup, batch processor, plan updater) and retains only user interaction, worker spawning, git commits, and abort decisions.
+Execute a `.design/plan.json` using dependency-graph scheduling with Task subagents. The lead computes ready-sets dynamically from `blockedBy` dependencies, spawning each batch of ready tasks as a round. The lead is a thin orchestrator — it delegates plan bootstrap to a setup subagent and performs verification, plan updates, and retries inline.
 
 **Workflow guard**: Execute the Orchestration Flow (Steps 1-4) as written. Do NOT use `EnterPlanMode` — this skill IS the execution plan. Proceed directly to Step 1: Setup.
 
-**Lead responsibilities** (never delegated):
+**Lead responsibilities**:
 
-- Spawn task agents and collect return values
-- `git add` + `git commit` (user-visible side effects)
+- Spawn task subagents and collect return values
+- Verify results (spot-checks + acceptance criteria via batched Bash)
+- Update `.design/plan.json` (status, trimming, cascading failures)
+- `git add` + `git commit`
 - `AskUserQuestion` (user interaction)
-- Circuit breaker evaluation (orchestration judgment)
+- Circuit breaker evaluation
 - Compute ready-sets and manage round progression
+- Assemble retry prompts for failed tasks
 
-**Delegated to subagents** (lead never reads raw `.design/plan.json`, except during fallback recovery):
+**Delegated to setup subagent only**:
 
 - Plan reading, validation, TaskList creation → Setup Subagent
-- Result parsing, spot-checks, acceptance checks, retry prompt assembly, plan mutation, progress tracking, cascading failures, progressive trimming → Batch Finalizer Subagent
-
-**Fallback rule**: If any delegation subagent fails (non-zero exit, malformed JSON output, or missing required fields), the lead performs that step's scoped minimal-mode fallback inline. Each step (Setup, Finalizer) defines its own fallback with reduced scope — see the **Fallback (minimal mode)** block at each step. Never abort execution due to a subagent infrastructure failure.
 
 ### Conventions
 
-- **FINAL-line**: Every subagent's last line of output is its structured return value (JSON object, no markdown fencing). The lead parses only this line.
+- **FINAL-line**: Every subagent's last line of output is its structured return value (JSON object or status line, no markdown fencing). The lead parses only this line.
 
 ---
 
-## Subagent Definitions
+## Setup Subagent (Plan Bootstrap)
 
-### A. Setup Subagent (Plan Bootstrap)
-
-Replaces plan reading, validation, and task list creation. Spawn once at the start. Model: sonnet.
+Reads and validates plan, creates TaskList. Spawn once at the start. Model: sonnet.
 
 ```
 Task:
@@ -142,95 +140,11 @@ Task:
 
 ---
 
-### B. Batch Finalizer Subagent (Result Processor + State Updater)
-
-Processes worker results and updates plan state after each batch. Combines result parsing, verification, retry assembly, plan mutation, progressive trimming, and cascading failure computation into a single subagent. Model: sonnet. Spawn once per processing pass (initial + each retry pass).
-
-```
-Task:
-  subagent_type: "general-purpose"
-  model: sonnet
-  prompt: <assembled from template below>
-```
-
-**Batch finalizer prompt template** — assemble by concatenating these sections:
-
-1. **Role and mission**:
-
-   ```
-   You are a batch finalizer. You process worker results and update plan state in a single pass. Responsibilities: (1) parse task status lines provided in the input, (2) verify file artifacts and run acceptance criteria, (3) determine retries and assemble retry prompts, (4) apply results to .design/plan.json, (5) perform progressive trimming on completed tasks, (6) compute cascading failures and circuit breaker. You read task metadata from .design/plan.json and are the ONLY agent that writes to .design/plan.json.
-   ```
-
-2. **Input data section** — the lead assembles this from task status lines and round metadata:
-
-   ```
-   ## Input
-   Round: {round_number}, Total tasks: {taskCount}, Small plan (<=3 tasks): {true/false}
-   Plan file: .design/plan.json
-   Read .design/plan.json for task metadata (prompts, acceptance criteria, fallback strategies).
-
-   ### Task Results
-   - planIndex: {planIndex}, statusLine: {FINAL status line}, attempts: {attempts}
-   ```
-
-   Append one line per task. If surprises/decisions exist, append `### Surprises/Decisions` with bullets.
-
-The finalizer reads task metadata from plan.json. Worker results are provided as status lines in the input — no log files.
-
-3. **Processing instructions**:
-
-   ```
-   ## Phase 1: Process Results
-
-   For each task:
-
-   1. Parse status line. Match `^(COMPLETED|FAILED|BLOCKED): .+`. If no match, treat as FAILED with reason "No valid status line returned".
-
-   2. Spot-check files: For creates, run `test -f {path}`. For modifies, verify in `git diff --name-only`. Flag unexpected diffs as warnings. If spot-check fails but agent reported COMPLETED: override to FAILED.
-
-   3. If COMPLETED and spot-check passed: run acceptance criteria checks. Override to FAILED if any fail (include command and output).
-
-   4. If BLOCKED: record as blocked — no retry, no cleanup.
-
-   5. If FAILED and attempts < 3: Clean up: `git checkout -- {modifies}` and `rm -f {creates}`. Assemble retry prompt: (a) original prompt from the task's `prompt` field in plan.json, (b) retry context block with attempt number and failure reason from status line, (c) fallback strategy if exists: "IMPORTANT: The primary approach failed. Use this strategy instead: {fallback}", (d) acceptance failures if relevant: "The following acceptance checks failed — ensure they pass before reporting COMPLETED: {failures}".
-
-   6. If FAILED and attempts >= 3: record as failed — no retry.
-
-   7. If COMPLETED and all checks passed: record as completed.
-   ```
-
-4. **Plan update instructions**:
-
-   ```
-   ## Phase 2: Update Plan State
-
-   1. Read .design/plan.json.
-
-   2. For each task from Phase 1: set status, result, attempts. Append completed tasks to progress.completedTasks. Append surprises and decisions.
-
-   3. Progressive trimming: for completed tasks, keep ONLY: subject, status, result, metadata.files, blockedBy, agent.role, agent.model. Strip prompt, fileOverlaps, and all other fields.
-
-   4. Compute cascading failures: tasks whose blockedBy chain includes failed/blocked tasks → set to skipped with dependency message.
-
-   5. Write .design/plan.json.
-
-   6. Circuit breaker: count pending tasks, count how many would be skipped by cascading failures. shouldAbort: true if totalTasks > 3 AND wouldBeSkipped >= 50% of pending.
-   ```
-
-5. **Output format**:
-
-   ```
-   ## Output
-   FINAL line: JSON object (no fencing). Schema: {"retryTasks": [{"planIndex": 1, "retryPrompt": "...", "model": "opus", "attempt": 2}], "completedFiles": {"create": [...], "modify": [...]}, "summary": "...", "updated": true, "skipList": [...], "circuitBreaker": {"totalTasks": N, "pendingCount": N, "wouldBeSkipped": N, "shouldAbort": bool}, "planSizeAfterTrim": "..."}
-   ```
-
----
-
 ## Orchestration Flow
 
 ### Step 1: Setup
 
-Spawn the Setup Subagent using the prompt template from Section A.
+Spawn the Setup Subagent using the prompt template above.
 
 Parse the final line of the subagent's return value as JSON.
 
@@ -242,7 +156,7 @@ Parse the final line of the subagent's return value as JSON.
 - If error is `schema_version`: tell user the plan uses an unsupported schema version and v3 is required, then stop.
 - If error is `empty_tasks`: tell user the plan contains no tasks and to re-run `/design`, then stop.
 
-Store setup output. The lead never reads `.design/plan.json` directly — all plan data comes through setup/finalizer responses. Worker prompts live in `.design/plan.json` — workers self-read via bootstrap.
+Store setup output. Worker prompts live in `.design/plan.json` — workers self-read via bootstrap.
 
 **Resume-nothing-to-do check**: If resuming and no pending tasks remain, tell user "All tasks are already resolved — nothing to do." and stop.
 
@@ -266,13 +180,13 @@ If `isResume` is true, report: "Resuming execution."
 
 Initialize `roundNumber` to 1. Maintain a `completedResults` map (planIndex → result string) across all rounds.
 
-**Silent execution**: Do NOT narrate worker progress. No per-worker status updates, no "waiting for tasks", no "Task X completed". The ONLY user-facing output is the round summary at Step 3e after the finalizer runs. Between spawning workers and receiving all results, output nothing.
+**Silent execution**: Do NOT narrate worker progress. No per-worker status updates, no "waiting for tasks", no "Task X completed". The ONLY user-facing output is the round summary at Step 3e. Between spawning workers and the round summary, output nothing.
 
 **Main loop**: While there are tasks with `pending` status in the setup output's `taskIdMapping`:
 
 #### 3a. Compute Ready Set
 
-Compute the ready set: tasks that are `pending` AND all tasks in their `blockedBy` are `completed` (check against the `completedResults` map and prior updater `skipList` responses).
+Compute the ready set: tasks that are `pending` AND all tasks in their `blockedBy` are `completed` (check against the `completedResults` map and prior `skipList`).
 
 **Deadlock detection**: If ready set is empty but pending tasks remain, abort with: "Deadlock detected: {pendingCount} tasks remain but none are ready. Remaining tasks depend on failed or blocked predecessors." Proceed to Step 4.
 
@@ -314,37 +228,60 @@ If the task has dependency results (from point 2 above), append them directly af
 
 **Parallel safety**: Check the setup output's `fileOverlapMatrix`. If any tasks in this ready set have file overlaps with each other, run those conflicting tasks sequentially. Spawn all non-conflicting tasks in parallel in a single response.
 
-#### 3c. Process Results and Update Plan
+#### 3c. Verify Results
 
-After all batch workers return, extract the FINAL status line from each worker's return value. The FINAL line is the last line of output and must match the format `COMPLETED:|FAILED:|BLOCKED:`. Discard all preceding output — only the FINAL status line is retained for processing.
+After all batch workers return, extract the FINAL status line from each worker's return value. The FINAL line is the last line of output and must match the format `COMPLETED:|FAILED:|BLOCKED:`. Discard all preceding output.
 
-Spawn the Batch Finalizer Subagent using the prompt template from Section B.
+**Parse each status line**: Match `^(COMPLETED|FAILED|BLOCKED): .+`. If no match, treat as FAILED with reason "No valid status line returned".
 
-Assemble finalizer input: round number, total task count, plan file path (`.design/plan.json`), and for each task: planIndex, status line (FINAL line only), attempts count, surprises/decisions.
+**Spot-check and acceptance in one batched Bash script**: Build a single Bash script that, for each task in the batch:
 
-Parse the final line of the finalizer's return value as JSON. The finalizer processes results and updates plan state in a single pass.
+1. If COMPLETED: spot-check created files (`test -f {path}` for each `metadata.files.create`), check modified files appear in `git diff --name-only`, run each `acceptanceCriteria[].check` command
+2. Output one JSON object per task: `{"planIndex": N, "status": "completed|failed|blocked", "result": "...", "spotCheckPassed": bool, "acceptancePassed": bool, "failures": ["..."]}`
 
-**Fallback (minimal mode)**: Parse worker status lines against `^(COMPLETED|FAILED|BLOCKED): .+`. For COMPLETED tasks, verify primary output files exist (`test -f` for creates, `git diff --name-only` for modifies). Skip acceptance criteria checks. For FAILED tasks with attempts < 3, read original prompt from the task's `prompt` field in `.design/plan.json`, append retry context, assemble retry prompt. Update status/result/attempts fields in `.design/plan.json`. Skip progressive trimming and cascading failure computation. Write plan. Return `{"retryTasks": [...], "completedFiles": {...}, "updated": true, "skipList": [], "circuitBreaker": {"shouldAbort": false}}`. Log: "Finalizer subagent failed — executing inline (minimal mode)."
+Wrap all per-task objects in a JSON array and output to stdout. Run this script in one Bash call.
 
-#### 3d. Handle Retries
+**Interpret results**: For each task:
+- COMPLETED + all checks passed → completed
+- COMPLETED + spot-check or acceptance failed → override to failed (use failure details as reason)
+- FAILED → failed (use status line reason)
+- BLOCKED → blocked
 
-If finalizer output contains `retryTasks`: spawn new Task subagents with finalizer-provided `retryPrompt` and `model`. After all retry agents return, spawn Batch Finalizer again with retry results. Include plan file path for further retry assembly. Repeat until no `retryTasks` remain or all failed tasks reach 3 attempts.
+#### 3d. Update Plan State
 
-#### 3e. Display Round Progress
+Read `.design/plan.json`. For each task from 3c:
 
-Using final finalizer output (after retries): display `Round {roundNumber}: {completed}/{total_in_batch} tasks ({total_completed_overall}/{taskCount} overall)` + task statuses.
+1. Set `status`, `result`, `attempts` on the task
+2. Append completed tasks to `progress.completedTasks`
+3. **Progressive trimming**: for completed tasks, keep ONLY: `subject`, `status`, `result`, `metadata.files`, `blockedBy`, `agent.role`, `agent.model`. Strip `prompt`, `fileOverlaps`, and all other fields.
+4. **Cascading failures**: tasks whose `blockedBy` chain includes any failed or blocked task → set to `skipped` with dependency message. Record skipped planIndices.
+5. Write `.design/plan.json`.
 
-#### 3f. Update Tracking State
+#### 3e. Handle Retries
 
-Update `completedResults` map with completed task results. Mark skipped tasks (from `skipList`) as completed in TaskList. Remove completed and skipped from pending set.
+For each failed task where `attempts < 3`:
+
+1. Clean up partial work: `git checkout -- {modifies}` and `rm -f {creates}`
+2. Read the task's `prompt` field from plan.json (loaded in 3d)
+3. Assemble retry prompt: original prompt + retry context block with attempt number and failure reason + fallback strategy if exists (`"IMPORTANT: The primary approach failed. Use this strategy instead: {fallback}"`) + acceptance failures if relevant
+4. Spawn retry worker with the assembled prompt and same model
+5. After retry worker returns, repeat verification (3c) and plan update (3d) for just that task
+
+Repeat until no retryable tasks remain or all have reached 3 attempts.
+
+#### 3f. Round Summary
+
+Display: `Round {roundNumber}: {completed}/{total_in_batch} tasks ({total_completed_overall}/{taskCount} overall)` + per-task status.
+
+Update `completedResults` map with completed task results. Mark completed tasks in TaskList via `TaskUpdate(status: "completed")`. Mark skipped tasks as completed in TaskList. Remove completed and skipped from pending set.
 
 #### 3g. Git Commit
 
-Stage and commit completed files: `git add {completedFiles} && git commit -m "{round summary}"`. Use finalizer's `completedFiles` field. Skip if no files (research-only tasks).
+Collect all created and modified files from completed tasks in this round. Stage and commit: `git add {files} && git commit -m "{round summary}"`. Skip if no files (research-only tasks).
 
 #### 3h. Circuit Breaker
 
-If finalizer's `circuitBreaker.shouldAbort` is true, ABORT. Display: "Circuit breaker triggered: {wouldBeSkipped}/{pendingCount} pending tasks would be skipped due to cascading failures." Proceed to Step 4. Ignore circuit breaker for plans with ≤3 tasks.
+Count pending tasks and how many would be skipped by cascading failures. If `totalTasks > 3 AND wouldBeSkipped >= 50% of pending`, ABORT. Display: "Circuit breaker triggered: {wouldBeSkipped}/{pendingCount} pending tasks would be skipped due to cascading failures." Proceed to Step 4.
 
 Increment `roundNumber` and continue the main loop.
 
@@ -360,8 +297,7 @@ After all rounds (or after circuit breaker abort or deadlock):
    - Skipped: {count} — {subjects}
    - Follow-up recommendations if any failures
 
-3. No intermediate artifacts to clean up.
-4. If fully successful: archive completed plan to history: `mkdir -p .design/history && mv .design/plan.json ".design/history/$(date -u +%Y%m%dT%H%M%SZ)-plan.json"`. Return "All {count} tasks completed."
-5. If partial: leave `.design/plan.json` for resume. Return "Execution incomplete. {done}/{total} completed."
+3. If fully successful: archive completed plan to history: `mkdir -p .design/history && mv .design/plan.json ".design/history/$(date -u +%Y%m%dT%H%M%SZ)-plan.json"`. Return "All {count} tasks completed."
+4. If partial: leave `.design/plan.json` for resume. Return "Execution incomplete. {done}/{total} completed."
 
 **Arguments**: $ARGUMENTS
