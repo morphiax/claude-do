@@ -6,12 +6,13 @@ argument-hint: ""
 
 # Execute
 
-Execute a `.design/plan.json` using dependency-graph scheduling with Task subagents. The lead computes ready-sets dynamically from `blockedBy` dependencies, spawning each batch of ready tasks as a round. The lead is a thin orchestrator — it delegates plan bootstrap to a setup subagent and performs verification, plan updates, and retries inline.
+Execute a `.design/plan.json` using dependency-graph scheduling with Task subagents. The lead computes ready-sets dynamically from `blockedBy` dependencies, spawning each batch of ready tasks as a round. The lead is a thin orchestrator — it performs setup (plan reading, validation, TaskList creation) inline and delegates only task execution to subagents.
 
 **Workflow guard**: Execute the Orchestration Flow (Steps 1-4) as written. Do NOT use `EnterPlanMode` — this skill IS the execution plan. Proceed directly to Step 1: Setup.
 
 **Lead responsibilities**:
 
+- Plan reading, validation, and TaskList creation (inline — no subagent)
 - Spawn task subagents and collect return values
 - Verify results (spot-checks + acceptance criteria via batched Bash)
 - Update `.design/plan.json` (status, trimming, cascading failures)
@@ -21,148 +22,86 @@ Execute a `.design/plan.json` using dependency-graph scheduling with Task subage
 - Compute ready-sets and manage round progression
 - Assemble retry prompts for failed tasks
 
-**Delegated to setup subagent only**:
-
-- Plan reading, validation, TaskList creation → Setup Subagent
-
 ### Conventions
 
 - **FINAL-line**: Every subagent's last line of output is its structured return value (JSON object or status line, no markdown fencing). The lead parses only this line.
 
----
+### Script Setup
 
-## Setup Subagent (Plan Bootstrap)
-
-Reads and validates plan, creates TaskList. Spawn once at the start. Model: sonnet.
+Resolve the plugin root directory (the directory containing `.claude-plugin/` and `skills/`). Set `PLAN_CLI` to the skill-local plan helper script:
 
 ```
-Task:
-  subagent_type: "general-purpose"
-  model: sonnet
-  prompt: <assembled from template below>
+PLAN_CLI = {plugin_root}/skills/execute/scripts/plan.py
 ```
 
-**Setup subagent prompt template** — assemble by concatenating these sections in order:
-
-1. **Role and mission**:
-
-   ```
-   You are a plan bootstrap agent. Your job is to read .design/plan.json, validate it, and create the TaskList for progress tracking. You produce structured JSON output — you do NOT execute any tasks.
-   ```
-
-2. **Plan reading instructions**:
-
-   ```
-   ## Step 1: Read Plan
-
-   Read `.design/plan.json` from the project root.
-
-   - If not found: return JSON with error field set to no_plan
-   - If found: parse JSON.
-     - If schemaVersion is not 3: return JSON with error field set to schema_version and version set to the actual version number
-     - If tasks array is empty: return JSON with error field set to empty_tasks
-     - Resume detection: if any task has status other than pending (e.g., completed, failed, blocked, skipped, in_progress), this is a resume. Reset any tasks with status in_progress back to pending (increment their attempts count). For each in_progress task being reset, clean up partial artifacts: revert uncommitted changes to metadata.files.modify files via git checkout -- {files} and delete partially created metadata.files.create files via rm -f {files}. For each completed task on resume, verify its metadata.files.create entries exist and its metadata.files.modify entries are committed. If verification fails, reset to pending. Write the updated plan back to .design/plan.json.
-     - Extract file overlap matrix: for each task, read its `fileOverlaps` array (populated by design). Build a mapping from planIndex to array of conflicting planIndices.
-   ```
-
-3. **Validation instructions**:
-
-   ```
-   ## Step 2: Batch Validation
-
-   Build a single Bash script that performs all validation in one invocation. The script:
-
-   1. Runs `git status --porcelain` and captures output
-   2. For each task with agent.assumptions where severity is blocking: runs the verify command and captures exit code + output
-   3. For each agent.contextFiles entry: tests path existence with `test -e`
-   4. Outputs a single JSON object to stdout with the combined results:
-      {"gitClean": bool, "gitStatus": "...", "blockingChecks": [{"taskIndex": N, "claim": "...", "passed": bool, "output": "..."}], "contextFilesValid": bool, "missingContextFiles": ["..."]}
-
-   Run this script in one Bash call and parse the JSON output.
-   ```
-
-4. **TaskList creation instructions**:
-
-   ```
-   ## Step 3: Create Task List
-
-   The TaskList is a derived view for user-facing visibility. .design/plan.json is authoritative.
-
-   The TaskList uses only valid statuses (pending | in_progress | completed). Detailed status (failed | blocked | skipped) is tracked exclusively in .design/plan.json.
-
-   For each task in .design/plan.json, create a tracked task:
-
-   id = TaskCreate:
-     subject: {task.subject}
-     description: {task.description}
-     activeForm: {task.activeForm}
-
-   Build an explicit planIndex-to-taskId mapping from the returned IDs.
-
-   After creating all tasks, wire dependencies:
-
-   TaskUpdate:
-     taskId: {planIndex-to-taskId map[task index]}
-     addBlockedBy: [planIndex-to-taskId map[dep] for dep in task.blockedBy]
-
-   If resuming: mark already-completed tasks as completed via TaskUpdate.
-   ```
-
-5. **Output format instructions**:
-
-   ```
-   ## Output
-
-   The FINAL line of your output MUST be a single JSON object (no markdown fencing). All fields required:
-
-   {
-     "goal": "Add user authentication",
-     "contextSummary": "Next.js + Prisma | ESLint + Prettier | test: npm test",
-     "isResume": false,
-     "validation": {
-       "gitClean": true,
-       "gitStatus": "",
-       "blockingChecks": [{"claim": "Node >= 18", "passed": true, "output": "v20.11.0"}],
-       "contextFilesValid": true,
-       "missingContextFiles": []
-     },
-     "taskIdMapping": {"0": "task-abc", "1": "task-def"},
-     "fileOverlapMatrix": {"0": [1]},
-     "taskCount": 5,
-     "maxDepth": 3,
-     "depthSummary": {"1": [0, 1], "2": [2, 3], "3": [4]}
-   }
-
-   fileOverlapMatrix is extracted from each task's `fileOverlaps` array in plan.json (populated by design).
-
-   depthSummary groups planIndices by dependency depth for display purposes (depth = 1 for tasks with empty blockedBy, otherwise 1 + max(depth of blockedBy tasks)). This is informational only — it does not determine execution order.
-   ```
+All deterministic operations use: `python3 $PLAN_CLI <command> [args]` via Bash. Parse JSON output. Every command outputs `{"ok": true/false, ...}` to stdout.
 
 ---
 
 ## Orchestration Flow
 
-### Step 1: Setup
+### Step 1: Setup (Inline)
 
-Spawn the Setup Subagent using the prompt template above.
+Read and validate `.design/plan.json`, run batch validation, create TaskList. This is mechanical — no subagent needed.
 
-Parse the final line of the subagent's return value as JSON.
+#### 1a. Read and Validate Plan
 
-**Fallback (minimal mode)**: Read `.design/plan.json`, validate schemaVersion is 3, create TaskList entries with dependencies. Extract `fileOverlaps` from each task to build `fileOverlapMatrix`. Return a setup JSON. Log: "Setup subagent failed — executing inline (minimal mode)."
+Run: `python3 $PLAN_CLI validate .design/plan.json` via Bash. Parse JSON output.
 
-**Error handling from setup output**:
+- If `ok` is false:
+  - `error` is `not_found`: tell user "No plan found. Run `/design <goal>` first." and stop.
+  - `error` is `bad_schema`: tell user the plan uses an unsupported schema version and v3 is required, then stop.
+  - `error` is `empty_tasks`: tell user the plan contains no tasks and to re-run `/design`, then stop.
 
-- If error is `no_plan`: tell user "No plan found. Run `/design <goal>` first." and stop.
-- If error is `schema_version`: tell user the plan uses an unsupported schema version and v3 is required, then stop.
-- If error is `empty_tasks`: tell user the plan contains no tasks and to re-run `/design`, then stop.
+#### 1b. Resume Detection
 
-Store setup output. Worker prompts live in `.design/plan.json` — workers self-read via bootstrap.
+Run: `python3 $PLAN_CLI status-counts .design/plan.json` via Bash. Parse JSON output. Set `isResume` from the output's `isResume` field.
 
-**Resume-nothing-to-do check**: If resuming and no pending tasks remain, tell user "All tasks are already resolved — nothing to do." and stop.
+If `isResume` is true:
+
+Run: `python3 $PLAN_CLI resume-reset .design/plan.json` via Bash. Parse JSON output. For each entry in `resetTasks`: revert uncommitted changes via `git checkout -- {filesToRevert}` and delete partial files via `rm -f {filesToDelete}`.
+
+**Resume-nothing-to-do check**: If `noWorkRemaining` is true, tell user "All tasks are already resolved — nothing to do." and stop.
+
+#### 1c. Extract File Overlap Matrix
+
+Run: `python3 $PLAN_CLI overlap-matrix .design/plan.json` via Bash. Parse JSON output. Store the `matrix` field as `fileOverlapMatrix`: a mapping from planIndex to array of conflicting planIndices.
+
+#### 1d. Batch Validation
+
+Build a single Bash script that:
+
+1. Runs `git status --porcelain` and captures output
+2. For each task with `agent.assumptions` where severity is `blocking`: runs the `verify` command and captures exit code + output
+3. For each `agent.contextFiles` entry: tests path existence with `test -e`
+4. Outputs a single JSON object to stdout: `{"gitClean": bool, "gitStatus": "...", "blockingChecks": [{"taskIndex": N, "claim": "...", "passed": bool, "output": "..."}], "contextFilesValid": bool, "missingContextFiles": ["..."]}`
+
+Run this script in one Bash call and parse the JSON output. Store as `validation`.
+
+#### 1e. Create TaskList
+
+The TaskList is a derived view for user-facing visibility. `.design/plan.json` is authoritative. The TaskList uses only valid statuses (`pending` | `in_progress` | `completed`). Detailed status (`failed` | `blocked` | `skipped`) is tracked exclusively in `.design/plan.json`.
+
+Run: `python3 $PLAN_CLI tasklist-data .design/plan.json` via Bash. Parse JSON output. For each entry in the `tasks` array:
+
+1. `TaskCreate` with `subject`, `description`, `activeForm`
+2. Record the returned ID in `taskIdMapping` (planIndex → taskId)
+
+After creating all tasks, wire dependencies:
+
+- For each entry with non-empty `blockedBy`: `TaskUpdate(taskId, addBlockedBy: [taskIdMapping[dep] for dep in blockedBy])`
+
+If resuming: mark entries with `status` of `completed` via `TaskUpdate(status: "completed")`.
+
+#### 1f. Compute Summary
+
+Run: `python3 $PLAN_CLI summary .design/plan.json` via Bash. Parse JSON output. Store `goal`, `taskCount`, `maxDepth`, `depthSummary`, and `modelDistribution` from the output.
+
+Store all computed data (`goal`, `isResume`, `validation`, `taskIdMapping`, `fileOverlapMatrix`, `taskCount`, `maxDepth`, `depthSummary`) as **setup data** — referenced by later steps.
 
 ### Step 2: Report Validation
 
-Using the setup output's `validation` field, display to the user:
+Using the setup data's `validation` field, display to the user:
 
 ```
 Executing: {goal}
@@ -182,17 +121,19 @@ Initialize `roundNumber` to 1. Maintain a `completedResults` map (planIndex → 
 
 **Silent execution**: Do NOT narrate worker progress. No per-worker status updates, no "waiting for tasks", no "Task X completed". The ONLY user-facing output is the round summary at Step 3e. Between spawning workers and the round summary, output nothing.
 
-**Main loop**: While there are tasks with `pending` status in the setup output's `taskIdMapping`:
+**Main loop**: While there are tasks with `pending` status in the setup data's `taskIdMapping`:
 
 #### 3a. Compute Ready Set
 
-Compute the ready set: tasks that are `pending` AND all tasks in their `blockedBy` are `completed` (check against the `completedResults` map and prior `skipList`).
+Run: `python3 $PLAN_CLI ready-set .design/plan.json` via Bash. Parse JSON output.
 
-**Deadlock detection**: If ready set is empty but pending tasks remain, abort with: "Deadlock detected: {pendingCount} tasks remain but none are ready. Remaining tasks depend on failed or blocked predecessors." Proceed to Step 4.
+**Deadlock detection**: If `isDeadlock` is true, abort with: "Deadlock detected: {pendingCount} tasks remain but none are ready. Remaining tasks depend on failed or blocked predecessors." Proceed to Step 4.
 
-Use setup output for task metadata (taskIdMapping, fileOverlapMatrix). Workers self-read prompts from plan.json via bootstrap.
+Use the `ready` array for this round's tasks. Use setup data for task metadata (taskIdMapping, fileOverlapMatrix).
 
 #### 3b. Spawn Task Subagents
+
+**Pre-extract worker tasks**: For each task in the ready set, run: `python3 $PLAN_CLI extract-task {planIndex} .design/plan.json` via Bash. This writes `.design/worker-task-{planIndex}.json` containing the task data and plan-level context.
 
 For each task in the ready set:
 
@@ -204,29 +145,30 @@ For each task in the ready set:
    - Task {index}: {result from the completedResults map for that task}
    ```
 
-3. Spawn a Task subagent with a bootstrap prompt — workers self-read their full instructions from plan.json:
+3. Spawn a Task subagent with a bootstrap prompt — workers read their instructions from a pre-extracted task file:
 
 ```
 Task:
   subagent_type: "general-purpose"
-  model: {task.agent.model from plan.json}
+  model: {task model from ready-set output}
   prompt: <bootstrap prompt assembled from template below>
 ```
 
-**Worker bootstrap template** — substitute `{planIndex}`, then append dependency results if present:
+**Worker bootstrap template** — substitute `{planIndex}` and `{taskSubject}` (from ready-set output), then append dependency results if present:
 
 ```
 ## Bootstrap — Self-Read Instructions
 
-1. Read `.design/plan.json` and extract the task at index {planIndex} from the `tasks` array.
-2. Your full task instructions are in the `prompt` field of that task.
-3. If dependency results appear below, find the placeholder line `[Dependency results — deferred: lead appends actual results at spawn time]` in the prompt and replace it with the dependency results section below.
-4. Execute the task instructions from the prompt field.
+1. Read `.design/worker-task-{planIndex}.json`. If this file does not exist, fall back to reading `.design/plan.json` and extract `tasks[{planIndex}]` (the element at 0-based array index {planIndex}).
+2. **Verify**: the task's `subject` must contain "{taskSubject}". If it does not, STOP and return `BLOCKED: Bootstrap mismatch — expected "{taskSubject}" at tasks[{planIndex}]`.
+3. Your full task instructions are in the `prompt` field of that task (at `task.prompt` in the worker-task file, or `tasks[{planIndex}].prompt` in plan.json).
+4. If dependency results appear below, find the placeholder line `[Dependency results — deferred: lead appends actual results at spawn time]` in the prompt and replace it with the dependency results section below.
+5. Execute the task instructions from the prompt field.
 ```
 
 If the task has dependency results (from point 2 above), append them directly after the bootstrap template.
 
-**Parallel safety**: Check the setup output's `fileOverlapMatrix`. If any tasks in this ready set have file overlaps with each other, run those conflicting tasks sequentially. Spawn all non-conflicting tasks in parallel in a single response.
+**Parallel safety**: Check the setup data's `fileOverlapMatrix`. If any tasks in this ready set have file overlaps with each other, run those conflicting tasks sequentially. Spawn all non-conflicting tasks in parallel in a single response.
 
 #### 3c. Verify Results
 
@@ -249,23 +191,24 @@ Wrap all per-task objects in a JSON array and output to stdout. Run this script 
 
 #### 3d. Update Plan State
 
-Read `.design/plan.json`. For each task from 3c:
+Build a JSON array of results from 3c: `[{"planIndex": N, "status": "completed|failed|blocked", "result": "..."}]`.
 
-1. Set `status`, `result`, `attempts` on the task
-2. Append completed tasks to `progress.completedTasks`
-3. **Progressive trimming**: for completed tasks, keep ONLY: `subject`, `status`, `result`, `metadata.files`, `blockedBy`, `agent.role`, `agent.model`. Strip `prompt`, `fileOverlaps`, and all other fields.
-4. **Cascading failures**: tasks whose `blockedBy` chain includes any failed or blocked task → set to `skipped` with dependency message. Record skipped planIndices.
-5. Write `.design/plan.json`.
+Run: `echo '<results JSON>' | python3 $PLAN_CLI update-status .design/plan.json` via Bash. Parse JSON output.
+
+The script handles status updates, progressive trimming (strips verbose fields from completed tasks), cascading failures (tasks depending on failed/blocked tasks are set to `skipped`), and writes the updated plan.
+
+Record any `cascaded` entries (skipped planIndices and reasons) for the round summary.
 
 #### 3e. Handle Retries
 
-For each failed task where `attempts < 3`:
+Run: `python3 $PLAN_CLI retry-candidates .design/plan.json` via Bash. Parse JSON output.
 
-1. Clean up partial work: `git checkout -- {modifies}` and `rm -f {creates}`
-2. Read the task's `prompt` field from plan.json (loaded in 3d)
-3. Assemble retry prompt: original prompt + retry context block with attempt number and failure reason + fallback strategy if exists (`"IMPORTANT: The primary approach failed. Use this strategy instead: {fallback}"`) + acceptance failures if relevant
-4. Spawn retry worker with the assembled prompt and same model
-5. After retry worker returns, repeat verification (3c) and plan update (3d) for just that task
+For each entry in the `retryable` array:
+
+1. Clean up partial work: `git checkout -- {metadata.files.modify}` and `rm -f {metadata.files.create}` (extract file paths from plan.json metadata for the task at `planIndex`)
+2. Assemble retry prompt from the output's `prompt` field + retry context block with `attempts` number and `result` (failure reason) + fallback strategy if `fallback` is not null (`"IMPORTANT: The primary approach failed. Use this strategy instead: {fallback}"`) + acceptance failures if relevant
+3. Spawn retry worker with the assembled prompt and same `model`
+4. After retry worker returns, repeat verification (3c) and plan update (3d) for just that task
 
 Repeat until no retryable tasks remain or all have reached 3 attempts.
 
@@ -277,11 +220,17 @@ Update `completedResults` map with completed task results. Mark completed tasks 
 
 #### 3g. Git Commit
 
-Collect all created and modified files from completed tasks in this round. Stage and commit: `git add {files} && git commit -m "{round summary}"`. Skip if no files (research-only tasks).
+Run: `python3 $PLAN_CLI collect-files .design/plan.json --indices {comma-separated planIndices of completed tasks in this round}` via Bash. Parse JSON output.
+
+If `allFiles` is not empty: `git add {allFiles} && git commit -m "{round summary}"`. Skip if empty (research-only tasks).
+
+**Clean up worker task files**: Run `rm -f .design/worker-task-*.json` via Bash to remove ephemeral pre-extracted task files from this round.
 
 #### 3h. Circuit Breaker
 
-Count pending tasks and how many would be skipped by cascading failures. If `totalTasks > 3 AND wouldBeSkipped >= 50% of pending`, ABORT. Display: "Circuit breaker triggered: {wouldBeSkipped}/{pendingCount} pending tasks would be skipped due to cascading failures." Proceed to Step 4.
+Run: `python3 $PLAN_CLI circuit-breaker .design/plan.json` via Bash. Parse JSON output.
+
+If `shouldAbort` is true, display `reason` and proceed to Step 4.
 
 Increment `roundNumber` and continue the main loop.
 
@@ -290,14 +239,14 @@ Increment `roundNumber` and continue the main loop.
 After all rounds (or after circuit breaker abort or deadlock):
 
 1. `TaskList` to confirm final statuses
-2. Summary:
-   - Completed: {count}
-   - Failed: {count} — {subjects}
-   - Blocked: {count} — {subjects}
-   - Skipped: {count} — {subjects}
+2. Run: `python3 $PLAN_CLI status-counts .design/plan.json` via Bash. Parse JSON output to get per-status counts. Display summary:
+   - Completed: {counts.completed}
+   - Failed: {counts.failed} — {subjects}
+   - Blocked: {counts.blocked} — {subjects}
+   - Skipped: {counts.skipped} — {subjects}
    - Follow-up recommendations if any failures
 
-3. If fully successful: archive completed plan to history: `mkdir -p .design/history && mv .design/plan.json ".design/history/$(date -u +%Y%m%dT%H%M%SZ)-plan.json"`. Return "All {count} tasks completed."
+3. If fully successful (all tasks completed): archive completed plan to history: `mkdir -p .design/history && mv .design/plan.json ".design/history/$(date -u +%Y%m%dT%H%M%SZ)-plan.json"`. Return "All {count} tasks completed."
 4. If partial: leave `.design/plan.json` for resume. Return "Execution incomplete. {done}/{total} completed."
 
 **Arguments**: $ARGUMENTS
