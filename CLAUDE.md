@@ -27,10 +27,11 @@ Both skills must be tested end-to-end. A change to one skill may affect the othe
 
 - `.claude-plugin/plugin.json` — Plugin manifest (name, version, metadata)
 - `.claude-plugin/marketplace.json` — Marketplace distribution config
+- `scripts/plan.py` — Shared helper script (17 commands: 12 query, 2 mutation, 3 build)
 - `skills/design/SKILL.md` — `/do:design` skill definition
-- `skills/design/scripts/plan.py` — Design helper script (5 commands: validate, status-counts, summary, extract-fields, model-distribution)
+- `skills/design/scripts/plan.py` — Symlink → `../../../scripts/plan.py`
 - `skills/execute/SKILL.md` — `/do:execute` skill definition
-- `skills/execute/scripts/plan.py` — Execute helper script (17 commands: 12 query, 2 mutation, 3 build)
+- `skills/execute/scripts/plan.py` — Symlink → `../../../scripts/plan.py`
 
 ### Skill Files Are the Implementation
 
@@ -40,10 +41,13 @@ Each SKILL.md has YAML frontmatter (`name`, `description`, `argument-hint`) that
 
 ### Scripts
 
-Each skill has its own `scripts/plan.py` with argparse subcommands for deterministic operations:
+A single `scripts/plan.py` at the repo root provides all deterministic operations. Each skill symlinks to it from `skills/{name}/scripts/plan.py` so SKILL.md can resolve a skill-local path.
 
-- **Design** (5 commands): validate, status-counts, summary, extract-fields, model-distribution. Plus 3 build commands: validate-structure, assemble-prompts, compute-overlaps.
-- **Execute** (17 commands): All design commands, plus overlap-matrix, tasklist-data, ready-set, extract-task, resume-reset, update-status, retry-candidates, collect-files, circuit-breaker. Execute includes mutation commands (resume-reset, update-status) that atomically modify plan.json and a prefilter command (extract-task) that writes per-worker `.design/worker-task-{N}.json` files to reduce context window usage.
+- **Query** (12 commands): validate, status-counts, summary, overlap-matrix, tasklist-data, ready-set, extract-fields, model-distribution, retry-candidates, collect-files, circuit-breaker, extract-task
+- **Mutation** (2 commands): resume-reset, update-status — atomically modify plan.json via temp file + rename
+- **Build** (3 commands): validate-structure, assemble-prompts, compute-overlaps — used by the plan-writer for deterministic finalization
+
+Design uses a subset (query + build). Execute uses all commands. `extract-task` writes per-worker `.design/worker-task-{N}.json` files to reduce context window usage.
 
 Scripts use python3 stdlib only (no dependencies), support Python 3.8+, and follow a consistent CLI pattern: `python3 plan.py <command> [plan_path] [options]`. All output is JSON to stdout with exit code 0 for success, 1 for errors.
 
