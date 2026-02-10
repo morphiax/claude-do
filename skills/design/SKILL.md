@@ -69,13 +69,13 @@ You are the Goal Analyst on a planning team. Deeply understand the goal, explore
    - **full** — 9+ tasks, multiple viable approaches, cross-cutting concerns
    Output `complexity` (minimal|standard|full) and `complexityRationale` (1-2 sentences). For minimal: `recommendedTeam` can be empty.
 
-5. Recommend 2–5 expert roles. Each has a **type**: `scanner` (analyzes through a domain lens — what needs to happen) or `architect` (designs HOW to solve a sub-problem — proposes 2–3 strategies with tradeoffs, recommends one). Aim for a mix based on how much is figuring-out-what vs figuring-out-how. For each: name, role, type, model (opus for analysis, sonnet for implementation, haiku for verification), one-line mandate with specific concepts and prior art.
+5. Recommend 2–5 expert roles. Each has a **type**: `architect` (analyzes the codebase through a domain lens — what needs to happen) or `researcher` (searches externally — community patterns, libraries, idiomatic solutions, algorithms, frameworks, best practices). Aim for a mix: architects for understanding the codebase, researchers for finding the best external solutions. For each: name, role, type, model (opus for analysis, sonnet for implementation, haiku for verification), one-line mandate with specific concepts and prior art.
 
 ## Output
 
 Write to .design/goal-analysis.json:
 
-{"goal": "{original}", "refinedGoal": "{restated if different}", "concepts": [], "priorArt": [], "codebaseContext": {"stack": "", "conventions": "", "testCommand": "", "buildCommand": "", "lsp": {"available": []}, "relevantModules": [], "existingPatterns": []}, "subProblems": [], "approaches": [{"name": "", "description": "", "pros": [], "cons": [], "effort": "", "risk": "", "recommended": false, "rationale": ""}], "complexity": "minimal|standard|full", "complexityRationale": "", "scopeNotes": "", "recommendedTeam": [{"name": "", "role": "", "type": "scanner|architect", "model": "", "mandate": ""}]}
+{"goal": "{original}", "refinedGoal": "{restated if different}", "concepts": [], "priorArt": [], "codebaseContext": {"stack": "", "conventions": "", "testCommand": "", "buildCommand": "", "lsp": {"available": []}, "relevantModules": [], "existingPatterns": []}, "subProblems": [], "approaches": [{"name": "", "description": "", "pros": [], "cons": [], "effort": "", "risk": "", "recommended": false, "rationale": ""}], "complexity": "minimal|standard|full", "complexityRationale": "", "scopeNotes": "", "recommendedTeam": [{"name": "", "role": "", "type": "architect|researcher", "model": "", "mandate": ""}]}
 
 Claim your task and mark completed. Read ~/.claude/teams/do-design/config.json for the lead's name, then:
 
@@ -155,7 +155,7 @@ Proceed to Step 3 unchanged. Two-tier fallback applies.
 
 ## Step 3: Grow Team with Experts, Critic, and Plan-Writer (standard/full only)
 
-Read `.design/goal-analysis.json` for `recommendedTeam` array (each entry has `type`: `scanner` or `architect`). Record array length as `{expectedExpertCount}`.
+Read `.design/goal-analysis.json` for `recommendedTeam` array (each entry has `type`: `architect` or `researcher`). Record array length as `{expectedExpertCount}`.
 
 1. Create TaskList entries with dependencies:
    - For each expert: `TaskCreate` with mandate as subject
@@ -163,14 +163,14 @@ Read `.design/goal-analysis.json` for `recommendedTeam` array (each entry has `t
    - `TaskCreate` for plan-writer (subject: "Merge expert analyses, validate, and write plan.json")
    - Wire via `TaskUpdate(addBlockedBy)`: **Full**: critic blockedBy all experts, plan-writer blockedBy critic. **Standard**: plan-writer blockedBy all experts.
 2. Spawn all agents in parallel via `Task(subagent_type: "general-purpose", team_name: "do-design", name: "{name}", model: "{model}")`:
-   - All experts (use scanner or architect prompt based on `type`)
+   - All experts (use architect or researcher prompt based on `type`)
    - **Full only**: `critic` (model: `opus`)
    - `plan-writer` (model: `opus`)
 
 **Scanner prompt** — fill `{goal}`, `{name}`, `{role}`, `{mandate}`:
 
 ```
-You are a {role} (domain scanner) on a planning team.
+You are a {role} (domain architect) on a planning team.
 
 **Goal**: {goal}
 **Your name**: {name}
@@ -193,29 +193,30 @@ Write to .design/expert-{name}.json with findings array and tasks array.
 Claim your task and mark completed.
 ```
 
-**Architect prompt** — fill `{goal}`, `{name}`, `{role}`, `{mandate}`:
+**Researcher prompt** — fill `{goal}`, `{name}`, `{role}`, `{mandate}`:
 
 ```
-You are a {role} (approach architect) on a planning team.
+You are a {role} (external researcher) on a planning team.
 
 **Goal**: {goal}
 **Your name**: {name}
 **Your mandate**: {mandate}
 
 ## Context
-Read .design/goal-analysis.json for goal decomposition, codebase context, approaches, and scope notes. Focus on the approaches array — drill into your sub-problem and design the concrete implementation.
+Read .design/goal-analysis.json for goal decomposition, codebase context, approaches, and scope notes.
 
 ## Instructions
-1. For your sub-problem, propose 2–3 concrete strategies. For each: detailed approach, concrete pros/cons (performance, maintainability, complexity, risk), assumptions it depends on, compatibility with the analyst's recommended approach.
-2. Recommend one strategy with rationale. Explain what would change your recommendation.
-3. Gather evidence: read source files, check patterns, use LSP if available, WebSearch/WebFetch for best practices.
-4. Produce task recommendations for the chosen strategy.
+1. Use WebSearch and WebFetch to research your mandate externally: community best practices, idiomatic solutions, existing libraries/frameworks, known algorithms, official documentation, and real-world examples.
+2. Evaluate what you find against the project's stack and conventions (from goal-analysis.json). Filter for what's actually applicable.
+3. For each relevant finding: source URL, what it solves, how it applies to this goal, any caveats or compatibility concerns.
+4. Read relevant source files in the codebase to understand current patterns and identify where external solutions would integrate.
+5. Produce concrete recommendations and task suggestions grounded in your research.
 
 ## Task Recommendations
-For each task: subject, description, type, files {create:[], modify:[]}, dependencies (by subject), chosenApproach, alternativesConsidered, agent spec: {role, model (opus/sonnet/haiku), approach, contextFiles [{path, reason}], assumptions [{claim, verify (shell cmd), severity: blocking|warning}], acceptanceCriteria [{criterion, check (shell cmd)}], rollbackTriggers, constraints}.
+For each task: subject, description, type (research|implementation|testing|configuration), files {create:[], modify:[]}, dependencies (by subject reference), agent spec: {role, model (opus/sonnet/haiku), approach (reference specific findings/patterns from your research), contextFiles [{path, reason}], assumptions [{claim, verify (shell cmd), severity: blocking|warning}], acceptanceCriteria [{criterion, check (shell cmd)}], rollbackTriggers, constraints}.
 
 ## Output
-Write to .design/expert-{name}.json with findings, approaches (2–3 evaluated strategies with pros/cons/recommendation), and tasks arrays.
+Write to .design/expert-{name}.json with research (array of findings with sources), recommendations, and tasks arrays.
 Claim your task and mark completed.
 ```
 
