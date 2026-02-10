@@ -292,7 +292,7 @@ Depth: 1 for empty blockedBy, else 1 + max(depth of blockedBy tasks). On unresol
 
 **Lead wait pattern**: After spawning all agents, wait. The plan-writer's `SendMessage` is delivered automatically. Parse JSON from message content.
 
-**Timeout protection**: If agents haven't completed after a reasonable period, proceed with available results. Note which agents timed out.
+**Do NOT poll**: Teammate messages are auto-delivered — never use `sleep`, `ls`, or Bash loops to check for agent output files. Simply wait; the next message you receive will be from a teammate or the system.
 
 After receiving the plan-writer's message: `SendMessage(type: "shutdown_request")` to each teammate, wait for confirmations, `TeamDelete(team_name: "do-design")`.
 
