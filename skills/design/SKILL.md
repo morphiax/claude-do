@@ -12,7 +12,7 @@ Thin-lead orchestrator: decompose a goal into `.design/plan.json` using a dynami
 
 - **Signaling**: Agents signal completion via TaskList and `SendMessage(type: "message")` to the lead. The lead parses JSON from message content.
 
-**MANDATORY: Execute ALL steps (1–4) for EVERY invocation. The lead is a lifecycle manager — it spawns agents and manages the team. ALL analysis happens inside agents. The lead's ONLY tools are: `TeamCreate`, `TeamDelete`, `TaskCreate`, `TaskUpdate`, `TaskList`, `SendMessage`, `Task`, `AskUserQuestion`, `Bash` (cleanup/verification only), and `Read` (only `.design/goal-analysis.json` during Complexity Branching). No other tools — no MCP tools, no `Grep`, no `Glob`, no `LSP`, no source file reads. The ONLY valid output of this skill is `.design/plan.json` — produced by the agent team. This applies regardless of goal type, complexity, or apparent simplicity. Audits, reviews, research, one-line fixes — all go through the team. No exceptions exist. If you are tempted to "just do it directly," STOP — that impulse is the exact failure mode this rule prevents.**
+**MANDATORY: Execute ALL steps (1–4) for EVERY invocation. The lead is a lifecycle manager — it spawns agents and manages the team. ALL analysis happens inside agents. The lead's ONLY tools are: `TeamCreate`, `TeamDelete`, `TaskCreate`, `TaskUpdate`, `TaskList`, `SendMessage`, `Task`, `AskUserQuestion`, and `Bash` (cleanup, verification, and `python3 $PLAN_CLI` invocations only). No other tools — no MCP tools, no `Grep`, no `Glob`, no `LSP`, no source file reads. The ONLY valid output of this skill is `.design/plan.json` — produced by the agent team. This applies regardless of goal type, complexity, or apparent simplicity. Audits, reviews, research, one-line fixes — all go through the team. No exceptions exist. If you are tempted to "just do it directly," STOP — that impulse is the exact failure mode this rule prevents.**
 
 **STOP GATE — Read before proceeding. These are the exact failure modes that have occurred repeatedly:**
 1. **"The goal is simple enough to analyze directly"** — WRONG. Every goal goes through the team. Spawn the analyst.
@@ -23,11 +23,23 @@ Thin-lead orchestrator: decompose a goal into `.design/plan.json` using a dynami
 
 **If you catch yourself rationalizing why THIS goal is the exception — it is not. Proceed to Step 1.**
 
+### Script Setup
+
+Resolve the plugin root directory (the directory containing `.claude-plugin/` and `skills/`). Set `PLAN_CLI` to the skill-local plan helper script:
+
+```
+PLAN_CLI = {plugin_root}/skills/design/scripts/plan.py
+```
+
+All deterministic operations use: `python3 $PLAN_CLI <command> [args]` via Bash. Parse JSON output. Every command outputs `{"ok": true/false, ...}` to stdout.
+
+---
+
 ## Step 1: Pre-flight
 
 1. Use `AskUserQuestion` to clarify only when reasonable developers would choose differently and the codebase doesn't answer it.
 2. If >12 tasks likely needed, suggest phases. Design only phase 1.
-3. Check for existing `.design/plan.json`. If it exists with non-pending statuses, count task statuses and use `AskUserQuestion`: "Existing plan has {N completed}/{M failed}/{P pending} tasks. Overwrite?" If declined, output "Keeping existing plan. Run /do:execute to continue." and STOP.
+3. Check for existing `.design/plan.json`: Run `python3 $PLAN_CLI status-counts .design/plan.json` via Bash. Parse JSON output. If `ok` is false, skip (no existing plan). If `ok` is true and `isResume` is true (non-pending statuses exist), use `AskUserQuestion`: "Existing plan has {counts} tasks. Overwrite?" (format counts from the `counts` field). If declined, output "Keeping existing plan. Run /do:execute to continue." and STOP.
 4. Clean up stale staging (preserve history): `mkdir -p .design/history && find .design -mindepth 1 -maxdepth 1 ! -name history -exec rm -rf {} +`
 
 ## Step 2: Team + Goal Analyst
@@ -88,7 +100,7 @@ Claim your task and mark completed. Read ~/.claude/teams/do-design/config.json f
 
 ## Complexity Branching
 
-Read `.design/goal-analysis.json` — extract `complexity`, `complexityRationale`, and `recommendedTeam`. Echo:
+Run: `python3 $PLAN_CLI extract-fields .design/goal-analysis.json complexity complexityRationale recommendedTeam` via Bash. Parse JSON output. Extract `complexity`, `complexityRationale`, and `recommendedTeam` from the `fields` object. Echo:
 
 ```
 Complexity: {complexity} — {complexityRationale}
@@ -122,10 +134,12 @@ You are a lightweight plan writer. Generate .design/plan.json for a minimal-comp
 1. Read .design/goal-analysis.json for decomposition, codebase context, approaches, and scope notes.
 2. Generate 1–3 tasks from the recommended approach. Each task needs: subject, description (explain WHY and connection to dependents), activeForm, status (pending), result (null), attempts (0), blockedBy (array of indices), metadata: {type, files: {create:[], modify:[]}, reads}, agent: {role, model (opus/sonnet/haiku), approach, contextFiles [{path, reason}], assumptions [{claim, verify (shell cmd), severity: blocking|warning}], acceptanceCriteria [{criterion, check (shell cmd)}], rollbackTriggers ["If X, STOP and return BLOCKED: reason"], constraints}.
 3. Auto-generate safety: for each modify path add blocking assumption `test -f {path}`, convert blocking assumptions to rollback triggers.
-4. Validate: tasks >= 1, no concurrent file conflicts, all blockedBy valid (no cycles), every task has >= 1 assumption and >= 1 rollback trigger, total <= 3.
-5. Assemble worker prompts: for each task, build a prompt string using sections S1-S9: S1 (role + expertise), S2 (pre-flight assumptions checklist), S3 (context files + project info), S4 (task subject + description + files), S5 (approach/priorArt/fallback if any), S6 (dependency placeholder if blockedBy non-empty), S7 (rollback triggers), S8 (acceptance criteria + no-commit rule), S9 (worker log path `.design/worker-{planIndex}.log` + FINAL line format: COMPLETED:/FAILED:/BLOCKED:). Store in each task's `prompt` field.
-6. Compute file overlaps: for each pair of tasks that can run concurrently (neither transitively depends on the other), check for intersecting files in metadata.files.create and metadata.files.modify. Store in each task's `fileOverlaps` field (array of conflicting planIndex integers; empty if none).
-7. Write .design/plan.json: {schemaVersion: 3, goal, context: {stack, conventions, testCommand, buildCommand, lsp}, progress: {completedTasks: [], surprises: [], decisions: []}, tasks: [...]} — each task includes `prompt` and `fileOverlaps` fields.
+4. Write .design/plan-draft.json: {schemaVersion: 3, goal, context: {stack, conventions, testCommand, buildCommand, lsp}, progress: {completedTasks: [], surprises: [], decisions: []}, tasks: [...]}. Do NOT include `prompt` or `fileOverlaps` fields — scripts will add them.
+5. Resolve the plugin root directory (the directory containing `.claude-plugin/` and `skills/`). Set PLAN_CLI to {plugin_root}/skills/design/scripts/plan.py. Run the following scripts in order via Bash:
+   - `python3 $PLAN_CLI validate-structure .design/plan-draft.json` — fix any reported issues before proceeding.
+   - `python3 $PLAN_CLI assemble-prompts .design/plan-draft.json` — assembles S1-S9 worker prompts into each task's `prompt` field.
+   - `python3 $PLAN_CLI compute-overlaps .design/plan-draft.json` — computes file overlap matrix into each task's `fileOverlaps` field.
+6. Rename to final plan: `mv .design/plan-draft.json .design/plan.json`
 
 ## Output
 
@@ -155,7 +169,7 @@ Proceed to Step 3 unchanged. Two-tier fallback applies.
 
 ## Step 3: Grow Team with Experts, Critic, and Plan-Writer (standard/full only)
 
-Read `.design/goal-analysis.json` for `recommendedTeam` array (each entry has `type`: `architect` or `researcher`). Record array length as `{expectedExpertCount}`.
+Use the `recommendedTeam` array extracted during Complexity Branching (each entry has `type`: `architect` or `researcher`). Record array length as `{expectedExpertCount}`.
 
 1. Create TaskList entries with dependencies:
    - For each expert: `TaskCreate` with mandate as subject
@@ -276,52 +290,25 @@ For each task, verify all required fields and fill gaps:
 - Cross-task deps: if task B modifies/creates files overlapping task A (in blockedBy closure), add blocking assumption
 - Convert every blocking assumption to a rollback trigger
 
-## Phase 4: Validate (7 checks)
-1. Tasks >= 1. 2. No concurrent file conflicts (create/modify). 3. No read/write overlaps between concurrent tasks. 4. All blockedBy valid, no cycles. 5. Every task has >= 1 assumption and >= 1 rollback trigger. 6. Total tasks <= 12. 7. Critical path <= 4 (restructure for parallelism if exceeded).
-Self-repair: fix and re-validate. After 2 attempts, include in validationIssues and proceed.
+## Phase 4: Write Draft Plan
 
-## Phase 5: Assemble Worker Prompts
-
-For each task, concatenate sections S1-S9. Include conditional sections only when referenced field is non-empty.
-
-**S1: Role** [always] `You are a {agent.role}` + ` with expertise in {agent.expertise}` [if exists]
-
-**S2: Pre-flight** [always] `## Pre-flight` / `Verify before starting. If BLOCKING check fails, return BLOCKED: followed by the reason.` + agent.assumptions as checklist: `- [ ] [{severity}] {claim}: \`{verify}\``
-
-**S3: Context** [always] `## Context` / `Read before implementing:` + agent.contextFiles as `- {path} — {reason}` + `Project: {context.stack}. Conventions: {context.conventions}.` + `Test: {context.testCommand}` [if exists] + `Use LSP (goToDefinition, findReferences, hover) over Grep for {context.lsp.available}.` [if exists] + `Use WebSearch/WebFetch for current information. Prefer web tools over assumptions when external facts are needed.` [if metadata.type = research]
-
-**S4: Task** [always] `## Task: {task.subject}` / `{task.description}` / `Files to create: {metadata.files.create or "(none)"}` / `Files to modify: {metadata.files.modify or "(none)"}` + agent.constraints as bullets under `Constraints:`
-
-**S5: Strategy** [if any exists] `Approach: {agent.approach}` [if exists] / `Apply: {agent.priorArt}` [if exists] / `Fallback: {agent.fallback}` [if exists]
-
-**S6: Dependency placeholder** [if task.blockedBy non-empty] Emit: `[Dependency results — deferred: lead appends actual results at spawn time]`
-
-**S7: Rollback** [always] `Rollback triggers — STOP immediately if any occur:` + agent.rollbackTriggers as bullets
-
-**S8: Acceptance** [always] `## After implementing` / `1. Verify acceptance criteria:` + agent.acceptanceCriteria as `- [ ] {criterion}: \`{check}\`` + `   Fix failures before proceeding.` / `2. Do NOT stage or commit — the lead handles git after the batch completes.`
-
-**S9: Output format** [always] Emit verbatim:
-   ## Output format
-   The FINAL line of your output MUST be one of:
-   - COMPLETED: {one-line summary}
-   - FAILED: {reason}
-   - BLOCKED: {reason}
-
-   Do NOT write log files. Your FINAL status line is the only output consumed by the orchestrator.
-
-Store the assembled prompt string in each task's `prompt` field.
-
-## Phase 6: Compute File Overlap Matrix
-
-Build a global concurrency-aware file overlap matrix. Two tasks can run concurrently if neither transitively depends on the other through blockedBy chains.
-
-For each pair of tasks that can run concurrently, build a set of all file paths from each task's metadata.files.create and metadata.files.modify. Check for intersections between the two tasks' file sets. Record which task indices conflict.
-
-The result is a mapping from each planIndex to an array of other planIndices that have file conflicts AND can run concurrently with it. Store in each task's `fileOverlaps` field (array of planIndex integers; empty array if no conflicts).
-
-## Phase 7: Write .design/plan.json
+Write `.design/plan-draft.json` with the merged, validated, and enriched tasks from Phases 1-3.
 Schema (schemaVersion 3): {schemaVersion: 3, goal, context: {stack, conventions, testCommand, buildCommand, lsp}, progress: {completedTasks: [], surprises: [], decisions: []}, tasks: [...]}
-Each task uses the schema from Phase 2 plus: `prompt` (assembled worker prompt from Phase 5), `fileOverlaps` (array of conflicting planIndex integers from Phase 6). Tasks ordered (index = ID, 0-based), blockedBy references indices, status: pending|in_progress|completed|failed|blocked|skipped. Note: execute will strip `prompt` from completed tasks during progressive trimming to reduce plan size.
+Each task uses the schema from Phase 2. Tasks ordered (index = ID, 0-based), blockedBy references indices, status: pending. Do NOT include `prompt` or `fileOverlaps` fields — scripts will add them.
+
+## Phase 5: Script-Assisted Finalization
+
+Resolve the plugin root directory (the directory containing `.claude-plugin/` and `skills/`). Set `PLAN_CLI` to `{plugin_root}/skills/design/scripts/plan.py`.
+
+Run the following scripts in order via Bash. Parse JSON output after each. If any returns `ok: false`, fix the reported issues in `.design/plan-draft.json` and re-run. After 2 failed attempts at validation, include issues in progress.decisions and proceed.
+
+1. **Validate structure**: `python3 $PLAN_CLI validate-structure .design/plan-draft.json` — runs 7 structural checks (task count, file conflicts, cycle detection, blockedBy validity, assumption coverage, critical path depth). Fix any reported `issues` before proceeding.
+2. **Assemble worker prompts**: `python3 $PLAN_CLI assemble-prompts .design/plan-draft.json` — assembles S1-S9 worker prompts from task fields and stores in each task's `prompt` field. The script handles all template logic (role, pre-flight, context, task details, strategy, dependency placeholder, rollback, acceptance, output format).
+3. **Compute file overlaps**: `python3 $PLAN_CLI compute-overlaps .design/plan-draft.json` — computes concurrent file overlap matrix and stores in each task's `fileOverlaps` field.
+
+## Phase 6: Finalize Plan
+
+After all scripts succeed, rename the draft to the final plan: `mv .design/plan-draft.json .design/plan.json`
 
 ## Output
 Claim your task and mark completed. Read ~/.claude/teams/do-design/config.json for the lead's name, then:
@@ -341,20 +328,22 @@ After receiving the plan-writer's message: `SendMessage(type: "shutdown_request"
 **Two-tier fallback** (standard/full only) — triggered when the team fails to produce `.design/plan.json`:
 
 - **Tier 1**: Shut down team. Spawn single plan-writer Task subagent (not teammate) with the prompt above, reading `.design/expert-*.json` and `.design/critic.json` (full only).
-- **Tier 2**: If retry fails, merge inline with context minimization — process one expert file at a time, extract tasks arrays, merge incrementally. Read critic for blocking issues only (full). Execute Phases 2–5 with reduced scope.
+- **Tier 2**: If retry fails, merge inline with context minimization — process one expert file at a time, extract tasks arrays, merge incrementally. Read critic for blocking issues only (full). Execute Phases 2–3 analytically, then attempt script finalization (Phase 5). If scripts are unavailable, perform validation, prompt assembly (S1-S9 concatenation), and overlap computation inline with reduced scope, then write `.design/plan.json` directly.
 
 ## Step 4: Cleanup & Summary
 
-1. **Verify**: `python3 -c "import json; p=json.load(open('.design/plan.json')); assert p.get('schemaVersion') == 3, 'schemaVersion must be 3'"`. Use stored `taskCount`/`maxDepth` from plan-writer's SendMessage.
+1. **Verify**: Run `python3 $PLAN_CLI validate .design/plan.json` via Bash. Parse JSON output. If `ok` is false, report the error and stop. Use stored `taskCount`/`maxDepth` from plan-writer's SendMessage.
 2. **Clean up TaskList**: Delete all tasks created during planning so `/do:execute` starts clean.
-3. **Output summary** using stored plan-writer data:
+3. **Compute summary data**: Run `python3 $PLAN_CLI summary .design/plan.json` via Bash. Parse JSON output. Extract `goal`, `taskCount`, `maxDepth`, `depthSummary`, and `modelDistribution`.
+4. **Output summary** using computed data:
 
 ```
 Plan: {goal}
 Tier: {complexity}
 Tasks: {taskCount}, max depth {maxDepth}
-Models: {model distribution, for example: 2 opus, 3 sonnet, 1 haiku}
+Models: {modelDistribution}
 
+{depthSummary formatted as:}
 Depth 1:
 - Task 0: {subject} ({model})
 - Task 1: {subject} ({model})
@@ -367,7 +356,5 @@ Test: {testCommand}
 
 Run /execute to begin.
 ```
-
-To compute model distribution: read `.design/plan.json`, count occurrences of each `agent.model` value across all tasks, format as `"{count} {model}"` joined by commas.
 
 **Goal**: $ARGUMENTS
