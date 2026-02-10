@@ -299,21 +299,14 @@ For each task, concatenate sections S1-S9. Include conditional sections only whe
 
 **S8: Acceptance** [always] `## After implementing` / `1. Verify acceptance criteria:` + agent.acceptanceCriteria as `- [ ] {criterion}: \`{check}\`` + `   Fix failures before proceeding.` / `2. Do NOT stage or commit — the lead handles git after the batch completes.`
 
-**S9: Output format** [always] Emit verbatim (substitute {planIndex}):
-   ## After implementing (continued)
-   3. Write your full work log (reasoning, commands run, decisions made, issues encountered) to `.design/worker-{planIndex}.log` using the Write tool. This log is consumed by the result processor — include enough detail for verification.
-
+**S9: Output format** [always] Emit verbatim:
    ## Output format
    The FINAL line of your output MUST be one of:
    - COMPLETED: {one-line summary}
-   - FAILED: {one-line reason}
+   - FAILED: {reason}
    - BLOCKED: {reason}
 
-   Return ONLY the status line as your final output. All detailed work output goes in the log file above.
-
-   Example valid outputs:
-   ...writing log.\nCOMPLETED: Added user authentication middleware with JWT
-   ...writing log.\nBLOCKED: Required package pg not installed
+   Do NOT write log files. Your FINAL status line is the only output consumed by the orchestrator.
 
 Store the assembled prompt string in each task's `prompt` field.
 

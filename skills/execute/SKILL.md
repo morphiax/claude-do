@@ -21,7 +21,7 @@ Execute a `.design/plan.json` using dependency-graph scheduling with Task subage
 **Delegated to subagents** (lead never reads raw `.design/plan.json`, except during fallback recovery):
 
 - Plan reading, validation, TaskList creation → Setup Subagent
-- Result parsing (from worker log files), spot-checks, acceptance checks, retry prompt assembly, plan mutation, progress tracking, cascading failures, progressive trimming → Batch Finalizer Subagent
+- Result parsing, spot-checks, acceptance checks, retry prompt assembly, plan mutation, progress tracking, cascading failures, progressive trimming → Batch Finalizer Subagent
 
 **Fallback rule**: If any delegation subagent fails (non-zero exit, malformed JSON output, or missing required fields), the lead performs that step's scoped minimal-mode fallback inline. Each step (Setup, Finalizer) defines its own fallback with reduced scope — see the **Fallback (minimal mode)** block at each step. Never abort execution due to a subagent infrastructure failure.
 
@@ -158,7 +158,7 @@ Task:
 1. **Role and mission**:
 
    ```
-   You are a batch finalizer. You process worker results and update plan state in a single pass. Responsibilities: (1) read task status lines and detailed output from worker log files (.design/worker-{planIndex}.log), (2) parse results, verify file artifacts, run acceptance criteria, (3) determine retries and assemble retry prompts, (4) apply results to .design/plan.json, (5) perform progressive trimming on completed tasks, (6) compute cascading failures and circuit breaker. You read task metadata from .design/plan.json and are the ONLY agent that writes to .design/plan.json.
+   You are a batch finalizer. You process worker results and update plan state in a single pass. Responsibilities: (1) parse task status lines provided in the input, (2) verify file artifacts and run acceptance criteria, (3) determine retries and assemble retry prompts, (4) apply results to .design/plan.json, (5) perform progressive trimming on completed tasks, (6) compute cascading failures and circuit breaker. You read task metadata from .design/plan.json and are the ONLY agent that writes to .design/plan.json.
    ```
 
 2. **Input data section** — the lead assembles this from task status lines and round metadata:
@@ -175,7 +175,7 @@ Task:
 
    Append one line per task. If surprises/decisions exist, append `### Surprises/Decisions` with bullets.
 
-The finalizer reads task metadata from plan.json and detailed output from `.design/worker-{planIndex}.log` (fallback to status line if missing).
+The finalizer reads task metadata from plan.json. Worker results are provided as status lines in the input — no log files.
 
 3. **Processing instructions**:
 
@@ -184,7 +184,7 @@ The finalizer reads task metadata from plan.json and detailed output from `.desi
 
    For each task:
 
-   1. Parse status line. Match `^(COMPLETED|FAILED|BLOCKED): .+`. If no match, treat as FAILED. Read `.design/worker-{planIndex}.log` for failure details (if missing, use "No status line returned and no log file found").
+   1. Parse status line. Match `^(COMPLETED|FAILED|BLOCKED): .+`. If no match, treat as FAILED with reason "No valid status line returned".
 
    2. Spot-check files: For creates, run `test -f {path}`. For modifies, verify in `git diff --name-only`. Flag unexpected diffs as warnings. If spot-check fails but agent reported COMPLETED: override to FAILED.
 
@@ -192,7 +192,7 @@ The finalizer reads task metadata from plan.json and detailed output from `.desi
 
    4. If BLOCKED: record as blocked — no retry, no cleanup.
 
-   5. If FAILED and attempts < 3: Read worker log for context. Clean up: `git checkout -- {modifies}` and `rm -f {creates}`. Delete stale log: `rm -f .design/worker-{planIndex}.log`. Assemble retry prompt: (a) original prompt from the task's `prompt` field in plan.json, (b) retry context block with attempt number and failure reason, (c) fallback strategy if exists: "IMPORTANT: The primary approach failed. Use this strategy instead: {fallback}", (d) acceptance failures if relevant: "The following acceptance checks failed — ensure they pass before reporting COMPLETED: {failures}".
+   5. If FAILED and attempts < 3: Clean up: `git checkout -- {modifies}` and `rm -f {creates}`. Assemble retry prompt: (a) original prompt from the task's `prompt` field in plan.json, (b) retry context block with attempt number and failure reason from status line, (c) fallback strategy if exists: "IMPORTANT: The primary approach failed. Use this strategy instead: {fallback}", (d) acceptance failures if relevant: "The following acceptance checks failed — ensure they pass before reporting COMPLETED: {failures}".
 
    6. If FAILED and attempts >= 3: record as failed — no retry.
 
@@ -320,7 +320,7 @@ After all batch workers return, extract the FINAL status line from each worker's
 
 Spawn the Batch Finalizer Subagent using the prompt template from Section B.
 
-Assemble finalizer input: round number, total task count, plan file path (`.design/plan.json`), and for each task: planIndex, status line (FINAL line only), attempts count, surprises/decisions. The lead does NOT embed raw output — finalizer reads from worker log files.
+Assemble finalizer input: round number, total task count, plan file path (`.design/plan.json`), and for each task: planIndex, status line (FINAL line only), attempts count, surprises/decisions.
 
 Parse the final line of the finalizer's return value as JSON. The finalizer processes results and updates plan state in a single pass.
 
@@ -360,7 +360,7 @@ After all rounds (or after circuit breaker abort or deadlock):
    - Skipped: {count} — {subjects}
    - Follow-up recommendations if any failures
 
-3. Clean up intermediate artifacts: `rm -f .design/worker-*.log`
+3. No intermediate artifacts to clean up.
 4. If fully successful: archive completed plan to history: `mkdir -p .design/history && mv .design/plan.json ".design/history/$(date -u +%Y%m%dT%H%M%SZ)-plan.json"`. Return "All {count} tasks completed."
 5. If partial: leave `.design/plan.json` for resume. Return "Execution incomplete. {done}/{total} completed."
 
