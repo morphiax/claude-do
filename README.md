@@ -3,7 +3,7 @@
 > Team-based planning and production-grade execution for Claude Code
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Version](https://img.shields.io/badge/version-1.2.4-green.svg)
+![Version](https://img.shields.io/badge/version-1.2.5-green.svg)
 ![Claude Code](https://img.shields.io/badge/Claude%20Code-2.1.32%2B-orange.svg)
 
 ## Why do?
