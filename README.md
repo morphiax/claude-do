@@ -3,14 +3,14 @@
 > Team-based planning and production-grade execution for Claude Code
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Version](https://img.shields.io/badge/version-1.1.0-green.svg)
+![Version](https://img.shields.io/badge/version-1.2.4-green.svg)
 ![Claude Code](https://img.shields.io/badge/Claude%20Code-2.1.32%2B-orange.svg)
 
 ## Why do?
 
 Most planning plugins use a single agent to decompose goals. `do` is different:
 
-- **A team plans your work, not one agent.** `/do:design` spawns a goal analyst, domain scanners, approach architects, and a critic that stress-tests the plan before it ships. Adaptive complexity scaling (minimal/standard/full tiers) matches team size to goal difficulty.
+- **A team plans your work, not one agent.** `/do:design` spawns a goal analyst, domain architects, external researchers, and a critic that stress-tests the plan before it ships. Adaptive complexity scaling (minimal/standard/full tiers) matches team size to goal difficulty.
 - **Plans are execution blueprints, not task lists.** Every task includes assumptions with shell-verified pre-flight checks, acceptance criteria with automated validation, rollback triggers, context files, and agent specialization (role, model, approach).
 - **Execution has safety rails.** `/do:execute` runs dependency-graph scheduling with retry budgets (3 attempts with failure context), cascading failure propagation, a circuit breaker (abort at >50% skip rate), progressive plan trimming, and git checkpoints per batch.
 
@@ -48,17 +48,17 @@ A thin-lead orchestrator spawns a dynamically growing team. The lead never analy
    - **Full** (9+ tasks): experts + critic + plan-writer — the critic challenges assumptions, evaluates coherence, and flags over/under-engineering before the plan-writer synthesizes
 4. **Cleanup & Summary** — Verifies `plan.json` schema, tears down the team, reports task count and dependency depth
 
-Experts come in two types: **scanners** (analyze _what_ needs to happen from a domain lens) and **architects** (design _how_ to solve sub-problems with 2-3 concrete strategies). Each writes `.design/expert-{name}.json`. The critic writes `.design/critic.json`. Two-tier fallback ensures plan generation even if the team fails.
+Experts come in two types: **architects** (analyze the codebase — structure, patterns, what needs to change) and **researchers** (search externally via WebSearch/WebFetch — community patterns, libraries, idiomatic solutions, best practices). Each writes `.design/expert-{name}.json`. The critic writes `.design/critic.json`. Two-tier fallback ensures plan generation even if the team fails.
 
 ### /do:execute — Dependency-graph scheduling
 
-A thin-lead orchestrator delegates all mechanical work to subagents:
+A thin-lead orchestrator with inline verification:
 
-- **Setup Subagent** — Reads and validates `.design/plan.json`, creates the task list, computes file overlap matrix for parallel safety, assembles worker prompts into `.design/tasks.json`
-- **Workers** — One Task subagent per ready task. Workers self-read full instructions from `.design/tasks.json` via a bootstrap prompt, return COMPLETED/FAILED/BLOCKED status lines, and write detailed logs to `.design/worker-{N}.log`
-- **Batch Finalizer** — Parses worker results, spot-checks file artifacts, runs acceptance criteria, determines retries with failure context, updates `.design/plan.json`, performs progressive trimming on completed tasks, and computes cascading failures
+- **Setup Subagent** — Reads and validates `.design/plan.json`, performs batch validation, creates the task list
+- **Workers** — One Task subagent per ready task. Workers self-read full instructions (including assembled prompts) from `.design/plan.json` via a bootstrap prompt, return COMPLETED/FAILED/BLOCKED status lines
+- **Inline verification** — The lead verifies results via one batched Bash script per round (spot-checks + acceptance criteria), then updates plan.json directly (status, progressive trimming, cascading failures)
 
-The lead handles only: worker spawning, git commits per batch, circuit breaker evaluation, and user interaction. Ready-sets are computed dynamically from `blockedBy` dependencies — no pre-computed waves. Completed plans archive to `.design/history/`.
+The lead handles: worker spawning, result verification, plan updates, retry assembly, git commits per round, circuit breaker evaluation, and user interaction. Ready-sets are computed dynamically from `blockedBy` dependencies — no pre-computed waves. Completed plans archive to `.design/history/`.
 
 ## Installation
 
