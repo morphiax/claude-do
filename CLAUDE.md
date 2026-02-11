@@ -43,11 +43,11 @@ Each SKILL.md has YAML frontmatter (`name`, `description`, `argument-hint`) that
 
 A single `scripts/plan.py` at the repo root provides all deterministic operations. Each skill symlinks to it from `skills/{name}/scripts/plan.py` so SKILL.md can resolve a skill-local path.
 
-- **Query** (12 commands): validate, status-counts, summary, overlap-matrix, tasklist-data, worker-pool, extract-fields, model-distribution, retry-candidates, collect-files, circuit-breaker, extract-task
+- **Query** (7 commands): status, summary, overlap-matrix, tasklist-data, worker-pool, retry-candidates, circuit-breaker
 - **Mutation** (2 commands): resume-reset, update-status — atomically modify plan.json via temp file + rename
-- **Build** (3 commands): validate-structure, assemble-prompts, compute-overlaps — used by the plan-writer for deterministic finalization
+- **Build** (1 command): finalize — validates structure, assembles prompts, computes overlaps in one atomic operation
 
-Design uses a subset (query + build). Execute uses all commands. `worker-pool` computes optimal worker count and role-based naming from the dependency graph. `extract-task` writes per-worker `.design/worker-task-{N}.json` files to reduce context window usage.
+Design uses query + finalize. Execute uses all commands. `worker-pool` computes optimal worker count and role-based naming from the dependency graph. Workers read `plan.json` directly — no per-worker task files needed.
 
 Scripts use python3 stdlib only (no dependencies), support Python 3.8+, and follow a consistent CLI pattern: `python3 plan.py <command> [plan_path] [options]`. All output is JSON to stdout with exit code 0 for success, 1 for errors.
 
@@ -60,7 +60,7 @@ The two skills communicate through `.design/plan.json` (schemaVersion 3) written
 - Tasks use dependency-only scheduling — no wave field in task schema, workers self-organize by claiming unblocked tasks from the TaskList based on `blockedBy` dependencies
 - Each task includes a concise assembled worker brief (`prompt` field) and file overlap analysis (`fileOverlaps` field) — design produces these during plan generation via scripts
 - Progressive trimming: completed tasks are stripped of verbose agent fields (including `prompt`) to reduce plan size as execution proceeds
-- Analysis artifacts (goal-analysis.json, expert-\*.json, critic.json) are preserved after plan generation for execute workers to reference via contextFiles
+- Expert artifacts (`expert-*.json`) are optional and preserved after plan generation for execute workers to reference via contextFiles
 - Plan history: completed plans are archived to `.design/history/{timestamp}-plan.json` on successful execution; design pre-flight preserves this subdirectory during cleanup
 
 ### Execution Model
@@ -70,20 +70,18 @@ Both skills use the **main conversation as team lead** with Agent Teams for coor
 - **Lead** (main conversation): creates team via `TeamCreate`, spawns teammates, manages lifecycle via `SendMessage`/`TaskCreate`/`TaskUpdate`/`TaskList`, performs verification, updates plan state. Tool-restricted to orchestration — never reads project source files.
 - **Teammates**: specialist agents (analysts, experts, workers) spawned into the team. Signal completion via `SendMessage` to the lead. Read `~/.claude/teams/{team-name}/config.json` to discover the lead's name.
 
-`/do:design` — organic, research-driven team builder (`do-design` team):
+`/do:design` — lead-determined dynamic team (`do-design` team):
 
-- **Lead responsibilities** (never delegated): pre-flight, team lifecycle, reading analyst's recommendations, spawning agents based on analyst's findings, lightweight verification, summary output. The lead NEVER analyzes the goal or reads source files.
-- **Adaptive team growth**: The team starts with a single goal analyst, then grows organically based on what the analyst discovers. The analyst recommends expert composition — could be 1 agent or 5, all architects or all researchers, depending on the goal. No rigid tiers or forced pipeline.
-- **Research-first analyst**: First teammate spawned. Does deep multi-hop research — web search for academic approaches, existing libraries with URLs and versions, community patterns, prior art. Uses `sequential-thinking` MCP (if available) + codebase exploration. Quality bar: specific algorithms with names, specific libraries with applicability assessments, practical tradeoffs. Writes `.design/goal-analysis.json`.
-- **Mandate-based experts**: Two types. **Architects** analyze the codebase through a domain lens. **Researchers** do deep external research via WebSearch/WebFetch. Each receives a one-line mandate (not a procedure list) and writes `.design/expert-{name}.json`.
-- **Plan-writer**: Merges expert analyses, deduplicates, ensures MECE coverage, records decisions. Runs script-assisted finalization (validate-structure, assemble-prompts, compute-overlaps) and writes `.design/plan.json`. For trivial goals (analyst recommends no experts), a single plan-writer Task subagent handles it directly.
-- **Natural communication**: All agents report findings in natural language via SendMessage. No rigid JSON protocols or signal codes.
+- **Lead responsibilities** (never delegated): pre-flight, quick goal research (WebSearch/codebase scan), determine which expert perspectives are needed, spawn experts, collect findings, merge or delegate to plan-writer, run `finalize` script, summary output.
+- **Dynamic expert team**: The lead reads the goal, does brief research, then determines team composition. Expert types include: **architect** (codebase structure, patterns), **researcher** (external libraries, best practices), **domain-specialist** (security, performance, i18n, etc.). Team size varies by goal complexity — simple goals may need only an architect; complex goals may need multiple perspectives.
+- **Expert prompts**: Each expert receives goal + focus area (e.g., "codebase architecture", "external research"). Experts analyze and recommend tasks with full agent specs. May write `.design/expert-{name}.json` or report directly to lead.
+- **Plan assembly**: Lead merges expert findings (inline or via plan-writer Task), runs `python3 $PLAN_CLI finalize .design/plan.json` to validate structure, assemble prompts, and compute overlaps in one atomic operation.
 - **Two-tier fallback**: If the team fails to produce `.design/plan.json` (1) retry with a single plan-writer Task subagent, or (2) merge inline with context minimization
 
 `/do:execute` — persistent self-organizing workers with event-driven lead (`do-execute` team):
 
 - **Lead responsibilities**: plan reading/validation/TaskList creation (inline — purely mechanical, no subagent), spawn persistent worker teammates once, monitor execution via event-driven messaging, update `.design/plan.json` (status, trimming, cascading failures via `update-status` script), wake idle workers when new tasks unblock, final batched verification after all tasks complete, user interaction (`AskUserQuestion`), circuit breaker evaluation, retry coordination. Natural communication — the lead interprets worker messages in plain language.
-- **Worker teammates** (named by `agent.role`, e.g. `api-developer`, `test-writer`): persistent workers spawned once via `worker-pool` command. Workers self-organize: check TaskList for pending unblocked tasks, claim one, read pre-extracted task file (`.design/worker-task-{N}.json`), execute, commit their own changes (`git add` + `git commit`), mark complete, report to lead naturally, then claim the next available task. Workers go idle when no tasks are available and are woken by the lead when new tasks unblock.
+- **Worker teammates** (named by `agent.role`, e.g. `api-developer`, `test-writer`): persistent workers spawned once via `worker-pool` command. Workers self-organize: check TaskList for pending unblocked tasks, claim one, read `.design/plan.json tasks[planIndex].prompt` directly, execute, commit their own changes (`git add` + `git commit`), mark complete, report to lead naturally, then claim the next available task. Workers go idle when no tasks are available and are woken by the lead when new tasks unblock.
 - **Peer communication**: workers message each other directly when they find issues with prior work (e.g., a bug in code committed by another worker). The affected worker fixes the issue and confirms. Lead is CC'd but does not intervene unless escalated.
 - **File ownership via dependencies**: the lead augments TaskList dependencies at setup using the overlap matrix — concurrent tasks touching the same files get runtime `blockedBy` constraints so they serialize naturally. No explicit file ownership assignment needed.
 - **Deferred verification**: workers verify their own acceptance criteria during execution. The lead runs a single batched final verification (spot-checks + acceptance criteria) after all tasks complete, instead of per-round checks.
@@ -97,7 +95,6 @@ Both skills use the **main conversation as team lead** with Agent Teams for coor
 
 - Claude Code 2.1.32+ with `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`
 - python3 3.8+ (for helper scripts)
-- `sequential-thinking` MCP server — used by the goal analyst for deep goal reasoning (fallback to inline reasoning if unavailable)
 
 ## Commit Conventions
 

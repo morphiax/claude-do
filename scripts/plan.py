@@ -2,15 +2,14 @@
 """plan.py - Deterministic operations for .design/plan.json manipulation.
 
 Query commands (read-only):
-  validate, status-counts, summary, overlap-matrix, tasklist-data, worker-pool,
-  extract-fields, model-distribution, retry-candidates, collect-files,
-  circuit-breaker, extract-task
+  status, summary, overlap-matrix, tasklist-data, worker-pool,
+  retry-candidates, circuit-breaker
 
 Mutation commands (modify plan.json):
   resume-reset, update-status
 
 Build commands (validation & enrichment):
-  validate-structure, assemble-prompts, compute-overlaps
+  finalize
 
 All commands output JSON to stdout with top-level 'ok' field.
 Exit code: 0 for success, 1 for errors.
@@ -145,8 +144,8 @@ def atomic_write(path: str, data: Any) -> None:
 # ============================================================================
 
 
-def cmd_validate(args: argparse.Namespace) -> NoReturn:
-    """Validate plan.json schema and structure."""
+def cmd_status(args: argparse.Namespace) -> NoReturn:
+    """Validate plan and return status counts in one call."""
     plan_path = args.plan_path
 
     if not os.path.exists(plan_path):
@@ -168,14 +167,7 @@ def cmd_validate(args: argparse.Namespace) -> NoReturn:
     if not tasks:
         output_json({"ok": False, "error": "empty_tasks"})
 
-    output_json({"ok": True, "schemaVersion": schema_version, "taskCount": len(tasks)})
-
-
-def cmd_status_counts(args: argparse.Namespace) -> NoReturn:
-    """Count tasks by status and detect resume state."""
-    plan = load_plan(args.plan_path)
-    tasks = plan.get("tasks", [])
-
+    # Count by status
     counts: dict[str, int] = defaultdict(int)
     for task in tasks:
         status = task.get("status", "pending")
@@ -185,12 +177,18 @@ def cmd_status_counts(args: argparse.Namespace) -> NoReturn:
     is_resume = any(status != "pending" for status in counts)
 
     output_json(
-        {"ok": True, "counts": dict(counts), "total": total, "isResume": is_resume}
+        {
+            "ok": True,
+            "schemaVersion": schema_version,
+            "taskCount": total,
+            "counts": dict(counts),
+            "isResume": is_resume,
+        }
     )
 
 
 def cmd_summary(args: argparse.Namespace) -> NoReturn:
-    """Compute taskCount, maxDepth, and depthSummary."""
+    """Compute taskCount, maxDepth, depthSummary, and modelDistribution."""
     plan = load_plan(args.plan_path)
     tasks = plan.get("tasks", [])
     goal = plan.get("goal", "")
@@ -348,47 +346,6 @@ def cmd_worker_pool(args: argparse.Namespace) -> NoReturn:
     )
 
 
-def cmd_extract_fields(args: argparse.Namespace) -> NoReturn:
-    """Extract specific top-level fields from any JSON file."""
-    json_path = args.json_path
-    fields = args.fields
-
-    if not os.path.exists(json_path):
-        error_exit(f"File not found: {json_path}")
-
-    try:
-        with open(json_path) as f:
-            data = json.load(f)
-    except json.JSONDecodeError as e:
-        error_exit(f"Invalid JSON: {e}")
-
-    result = {}
-    for field in fields:
-        if field in data:
-            result[field] = data[field]
-
-    output_json({"ok": True, "fields": result})
-
-
-def cmd_model_distribution(args: argparse.Namespace) -> NoReturn:
-    """Count tasks by agent.model value."""
-    plan = load_plan(args.plan_path)
-    tasks = plan.get("tasks", [])
-
-    distribution: dict[str, int] = defaultdict(int)
-    for task in tasks:
-        model = task.get("agent", {}).get("model", "unknown")
-        distribution[model] += 1
-
-    formatted = ", ".join(
-        f"{count} {model}" for model, count in sorted(distribution.items())
-    )
-
-    output_json(
-        {"ok": True, "distribution": dict(distribution), "formatted": formatted}
-    )
-
-
 def cmd_retry_candidates(args: argparse.Namespace) -> NoReturn:
     """Find failed tasks with attempts < 3, extract prompt + failure context."""
     plan = load_plan(args.plan_path)
@@ -414,50 +371,6 @@ def cmd_retry_candidates(args: argparse.Namespace) -> NoReturn:
             )
 
     output_json({"ok": True, "retryable": retryable})
-
-
-def cmd_collect_files(args: argparse.Namespace) -> NoReturn:
-    """Collect create/modify files from specified completed tasks."""
-    plan = load_plan(args.plan_path)
-    tasks = plan.get("tasks", [])
-
-    indices: list[int] = []
-    if args.indices:
-        indices = [int(x) for x in args.indices.split(",")]
-
-    create_files: list[str] = []
-    modify_files: list[str] = []
-
-    for i in indices:
-        if i >= len(tasks):
-            continue
-
-        task = tasks[i]
-        if task.get("status") != "completed":
-            continue
-
-        metadata = task.get("metadata", {})
-        files = metadata.get("files", {})
-
-        create_files.extend(files.get("create", []))
-        modify_files.extend(files.get("modify", []))
-
-    # Remove duplicates while preserving order
-    seen: set[str] = set()
-    all_files: list[str] = []
-    for f in create_files + modify_files:
-        if f not in seen:
-            seen.add(f)
-            all_files.append(f)
-
-    output_json(
-        {
-            "ok": True,
-            "create": create_files,
-            "modify": modify_files,
-            "allFiles": all_files,
-        }
-    )
 
 
 def cmd_circuit_breaker(args: argparse.Namespace) -> NoReturn:
@@ -503,49 +416,6 @@ def cmd_circuit_breaker(args: argparse.Namespace) -> NoReturn:
             "reason": reason,
         }
     )
-
-
-def cmd_extract_task(args: argparse.Namespace) -> NoReturn:
-    """Extract single task + plan context to .design/worker-task-{N}.json."""
-    plan_path = args.plan_path
-    plan_index = args.plan_index
-
-    plan = load_plan(plan_path)
-    tasks = plan.get("tasks", [])
-
-    if plan_index >= len(tasks):
-        error_exit(
-            f"Task index {plan_index} out of range (plan has {len(tasks)} tasks)"
-        )
-
-    task = tasks[plan_index]
-
-    # Extract plan-level context
-    plan_context = plan.get("context", {})
-    context = {
-        "stack": plan_context.get("stack", ""),
-        "conventions": plan_context.get("conventions", ""),
-        "testCommand": plan_context.get("testCommand"),
-        "buildCommand": plan_context.get("buildCommand"),
-        "lsp": plan_context.get("lsp", {}),
-    }
-
-    # Build worker task file
-    worker_data = {"planIndex": plan_index, "task": task, "context": context}
-
-    # Write to .design/worker-task-{N}.json
-    design_dir = os.path.dirname(plan_path)
-    worker_path = os.path.join(design_dir, f"worker-task-{plan_index}.json")
-
-    try:
-        with open(worker_path, "w") as f:
-            json.dump(worker_data, f, indent=2)
-
-        size_bytes = os.path.getsize(worker_path)
-
-        output_json({"ok": True, "path": worker_path, "sizeBytes": size_bytes})
-    except OSError as e:
-        error_exit(f"Failed to write worker task file: {e}")
 
 
 # ============================================================================
@@ -818,10 +688,8 @@ def _check_critical_path_depth(tasks: list[dict[str, Any]]) -> list[str]:
     return []
 
 
-def cmd_validate_structure(args: argparse.Namespace) -> NoReturn:
-    """Run 7 structural checks on plan.json."""
-    plan = load_plan(args.plan_path)
-    tasks = plan.get("tasks", [])
+def _validate_structure(tasks: list[dict[str, Any]]) -> list[str]:
+    """Run 7 structural checks on tasks. Returns list of issues."""
     issues: list[str] = []
 
     issues.extend(_check_task_count(tasks))
@@ -834,7 +702,7 @@ def cmd_validate_structure(args: argparse.Namespace) -> NoReturn:
     issues.extend(_check_assumption_coverage(tasks))
     issues.extend(_check_critical_path_depth(tasks))
 
-    output_json({"ok": len(issues) == 0, "issues": issues})
+    return issues
 
 
 def _format_assumptions(assumptions: list[dict[str, Any]]) -> str:
@@ -937,13 +805,10 @@ def _assemble_task_prompt(
     return "\n\n".join(parts)
 
 
-def cmd_assemble_prompts(args: argparse.Namespace) -> NoReturn:
-    """Assemble concise task briefs for all tasks and update plan.json."""
-    plan_path = args.plan_path
-    plan = load_plan(plan_path)
+def _assemble_prompts(plan: dict[str, Any]) -> int:
+    """Assemble concise task briefs for all tasks. Returns count assembled."""
     tasks = plan.get("tasks", [])
     context = plan.get("context", {})
-
     assembled_count = 0
 
     for task in tasks:
@@ -956,14 +821,11 @@ def cmd_assemble_prompts(args: argparse.Namespace) -> NoReturn:
         task["prompt"] = _assemble_task_prompt(task, agent, metadata, context)
         assembled_count += 1
 
-    atomic_write(plan_path, plan)
-    output_json({"ok": True, "assembled": assembled_count})
+    return assembled_count
 
 
-def cmd_compute_overlaps(args: argparse.Namespace) -> NoReturn:
-    """Compute fileOverlaps for concurrent task pairs based on file intersection."""
-    plan_path = args.plan_path
-    plan = load_plan(plan_path)
+def _compute_overlaps(plan: dict[str, Any]) -> int:
+    """Compute fileOverlaps for concurrent task pairs. Returns task count."""
     tasks = plan.get("tasks", [])
 
     # For each task, compute its file set
@@ -995,10 +857,37 @@ def cmd_compute_overlaps(args: argparse.Namespace) -> NoReturn:
 
         task["fileOverlaps"] = overlaps
 
-    # Write updated plan
+    return len(tasks)
+
+
+def cmd_finalize(args: argparse.Namespace) -> NoReturn:
+    """Finalize plan-draft.json: validate structure, assemble prompts, compute overlaps."""
+    plan_path = args.plan_path
+    plan = load_plan(plan_path)
+    tasks = plan.get("tasks", [])
+
+    # Step 1: Validate structure
+    issues = _validate_structure(tasks)
+    if issues:
+        output_json({"ok": False, "error": "validation_failed", "issues": issues})
+
+    # Step 2: Assemble prompts
+    assembled = _assemble_prompts(plan)
+
+    # Step 3: Compute overlaps
+    computed = _compute_overlaps(plan)
+
+    # Single atomic write
     atomic_write(plan_path, plan)
 
-    output_json({"ok": True, "computed": len(tasks)})
+    output_json(
+        {
+            "ok": True,
+            "validated": True,
+            "assembled": assembled,
+            "computedOverlaps": computed,
+        }
+    )
 
 
 # ============================================================================
@@ -1014,18 +903,12 @@ def main() -> None:
     subparsers = parser.add_subparsers(dest="command", help="Command to execute")
 
     # Query commands
-    p = subparsers.add_parser(
-        "validate", help="Validate plan.json schema and structure"
-    )
+    p = subparsers.add_parser("status", help="Validate plan and return status counts")
     p.add_argument("plan_path", nargs="?", default=".design/plan.json")
-    p.set_defaults(func=cmd_validate)
-
-    p = subparsers.add_parser("status-counts", help="Count tasks by status")
-    p.add_argument("plan_path", nargs="?", default=".design/plan.json")
-    p.set_defaults(func=cmd_status_counts)
+    p.set_defaults(func=cmd_status)
 
     p = subparsers.add_parser(
-        "summary", help="Compute task count, max depth, and depth summary"
+        "summary", help="Task count, depth summary, and model distribution"
     )
     p.add_argument("plan_path", nargs="?", default=".design/plan.json")
     p.set_defaults(func=cmd_summary)
@@ -1046,36 +929,13 @@ def main() -> None:
     p.add_argument("plan_path", nargs="?", default=".design/plan.json")
     p.set_defaults(func=cmd_worker_pool)
 
-    p = subparsers.add_parser(
-        "extract-fields", help="Extract specific fields from JSON file"
-    )
-    p.add_argument("json_path", help="Path to JSON file")
-    p.add_argument("fields", nargs="+", help="Field names to extract")
-    p.set_defaults(func=cmd_extract_fields)
-
-    p = subparsers.add_parser("model-distribution", help="Count tasks by model")
-    p.add_argument("plan_path", nargs="?", default=".design/plan.json")
-    p.set_defaults(func=cmd_model_distribution)
-
     p = subparsers.add_parser("retry-candidates", help="Find retryable failed tasks")
     p.add_argument("plan_path", nargs="?", default=".design/plan.json")
     p.set_defaults(func=cmd_retry_candidates)
 
-    p = subparsers.add_parser(
-        "collect-files", help="Collect files from completed tasks"
-    )
-    p.add_argument("plan_path", nargs="?", default=".design/plan.json")
-    p.add_argument("--indices", help="Comma-separated task indices")
-    p.set_defaults(func=cmd_collect_files)
-
     p = subparsers.add_parser("circuit-breaker", help="Check cascade failure threshold")
     p.add_argument("plan_path", nargs="?", default=".design/plan.json")
     p.set_defaults(func=cmd_circuit_breaker)
-
-    p = subparsers.add_parser("extract-task", help="Extract single task to worker file")
-    p.add_argument("plan_index", type=int, help="Task index to extract")
-    p.add_argument("plan_path", nargs="?", default=".design/plan.json")
-    p.set_defaults(func=cmd_extract_task)
 
     # Mutation commands
     p = subparsers.add_parser("resume-reset", help="Reset in_progress tasks to pending")
@@ -1090,22 +950,10 @@ def main() -> None:
 
     # Build commands
     p = subparsers.add_parser(
-        "validate-structure", help="Run 7 structural validation checks"
+        "finalize", help="Validate structure, assemble prompts, compute overlaps"
     )
     p.add_argument("plan_path", nargs="?", default=".design/plan.json")
-    p.set_defaults(func=cmd_validate_structure)
-
-    p = subparsers.add_parser(
-        "assemble-prompts", help="Assemble concise task briefs for all tasks"
-    )
-    p.add_argument("plan_path", nargs="?", default=".design/plan.json")
-    p.set_defaults(func=cmd_assemble_prompts)
-
-    p = subparsers.add_parser(
-        "compute-overlaps", help="Compute fileOverlaps for all tasks"
-    )
-    p.add_argument("plan_path", nargs="?", default=".design/plan.json")
-    p.set_defaults(func=cmd_compute_overlaps)
+    p.set_defaults(func=cmd_finalize)
 
     args = parser.parse_args()
 
