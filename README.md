@@ -3,14 +3,14 @@
 > Team-based planning and production-grade execution for Claude Code
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Version](https://img.shields.io/badge/version-1.5.0-green.svg)
+![Version](https://img.shields.io/badge/version-1.5.1-green.svg)
 ![Claude Code](https://img.shields.io/badge/Claude%20Code-2.1.32%2B-orange.svg)
 
 ## Why do?
 
 Most planning plugins use a single agent to decompose goals. `do` is different:
 
-- **A team plans your work, not one agent.** `/do:design` spawns a goal analyst, domain architects, external researchers, and a critic that stress-tests the plan before it ships. Adaptive complexity scaling (minimal/standard/full tiers) matches team size to goal difficulty.
+- **A team plans your work, not one agent.** `/do:design` spawns a research-first goal analyst that does deep multi-hop research (academic approaches, existing libraries, community patterns), then grows the team organically — architects, researchers, and a plan-writer — based on what the analyst discovers. No rigid tiers; the team adapts to the goal.
 - **Plans are execution blueprints, not task lists.** Every task includes assumptions with shell-verified pre-flight checks, acceptance criteria with automated validation, rollback triggers, context files, and agent specialization (role, model, approach).
 - **Execution has safety rails.** `/do:execute` spawns persistent, self-organizing workers that claim tasks from the dependency graph, commit their own changes, and communicate with each other when issues arise. Safety rails include retry budgets (3 attempts with failure context), cascading failure propagation, a circuit breaker (abort at >50% skip rate), progressive plan trimming, and deferred final verification.
 - **Script-assisted orchestration.** Both skills use per-skill python3 helper scripts (`skills/{name}/scripts/plan.py`) for deterministic operations like validation, dependency computation, and plan manipulation, reserving LLM usage for analytical and creative work.
@@ -37,19 +37,16 @@ cat .design/plan.json
 
 ## How It Works
 
-### /do:design — 4-step team pipeline
+### /do:design — Research-driven adaptive team
 
-A thin-lead orchestrator spawns a dynamically growing team of specialist agents. The lead never analyzes — all analytical work happens inside agents.
+A thin-lead orchestrator spawns an adaptive team that grows organically based on goal complexity. The lead never analyzes — all analytical work happens inside agents.
 
 1. **Pre-flight** — Checks for existing plans, cleans stale artifacts, preserves `.design/history/`
-2. **Goal Analyst** — First teammate spawned. Uses `sequential-thinking` MCP to deeply understand the goal, explore the codebase, propose 2-3 approaches with tradeoffs, and assess complexity. Writes `.design/goal-analysis.json` with a recommended expert team composition
-3. **Complexity branching** — The analyst's `complexity` rating determines the pipeline:
-   - **Minimal** (1-3 tasks): single lightweight plan-writer, no experts or critic
-   - **Standard** (4-8 tasks): experts + plan-writer, no critic
-   - **Full** (9+ tasks): experts + critic + plan-writer — the critic challenges assumptions, evaluates coherence, and flags over/under-engineering before the plan-writer synthesizes
-4. **Cleanup & Summary** — Verifies `plan.json` schema, tears down the team, reports task count and dependency depth
+2. **Goal Analyst** — First teammate spawned. Does deep multi-hop research: web search for academic approaches, existing libraries with URLs and versions, community patterns. Explores the codebase, proposes 2-3 approaches with tradeoffs, and recommends expert team composition. Writes `.design/goal-analysis.json`
+3. **Grow the team** — The lead reads the analyst's findings and spawns whatever experts are needed. Could be 1 or 5, all architects or all researchers — the team adapts to the goal. For trivial goals, a single plan-writer handles it directly
+4. **Collect & Finalize** — Plan-writer merges expert analyses, runs script-assisted finalization, produces `.design/plan.json`
 
-Experts come in two types: **architects** (analyze the codebase — structure, patterns, what needs to change) and **researchers** (search externally via WebSearch/WebFetch — community patterns, libraries, idiomatic solutions, best practices). Each writes `.design/expert-{name}.json`. The critic writes `.design/critic.json`. All teammates signal completion via `SendMessage` to the lead. Two-tier fallback ensures plan generation even if the team fails.
+Experts come in two types: **architects** (analyze the codebase through a domain lens) and **researchers** (deep external research via WebSearch/WebFetch — libraries, academic papers, best practices). Each receives a mandate-based prompt and writes `.design/expert-{name}.json`. Two-tier fallback ensures plan generation even if the team fails.
 
 ### /do:execute — Persistent self-organizing workers
 
