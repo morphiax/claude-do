@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-`claude-do` is a Claude Code plugin providing two skills: `/do:design` (team-based goal decomposition into `.design/plan.json`) and `/do:execute` (dependency-graph execution with worker teammates). It leverages Claude Code's native Agent Teams and Tasks features for multi-agent collaboration. Both skills use a launcher → dedicated team lead → teammates architecture. Skills are implemented as SKILL.md prompts augmented with python3 helper scripts for deterministic operations.
+`claude-do` is a Claude Code plugin providing two skills: `/do:design` (team-based goal decomposition into `.design/plan.json`) and `/do:execute` (dependency-graph execution with worker teammates). It leverages Claude Code's native Agent Teams and Tasks features for multi-agent collaboration. Both skills use the main conversation as team lead with teammates for analytical/execution work. Skills are implemented as SKILL.md prompts augmented with python3 helper scripts for deterministic operations.
 
 ## Testing
 
@@ -65,15 +65,15 @@ The two skills communicate through `.design/plan.json` (schemaVersion 3) written
 
 ### Execution Model
 
-Both skills use a **launcher → dedicated team lead → teammates** architecture:
+Both skills use the **main conversation as team lead** with Agent Teams for coordination:
 
-- **Launcher** (main conversation): pre-flight, `TeamCreate`, spawns a dedicated team lead via `Task(team_name, name: "lead")`, displays summary, `TeamDelete`. Tool-restricted: `TeamCreate`, `TeamDelete`, `Task`, `AskUserQuestion`, `Bash` (PLAN_CLI only).
-- **Team lead** (named teammate "lead"): orchestrates all agents/workers within the team. Spawns teammates, manages lifecycle via `SendMessage`/`TaskCreate`/`TaskUpdate`/`TaskList`, performs verification, updates plan state.
+- **Lead** (main conversation): creates team via `TeamCreate`, spawns teammates, manages lifecycle via `SendMessage`/`TaskCreate`/`TaskUpdate`/`TaskList`, performs verification, updates plan state. Tool-restricted to orchestration — never reads project source files.
+- **Teammates**: specialist agents (analysts, experts, workers) spawned into the team. Signal completion via `SendMessage` to the lead. Read `~/.claude/teams/{team-name}/config.json` to discover the lead's name.
 
-`/do:design` — adaptive complexity scaling with a dedicated team lead (`do-design` team):
+`/do:design` — adaptive complexity scaling with a thin-lead orchestrator (`do-design` team):
 
-- **Team lead** spawns and coordinates all agents. Never analyzes the goal or reads source files — purely a lifecycle manager. Reads only `.design/goal-analysis.json` (for `complexity` and `recommendedTeam`).
-- **Dynamically growing team**: The team starts with a single goal analyst, then grows based on goal complexity. One team (`do-design`), dynamic membership. Teammates signal completion via `SendMessage(recipient: "lead")`.
+- **Lead responsibilities** (never delegated): pre-flight, team lifecycle (`TeamCreate`, `SendMessage`, shutdown), reading analyst's output (`complexity` and `recommendedTeam`), spawning agents, lightweight verification, summary output. The lead NEVER analyzes the goal or reads source files.
+- **Dynamically growing team**: The team starts with a single goal analyst, then grows based on goal complexity. One team (`do-design`), dynamic membership. Teammates signal completion via `SendMessage` to the lead.
 - **Goal analyst**: First teammate spawned. Uses `sequential-thinking` MCP (if available) + codebase exploration to deeply understand the goal, propose 2–3 high-level approaches with tradeoffs, assess complexity, and recommend expert team composition. Experts are typed as `architect` (codebase analysis — structure, patterns, what needs to change) or `researcher` (external research — community patterns, libraries, best practices). Writes `.design/goal-analysis.json` including `complexity`, `complexityRationale`, `codebaseContext`, `approaches`, and `recommendedTeam`.
 - **Complexity tiers** (analyst's `complexity` field determines pipeline):
   - **Minimal** (1-3 tasks, single obvious approach): skip expert/critic/plan-writer teammates. Team lead spawns single lightweight plan-writer Task subagent (model: sonnet) reading only `goal-analysis.json`. Quality gate warns if plan exceeds 3 tasks or depth 2.
@@ -84,10 +84,10 @@ Both skills use a **launcher → dedicated team lead → teammates** architectur
 - **Plan-writer** (standard/full only): teammate blockedBy critic (full) or experts (standard). Merges expert analyses, incorporates critique (full only), validates, enriches. Assembles worker prompts (S1-S9 template) and computes file overlap matrix. Records approach decisions in `progress.decisions`. Writes `.design/plan.json` with fully assembled prompts.
 - **Two-tier fallback** (standard/full only): If the team fails to produce `.design/plan.json` (1) retry with a single plan-writer Task subagent, or (2) perform merge and plan writing inline with context minimization (process expert files one at a time)
 
-`/do:execute` — dependency-graph scheduling with a dedicated team lead (`do-execute` team):
+`/do:execute` — dependency-graph scheduling with worker teammates (`do-execute` team):
 
-- **Team lead** handles: TaskList creation, worker spawning, result collection, verification (batched spot-checks + acceptance criteria), plan updates (status, trimming, cascading failures via `update-status` script), git commits, circuit breaker evaluation, ready-set computation, retry assembly
-- **Worker teammates** (name: `worker-{planIndex}`): one per task in each ready-set batch, receive pre-extracted task files (`.design/worker-task-{N}.json`) via `extract-task` script, report results via `SendMessage(recipient: "lead")` with JSON payload (`planIndex`, `status`, `result`). Workers are shut down after each round.
+- **Lead responsibilities**: plan reading/validation/TaskList creation (inline — purely mechanical, no subagent), spawn worker teammates, collect results via `SendMessage`, verify results (batched spot-checks + acceptance criteria), update `.design/plan.json` (status, trimming, cascading failures via `update-status` script), git commits, user interaction (`AskUserQuestion`), circuit breaker evaluation, compute ready-sets from dependencies, assemble retry prompts
+- **Worker teammates** (name: `worker-{planIndex}`): one per task in each ready-set batch, receive pre-extracted task files (`.design/worker-task-{N}.json`) via `extract-task` script, report results via `SendMessage` to the lead with JSON payload (`planIndex`, `status`, `result`). Workers are shut down after each round.
 - **Dependency-graph scheduling**: orchestration uses ready-set loop (spawn all tasks whose `blockedBy` dependencies are completed), no pre-computed waves
 - Progressive trimming: completed tasks are stripped of verbose agent fields including `prompt` (keep only subject, status, result, metadata.files, blockedBy, agent.role, agent.model)
 - Retry budget: max 3 attempts per task with failure context passed to retries

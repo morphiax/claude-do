@@ -39,27 +39,27 @@ cat .design/plan.json
 
 ### /do:design — 4-step team pipeline
 
-A dedicated team lead coordinates a dynamically growing team of specialist agents. The launcher spawns the lead, who orchestrates all analytical work — the launcher never analyzes.
+A thin-lead orchestrator spawns a dynamically growing team of specialist agents. The lead never analyzes — all analytical work happens inside agents.
 
 1. **Pre-flight** — Checks for existing plans, cleans stale artifacts, preserves `.design/history/`
-2. **Goal Analyst** — First teammate spawned by the team lead. Uses `sequential-thinking` MCP to deeply understand the goal, explore the codebase, propose 2-3 approaches with tradeoffs, and assess complexity. Writes `.design/goal-analysis.json` with a recommended expert team composition
+2. **Goal Analyst** — First teammate spawned. Uses `sequential-thinking` MCP to deeply understand the goal, explore the codebase, propose 2-3 approaches with tradeoffs, and assess complexity. Writes `.design/goal-analysis.json` with a recommended expert team composition
 3. **Complexity branching** — The analyst's `complexity` rating determines the pipeline:
    - **Minimal** (1-3 tasks): single lightweight plan-writer, no experts or critic
    - **Standard** (4-8 tasks): experts + plan-writer, no critic
    - **Full** (9+ tasks): experts + critic + plan-writer — the critic challenges assumptions, evaluates coherence, and flags over/under-engineering before the plan-writer synthesizes
 4. **Cleanup & Summary** — Verifies `plan.json` schema, tears down the team, reports task count and dependency depth
 
-Experts come in two types: **architects** (analyze the codebase — structure, patterns, what needs to change) and **researchers** (search externally via WebSearch/WebFetch — community patterns, libraries, idiomatic solutions, best practices). Each writes `.design/expert-{name}.json`. The critic writes `.design/critic.json`. All teammates signal completion via `SendMessage(recipient: "lead")`. Two-tier fallback ensures plan generation even if the team fails.
+Experts come in two types: **architects** (analyze the codebase — structure, patterns, what needs to change) and **researchers** (search externally via WebSearch/WebFetch — community patterns, libraries, idiomatic solutions, best practices). Each writes `.design/expert-{name}.json`. The critic writes `.design/critic.json`. All teammates signal completion via `SendMessage` to the lead. Two-tier fallback ensures plan generation even if the team fails.
 
 ### /do:execute — Dependency-graph scheduling
 
-A dedicated team lead executes using dependency-graph scheduling with worker teammates:
+A thin-lead orchestrator with worker teammates and script-assisted operations:
 
-- **Inline setup** — The team lead uses helper scripts for deterministic operations: validation (`validate`), resume detection (`status-counts`), file overlap extraction (`overlap-matrix`), and task list data prep (`tasklist-data`). The team lead still makes TaskCreate calls but reads pre-computed data instead of parsing plan.json manually.
-- **Workers** — One worker teammate (`worker-{planIndex}`) per ready task. Workers receive pre-extracted task files (`.design/worker-task-{N}.json`) via the `extract-task` prefilter script (10-20x context reduction vs reading full plan.json). Workers report results via `SendMessage(recipient: "lead")` with JSON payloads and are shut down after each round.
-- **Inline verification** — The team lead verifies results via batched Bash scripts per round (spot-checks + acceptance criteria), then uses the `update-status` script for atomic plan.json updates (status changes, progressive trimming, cascading failures).
+- **Inline setup** — The lead uses helper scripts for deterministic operations: validation (`validate`), resume detection (`status-counts`), file overlap extraction (`overlap-matrix`), and task list data prep (`tasklist-data`). The lead still makes TaskCreate calls but reads pre-computed data instead of parsing plan.json manually.
+- **Workers** — One worker teammate (`worker-{planIndex}`) per ready task. Workers receive pre-extracted task files (`.design/worker-task-{N}.json`) via the `extract-task` prefilter script (10-20x context reduction vs reading full plan.json). Workers report results via `SendMessage` to the lead with JSON payloads and are shut down after each round.
+- **Inline verification** — The lead verifies results via batched Bash scripts per round (spot-checks + acceptance criteria), then uses the `update-status` script for atomic plan.json updates (status changes, progressive trimming, cascading failures).
 
-The team lead handles: worker spawning, result verification, plan updates (via scripts), retry assembly, git commits per round, and circuit breaker evaluation. Ready-sets are computed via the `ready-set` script from `blockedBy` dependencies — no pre-computed waves. Completed plans archive to `.design/history/`.
+The lead handles: worker spawning, result verification, plan updates (via scripts), retry assembly, git commits per round, and circuit breaker evaluation. Ready-sets are computed via the `ready-set` script from `blockedBy` dependencies — no pre-computed waves. Completed plans archive to `.design/history/`.
 
 ## Installation
 

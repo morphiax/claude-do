@@ -6,19 +6,20 @@ argument-hint: "<goal description>"
 
 # Design
 
-Launcher that spawns a dedicated team lead to decompose a goal into `.design/plan.json` using a dynamically growing team of specialist agents. The main conversation is purely a launcher — it creates the team, spawns the lead, and displays the summary. ALL orchestration, analysis, and planning happens inside the team lead and its agents. **This skill only designs — it does NOT execute.**
+Thin-lead orchestrator: decompose a goal into `.design/plan.json` using a dynamically growing team of specialist agents. The lead is purely mechanical — it spawns agents, relays messages, and manages team lifecycle. ALL analytical work (goal understanding, codebase exploration, domain analysis, synthesis, plan writing) happens inside agents. **This skill only designs — it does NOT execute.**
 
 **Do NOT use EnterPlanMode — this skill IS the plan.**
 
-**MANDATORY: Execute ALL steps (1–3) for EVERY invocation. The main conversation is a launcher — it spawns the team lead and displays results. ALL analysis and orchestration happens inside the team lead. The main conversation's ONLY tools are: `TeamCreate`, `TeamDelete`, `Task`, `AskUserQuestion`, and `Bash` (cleanup, verification, and `python3 $PLAN_CLI` invocations only). No other tools — no MCP tools, no `Grep`, no `Glob`, no `LSP`, no source file reads, no `SendMessage`, no `TaskCreate`, no `TaskUpdate`, no `TaskList`. The ONLY valid output of this skill is `.design/plan.json` — produced by the team lead and its agents. This applies regardless of goal type, complexity, or apparent simplicity. Audits, reviews, research, one-line fixes — all go through the team. No exceptions exist. If you are tempted to "just do it directly," STOP — that impulse is the exact failure mode this rule prevents.**
+- **Signaling**: Agents signal completion via TaskList and `SendMessage(type: "message")` to the lead. The lead parses JSON from message content.
+
+**MANDATORY: Execute ALL steps (1–4) for EVERY invocation. The lead is a lifecycle manager — it spawns agents and manages the team. ALL analysis happens inside agents. The lead's ONLY tools are: `TeamCreate`, `TeamDelete`, `TaskCreate`, `TaskUpdate`, `TaskList`, `SendMessage`, `Task`, `AskUserQuestion`, and `Bash` (cleanup, verification, and `python3 $PLAN_CLI` invocations only). No other tools — no MCP tools, no `Grep`, no `Glob`, no `LSP`, no source file reads. The ONLY valid output of this skill is `.design/plan.json` — produced by the agent team. This applies regardless of goal type, complexity, or apparent simplicity. Audits, reviews, research, one-line fixes — all go through the team. No exceptions exist. If you are tempted to "just do it directly," STOP — that impulse is the exact failure mode this rule prevents.**
 
 **STOP GATE — Read before proceeding. These are the exact failure modes that have occurred repeatedly:**
-1. **"The goal is simple enough to analyze directly"** — WRONG. Every goal goes through the team. Spawn the lead.
-2. **"Let me read the source files first to understand the problem"** — WRONG. The launcher never reads source files. The team lead and its agents read source files.
+1. **"The goal is simple enough to analyze directly"** — WRONG. Every goal goes through the team. Spawn the analyst.
+2. **"Let me read the source files first to understand the problem"** — WRONG. The lead never reads source files. The analyst and experts read source files.
 3. **"I'll just do a quick inline analysis instead of spawning a team"** — WRONG. The team exists to provide multiple perspectives. Inline analysis defeats the purpose.
 4. **"This is a review/research task, not implementation, so I don't need agents"** — WRONG. Reviews, audits, and research all go through the team pipeline.
-5. **Using `EnterPlanMode` or `Explore` or `Grep/Glob/Read` on project source files** — WRONG. The launcher's tool boundary is absolute.
-6. **"I'll orchestrate the agents myself instead of spawning a team lead"** — WRONG. The launcher spawns the lead. The lead orchestrates the agents.
+5. **Using `EnterPlanMode` or `Explore` or `Grep/Glob/Read` on project source files** — WRONG. The lead's tool boundary is absolute.
 
 **If you catch yourself rationalizing why THIS goal is the exception — it is not. Proceed to Step 1.**
 
@@ -41,76 +42,14 @@ All deterministic operations use: `python3 $PLAN_CLI <command> [args]` via Bash.
 3. Check for existing `.design/plan.json`: Run `python3 $PLAN_CLI status-counts .design/plan.json` via Bash. Parse JSON output. If `ok` is false, skip (no existing plan). If `ok` is true and `isResume` is true (non-pending statuses exist), use `AskUserQuestion`: "Existing plan has {counts} tasks. Overwrite?" (format counts from the `counts` field). If declined, output "Keeping existing plan. Run /do:execute to continue." and STOP.
 4. Clean up stale staging (preserve history): `mkdir -p .design/history && find .design -mindepth 1 -maxdepth 1 ! -name history -exec rm -rf {} +`
 
-## Step 2: Launch Team Lead
+## Step 2: Team + Goal Analyst
+
+Create the team and spawn a goal analyst as the first teammate.
 
 1. `TeamDelete(team_name: "do-design")` (ignore errors — cleanup of stale team)
 2. `TeamCreate(team_name: "do-design")`. If it fails, tell user: "Agent Teams is required for /do:design. Ensure your Claude Code version supports Agent Teams and retry." Then STOP.
-3. Spawn the team lead. Assemble the prompt from the **Team Lead Prompt** section below. Fill `{goal}` and `{PLAN_CLI}`:
-
-```
-Task:
-  subagent_type: "general-purpose"
-  team_name: "do-design"
-  name: "lead"
-  model: opus
-  prompt: <Team Lead Prompt with {goal} and {PLAN_CLI} filled>
-```
-
-4. **Wait** for the Task to return. Parse the FINAL line of the return value as JSON. Extract `ok`, `taskCount`, `maxDepth`, `complexity`, and `depthSummary`.
-5. If `ok` is false or the Task failed, report the error and stop.
-
-## Step 3: Cleanup & Summary
-
-1. `TeamDelete(team_name: "do-design")` (ignore errors)
-2. **Verify**: Run `python3 $PLAN_CLI validate .design/plan.json` via Bash. Parse JSON output. If `ok` is false, report the error and stop.
-3. **Compute summary data**: Run `python3 $PLAN_CLI summary .design/plan.json` via Bash. Parse JSON output. Extract `goal`, `taskCount`, `maxDepth`, `depthSummary`, and `modelDistribution`.
-4. **Output summary** using computed data:
-
-```
-Plan: {goal}
-Tier: {complexity}
-Tasks: {taskCount}, max depth {maxDepth}
-Models: {modelDistribution}
-
-{depthSummary formatted as:}
-Depth 1:
-- Task 0: {subject} ({model})
-- Task 1: {subject} ({model})
-
-Depth 2:
-- Task 2: {subject} ({model}) [blocked by: 0, 1]
-
-Context: {stack}
-Test: {testCommand}
-
-Run /execute to begin.
-```
-
-**Goal**: $ARGUMENTS
-
----
----
-
-# Team Lead Prompt
-
-You are the **Team Lead** for a design planning team. You orchestrate a dynamically growing team of specialist agents to decompose a goal into `.design/plan.json`. You are purely a lifecycle manager — you spawn agents, manage dependencies, and relay results. ALL analytical work (goal understanding, codebase exploration, domain analysis, synthesis, plan writing) happens inside your agents.
-
-**Goal**: {goal}
-
-**Script CLI**: `{PLAN_CLI}` — all deterministic operations use `python3 {PLAN_CLI} <command> [args]` via Bash. Parse JSON output.
-
-- **Signaling**: Agents signal completion via TaskList and `SendMessage(type: "message", recipient: "lead")`. Parse JSON from message content.
-
-**MANDATORY: You are a lifecycle manager. You spawn agents and manage the team. ALL analysis happens inside agents. Your ONLY tools are: `Task` (spawn subagents), `TaskCreate`, `TaskUpdate`, `TaskList`, `SendMessage`, `Bash` (`python3 {PLAN_CLI}` invocations only), and `Read` (`.design/*.json` routing files only — NEVER source files). No other tools — no MCP tools, no `Grep`, no `Glob`, no `LSP`, no source file reads. If you are tempted to analyze the goal directly — STOP. Spawn an agent.**
-
-**Do NOT poll**: Teammate messages are auto-delivered — never use `sleep`, `ls`, or Bash loops to check for agent output files. Simply wait; the next message you receive will be from a teammate or the system.
-
----
-
-## Phase 1: Spawn Goal Analyst
-
-1. `TaskCreate` for goal analyst (subject: "Analyze goal and recommend team composition")
-2. Spawn the goal analyst using the **ANALYST_PROMPT** template below. Fill `{goal}`:
+3. `TaskCreate` for goal analyst (subject: "Analyze goal and recommend team composition")
+4. Spawn the goal analyst:
 
 ```
 Task:
@@ -118,97 +57,10 @@ Task:
   team_name: "do-design"
   name: "analyst"
   model: opus
-  prompt: <ANALYST_PROMPT with {goal} filled>
+  prompt: <analyst prompt below>
 ```
 
-3. **Wait** for the analyst's `SendMessage`. Once received, proceed to Phase 2.
-
-**Fallback**: If the analyst fails to produce `.design/goal-analysis.json`, perform minimal inline analysis: read package.json for stack, identify 2–3 obvious domains, compose a default team. Log: "Analyst failed — using minimal team composition."
-
-## Phase 2: Complexity Branching
-
-Run: `python3 {PLAN_CLI} extract-fields .design/goal-analysis.json complexity complexityRationale recommendedTeam` via Bash. Parse JSON output. Extract `complexity`, `complexityRationale`, and `recommendedTeam` from the `fields` object. Echo:
-
-```
-Complexity: {complexity} — {complexityRationale}
-Experts recommended: {length of recommendedTeam}
-```
-
-Branch based on `complexity`:
-
-### Minimal Path
-
-Skip Phase 3. Echo: `"Spawning lightweight plan-writer (minimal mode)"`
-
-Spawn a single plan-writer **Task subagent** (NOT a teammate):
-
-```
-Task:
-  subagent_type: "general-purpose"
-  model: sonnet
-  prompt: <MINIMAL_PLAN_WRITER_PROMPT with {goal} and {PLAN_CLI} filled>
-```
-
-Parse the FINAL line of the subagent's return value as JSON. Store `taskCount`, `maxDepth`, and `depthSummary`.
-
-**Quality gate**: Read `.design/plan.json` and check task count and max dependency depth. If taskCount > 3 or maxDepth > 2, echo: `"Plan generated in minimal mode has {taskCount} tasks (depth {maxDepth}) — consider re-running /do:design for full analysis."`
-
-**Minimal fallback**: If the Task subagent fails, perform plan writing inline: read `.design/goal-analysis.json`, extract sub-problems and recommended approach, write a 1–3 task plan directly to `.design/plan.json`. Log: "Minimal plan-writer failed — writing plan inline."
-
-Proceed to Phase 4 (skip Phase 3).
-
-### Standard Path
-
-Echo: `"Spawning {N} experts + plan-writer (no critic)"`
-
-Proceed to Phase 3 with: skip critic, plan-writer `blockedBy` all expert task IDs directly, plan-writer prompt omits critic.json references. Two-tier fallback applies.
-
-### Full Path
-
-Echo: `"Spawning {N} experts + critic + plan-writer"`
-
-Proceed to Phase 3 unchanged. Two-tier fallback applies.
-
-## Phase 3: Grow Team with Experts, Critic, and Plan-Writer (standard/full only)
-
-Use the `recommendedTeam` array extracted during Phase 2 (each entry has `type`: `architect` or `researcher`). Record array length as `{expectedExpertCount}`.
-
-1. Create TaskList entries with dependencies:
-   - For each expert: `TaskCreate` with mandate as subject
-   - **Full only**: `TaskCreate` for critic (subject: "Challenge expert proposals and evaluate approach coherence")
-   - `TaskCreate` for plan-writer (subject: "Merge expert analyses, validate, and write plan.json")
-   - Wire via `TaskUpdate(addBlockedBy)`: **Full**: critic blockedBy all experts, plan-writer blockedBy critic. **Standard**: plan-writer blockedBy all experts.
-2. Spawn all agents in parallel via `Task(subagent_type: "general-purpose", team_name: "do-design", name: "{name}", model: "{model}")`:
-   - All experts (use **ARCHITECT_PROMPT** or **RESEARCHER_PROMPT** based on `type`)
-   - **Full only**: `critic` (model: `opus`) using **CRITIC_PROMPT**
-   - `plan-writer` (model: `opus`) using **PLAN_WRITER_PROMPT**
-
-**Wait** for the plan-writer's `SendMessage`. Parse JSON from message content.
-
-After receiving the plan-writer's message: `SendMessage(type: "shutdown_request")` to each teammate, wait for confirmations.
-
-**Two-tier fallback** (standard/full only) — triggered when the team fails to produce `.design/plan.json`:
-
-- **Tier 1**: Shut down teammates. Spawn single plan-writer Task subagent (not teammate) with the **PLAN_WRITER_PROMPT**, reading `.design/expert-*.json` and `.design/critic.json` (full only).
-- **Tier 2**: If retry fails, merge inline with context minimization — process one expert file at a time, extract tasks arrays, merge incrementally. Read critic for blocking issues only (full). Execute Phases 2–3 of the plan-writer analytically, then attempt script finalization. If scripts are unavailable, perform validation, prompt assembly (S1-S9 concatenation), and overlap computation inline with reduced scope, then write `.design/plan.json` directly.
-
-## Phase 4: Validate & Return
-
-1. **Verify**: Run `python3 {PLAN_CLI} validate .design/plan.json` via Bash. Parse JSON output. If `ok` is false, report the error.
-2. **Clean up TaskList**: Delete all tasks created during planning so `/do:execute` starts clean.
-3. **Return**: The FINAL line of your output MUST be a single JSON object (no markdown fencing):
-
-```
-{"ok": true, "taskCount": N, "maxDepth": N, "complexity": "minimal|standard|full", "depthSummary": {"1": ["Task 0: subject"], ...}}
-```
-
-On unresolvable error: `{"ok": false, "error": "..."}`
-
----
-
-## Teammate Prompt Templates
-
-### ANALYST_PROMPT
+**Goal analyst prompt** — fill `{goal}`:
 
 ```
 You are the Goal Analyst on a planning team. Deeply understand the goal, explore the codebase, propose approaches, and recommend the expert team.
@@ -237,12 +89,99 @@ Write to .design/goal-analysis.json:
 
 {"goal": "{original}", "refinedGoal": "{restated if different}", "concepts": [], "priorArt": [], "codebaseContext": {"stack": "", "conventions": "", "testCommand": "", "buildCommand": "", "lsp": {"available": []}, "relevantModules": [], "existingPatterns": []}, "subProblems": [], "approaches": [{"name": "", "description": "", "pros": [], "cons": [], "effort": "", "risk": "", "recommended": false, "rationale": ""}], "complexity": "minimal|standard|full", "complexityRationale": "", "scopeNotes": "", "recommendedTeam": [{"name": "", "role": "", "type": "architect|researcher", "model": "", "mandate": ""}]}
 
-Claim your task and mark completed. Then:
+Claim your task and mark completed. Read ~/.claude/teams/do-design/config.json for the lead's name, then:
 
-    SendMessage(type: "message", recipient: "lead", content: "ANALYST_COMPLETE", summary: "Goal analysis complete")
+    SendMessage(type: "message", recipient: {lead-name}, content: "ANALYST_COMPLETE", summary: "Goal analysis complete")
 ```
 
-### ARCHITECT_PROMPT
+**Lead waits** for the analyst's `SendMessage`. Once received, proceed to Complexity Branching.
+
+**Fallback**: If the analyst fails to produce `.design/goal-analysis.json`, the lead performs minimal inline analysis: read package.json for stack, identify 2–3 obvious domains, compose a default team. Log: "Analyst failed — using minimal team composition."
+
+## Complexity Branching
+
+Run: `python3 $PLAN_CLI extract-fields .design/goal-analysis.json complexity complexityRationale recommendedTeam` via Bash. Parse JSON output. Extract `complexity`, `complexityRationale`, and `recommendedTeam` from the `fields` object. Echo:
+
+```
+Complexity: {complexity} — {complexityRationale}
+Experts recommended: {length of recommendedTeam}
+```
+
+Branch based on `complexity`:
+
+### Minimal Path
+
+Skip Step 3. Echo: `"Spawning lightweight plan-writer (minimal mode)"`
+
+Spawn a single plan-writer **Task subagent** (NOT a teammate):
+
+```
+Task:
+  subagent_type: "general-purpose"
+  model: sonnet
+  prompt: <minimal plan-writer prompt below>
+```
+
+**Minimal plan-writer prompt** — fill `{goal}`:
+
+```
+You are a lightweight plan writer. Generate .design/plan.json for a minimal-complexity goal using only the analyst's output.
+
+**Goal**: {goal}
+
+## Instructions
+
+1. Read .design/goal-analysis.json for decomposition, codebase context, approaches, and scope notes.
+2. Generate 1–3 tasks from the recommended approach. Each task needs: subject, description (explain WHY and connection to dependents), activeForm, status (pending), result (null), attempts (0), blockedBy (array of indices), metadata: {type, files: {create:[], modify:[]}, reads}, agent: {role, model (opus/sonnet/haiku), approach, contextFiles [{path, reason}], assumptions [{claim, verify (shell cmd), severity: blocking|warning}], acceptanceCriteria [{criterion, check (shell cmd)}], rollbackTriggers ["If X, STOP and return BLOCKED: reason"], constraints}.
+3. Auto-generate safety: for each modify path add blocking assumption `test -f {path}`, convert blocking assumptions to rollback triggers.
+4. Write .design/plan-draft.json: {schemaVersion: 3, goal, context: {stack, conventions, testCommand, buildCommand, lsp}, progress: {completedTasks: [], surprises: [], decisions: []}, tasks: [...]}. Do NOT include `prompt` or `fileOverlaps` fields — scripts will add them.
+5. Resolve the plugin root directory (the directory containing `.claude-plugin/` and `skills/`). Set PLAN_CLI to {plugin_root}/skills/design/scripts/plan.py. Run the following scripts in order via Bash:
+   - `python3 $PLAN_CLI validate-structure .design/plan-draft.json` — fix any reported issues before proceeding.
+   - `python3 $PLAN_CLI assemble-prompts .design/plan-draft.json` — assembles S1-S9 worker prompts into each task's `prompt` field.
+   - `python3 $PLAN_CLI compute-overlaps .design/plan-draft.json` — computes file overlap matrix into each task's `fileOverlaps` field.
+6. Rename to final plan: `mv .design/plan-draft.json .design/plan.json`
+
+## Output
+
+The FINAL line of your output MUST be a single JSON object (no markdown fencing):
+{"taskCount": N, "maxDepth": N, "depthSummary": {"1": ["Task 0: subject"], ...}}
+```
+
+Parse the FINAL line of the subagent's return value as JSON. Store `taskCount`, `maxDepth`, and `depthSummary`.
+
+**Quality gate**: Read `.design/plan.json` and check task count and max dependency depth. If taskCount > 3 or maxDepth > 2, echo: `"Plan generated in minimal mode has {taskCount} tasks (depth {maxDepth}) — consider re-running /do:design for full analysis."`
+
+**Minimal fallback**: If the Task subagent fails, perform plan writing inline: read `.design/goal-analysis.json`, extract sub-problems and recommended approach, write a 1–3 task plan directly to `.design/plan.json`. Log: "Minimal plan-writer failed — writing plan inline."
+
+Proceed to Step 4 (skip Step 3).
+
+### Standard Path
+
+Echo: `"Spawning {N} experts + plan-writer (no critic)"`
+
+Proceed to Step 3 with: skip critic, plan-writer `blockedBy` all expert task IDs directly, plan-writer prompt omits critic.json references. Two-tier fallback applies.
+
+### Full Path
+
+Echo: `"Spawning {N} experts + critic + plan-writer"`
+
+Proceed to Step 3 unchanged. Two-tier fallback applies.
+
+## Step 3: Grow Team with Experts, Critic, and Plan-Writer (standard/full only)
+
+Use the `recommendedTeam` array extracted during Complexity Branching (each entry has `type`: `architect` or `researcher`). Record array length as `{expectedExpertCount}`.
+
+1. Create TaskList entries with dependencies:
+   - For each expert: `TaskCreate` with mandate as subject
+   - **Full only**: `TaskCreate` for critic (subject: "Challenge expert proposals and evaluate approach coherence")
+   - `TaskCreate` for plan-writer (subject: "Merge expert analyses, validate, and write plan.json")
+   - Wire via `TaskUpdate(addBlockedBy)`: **Full**: critic blockedBy all experts, plan-writer blockedBy critic. **Standard**: plan-writer blockedBy all experts.
+2. Spawn all agents in parallel via `Task(subagent_type: "general-purpose", team_name: "do-design", name: "{name}", model: "{model}")`:
+   - All experts (use architect or researcher prompt based on `type`)
+   - **Full only**: `critic` (model: `opus`)
+   - `plan-writer` (model: `opus`)
+
+**Scanner prompt** — fill `{goal}`, `{name}`, `{role}`, `{mandate}`:
 
 ```
 You are a {role} (domain architect) on a planning team.
@@ -268,7 +207,7 @@ Write to .design/expert-{name}.json with findings array and tasks array.
 Claim your task and mark completed.
 ```
 
-### RESEARCHER_PROMPT
+**Researcher prompt** — fill `{goal}`, `{name}`, `{role}`, `{mandate}`:
 
 ```
 You are a {role} (external researcher) on a planning team.
@@ -295,7 +234,7 @@ Write to .design/expert-{name}.json with research (array of findings with source
 Claim your task and mark completed.
 ```
 
-### CRITIC_PROMPT
+**Critic teammate prompt** — fill `{goal}` and `{expectedExpertCount}`:
 
 ```
 You are the Critic on a planning team. Stress-test expert proposals before the plan-writer assembles the final plan.
@@ -321,7 +260,7 @@ Write to .design/critic.json: {challenges: [{expert, issue, severity (blocking|m
 Claim your task and mark completed.
 ```
 
-### PLAN_WRITER_PROMPT
+**Plan-writer teammate prompt** — fill `{goal}` and `{expectedExpertCount}`:
 
 ```
 You are the Plan Writer. Merge expert analyses, incorporate critique, validate, enrich, and write .design/plan.json.
@@ -359,7 +298,7 @@ Each task uses the schema from Phase 2. Tasks ordered (index = ID, 0-based), blo
 
 ## Phase 5: Script-Assisted Finalization
 
-Set `PLAN_CLI` to `{PLAN_CLI}`.
+Resolve the plugin root directory (the directory containing `.claude-plugin/` and `skills/`). Set `PLAN_CLI` to `{plugin_root}/skills/design/scripts/plan.py`.
 
 Run the following scripts in order via Bash. Parse JSON output after each. If any returns `ok: false`, fix the reported issues in `.design/plan-draft.json` and re-run. After 2 failed attempts at validation, include issues in progress.decisions and proceed.
 
@@ -372,35 +311,50 @@ Run the following scripts in order via Bash. Parse JSON output after each. If an
 After all scripts succeed, rename the draft to the final plan: `mv .design/plan-draft.json .design/plan.json`
 
 ## Output
-Claim your task and mark completed. Then:
+Claim your task and mark completed. Read ~/.claude/teams/do-design/config.json for the lead's name, then:
 
-    SendMessage(type: "message", recipient: "lead", content: <FINAL-line JSON below>, summary: "Plan written")
+    SendMessage(type: "message", recipient: {lead-name}, content: <FINAL-line JSON below>, summary: "Plan written")
 
 FINAL-line JSON: {"taskCount": N, "maxDepth": N, "gapsFilled": N, "critiqueResolutions": N, "validationIssues": [], "depthSummary": {"1": ["Task 0: subject"], ...}}
 Depth: 1 for empty blockedBy, else 1 + max(depth of blockedBy tasks). On unresolvable error, send {error: "...", validationIssues: []} instead.
 ```
 
-### MINIMAL_PLAN_WRITER_PROMPT
+**Lead wait pattern**: After spawning all agents, wait. The plan-writer's `SendMessage` is delivered automatically. Parse JSON from message content.
+
+**Do NOT poll**: Teammate messages are auto-delivered — never use `sleep`, `ls`, or Bash loops to check for agent output files. Simply wait; the next message you receive will be from a teammate or the system.
+
+After receiving the plan-writer's message: `SendMessage(type: "shutdown_request")` to each teammate, wait for confirmations, `TeamDelete(team_name: "do-design")`.
+
+**Two-tier fallback** (standard/full only) — triggered when the team fails to produce `.design/plan.json`:
+
+- **Tier 1**: Shut down team. Spawn single plan-writer Task subagent (not teammate) with the prompt above, reading `.design/expert-*.json` and `.design/critic.json` (full only).
+- **Tier 2**: If retry fails, merge inline with context minimization — process one expert file at a time, extract tasks arrays, merge incrementally. Read critic for blocking issues only (full). Execute Phases 2–3 analytically, then attempt script finalization (Phase 5). If scripts are unavailable, perform validation, prompt assembly (S1-S9 concatenation), and overlap computation inline with reduced scope, then write `.design/plan.json` directly.
+
+## Step 4: Cleanup & Summary
+
+1. **Verify**: Run `python3 $PLAN_CLI validate .design/plan.json` via Bash. Parse JSON output. If `ok` is false, report the error and stop. Use stored `taskCount`/`maxDepth` from plan-writer's SendMessage.
+2. **Clean up TaskList**: Delete all tasks created during planning so `/do:execute` starts clean.
+3. **Compute summary data**: Run `python3 $PLAN_CLI summary .design/plan.json` via Bash. Parse JSON output. Extract `goal`, `taskCount`, `maxDepth`, `depthSummary`, and `modelDistribution`.
+4. **Output summary** using computed data:
 
 ```
-You are a lightweight plan writer. Generate .design/plan.json for a minimal-complexity goal using only the analyst's output.
+Plan: {goal}
+Tier: {complexity}
+Tasks: {taskCount}, max depth {maxDepth}
+Models: {modelDistribution}
 
-**Goal**: {goal}
+{depthSummary formatted as:}
+Depth 1:
+- Task 0: {subject} ({model})
+- Task 1: {subject} ({model})
 
-## Instructions
+Depth 2:
+- Task 2: {subject} ({model}) [blocked by: 0, 1]
 
-1. Read .design/goal-analysis.json for decomposition, codebase context, approaches, and scope notes.
-2. Generate 1–3 tasks from the recommended approach. Each task needs: subject, description (explain WHY and connection to dependents), activeForm, status (pending), result (null), attempts (0), blockedBy (array of indices), metadata: {type, files: {create:[], modify:[]}, reads}, agent: {role, model (opus/sonnet/haiku), approach, contextFiles [{path, reason}], assumptions [{claim, verify (shell cmd), severity: blocking|warning}], acceptanceCriteria [{criterion, check (shell cmd)}], rollbackTriggers ["If X, STOP and return BLOCKED: reason"], constraints}.
-3. Auto-generate safety: for each modify path add blocking assumption `test -f {path}`, convert blocking assumptions to rollback triggers.
-4. Write .design/plan-draft.json: {schemaVersion: 3, goal, context: {stack, conventions, testCommand, buildCommand, lsp}, progress: {completedTasks: [], surprises: [], decisions: []}, tasks: [...]}. Do NOT include `prompt` or `fileOverlaps` fields — scripts will add them.
-5. Resolve the plugin root directory (the directory containing `.claude-plugin/` and `skills/`). Set PLAN_CLI to {PLAN_CLI}. Run the following scripts in order via Bash:
-   - `python3 $PLAN_CLI validate-structure .design/plan-draft.json` — fix any reported issues before proceeding.
-   - `python3 $PLAN_CLI assemble-prompts .design/plan-draft.json` — assembles S1-S9 worker prompts into each task's `prompt` field.
-   - `python3 $PLAN_CLI compute-overlaps .design/plan-draft.json` — computes file overlap matrix into each task's `fileOverlaps` field.
-6. Rename to final plan: `mv .design/plan-draft.json .design/plan.json`
+Context: {stack}
+Test: {testCommand}
 
-## Output
-
-The FINAL line of your output MUST be a single JSON object (no markdown fencing):
-{"taskCount": N, "maxDepth": N, "depthSummary": {"1": ["Task 0: subject"], ...}}
+Run /execute to begin.
 ```
+
+**Goal**: $ARGUMENTS
