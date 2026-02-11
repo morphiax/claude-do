@@ -4,6 +4,9 @@
 # OS files
 .DS_Store
 
+# Python
+__pycache__/
+
 # Dependencies
 node_modules/
 
