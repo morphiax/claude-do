@@ -2,8 +2,9 @@
 """plan.py - Deterministic operations for .design/plan.json manipulation.
 
 Query commands (read-only):
-  validate, status-counts, summary, overlap-matrix, tasklist-data, ready-set,
-  extract-fields, model-distribution, retry-candidates, collect-files, circuit-breaker
+  validate, status-counts, summary, overlap-matrix, tasklist-data, worker-pool,
+  extract-fields, model-distribution, retry-candidates, collect-files,
+  circuit-breaker, extract-task
 
 Mutation commands (modify plan.json):
   resume-reset, update-status
@@ -20,6 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from collections import defaultdict, deque
 from typing import TYPE_CHECKING, Any, NoReturn
@@ -262,47 +264,86 @@ def cmd_tasklist_data(args: argparse.Namespace) -> NoReturn:
     output_json({"ok": True, "tasks": result})
 
 
-def cmd_ready_set(args: argparse.Namespace) -> NoReturn:
-    """Compute next ready set: pending tasks whose blockedBy are all completed."""
+def _slugify_role(role: str) -> str:
+    """Convert agent role to kebab-case slug for worker naming."""
+    slug = role.lower()
+    slug = re.sub(r"[_\s]+", "-", slug)
+    slug = re.sub(r"[^a-z0-9-]", "", slug)
+    slug = re.sub(r"-{2,}", "-", slug)
+    return slug.strip("-") or "worker"
+
+
+def _most_common_model(tasks: list[dict[str, Any]], indices: list[int]) -> str:
+    """Return the most common agent.model among the given task indices."""
+    model_counts: dict[str, int] = defaultdict(int)
+    for idx in indices:
+        m = tasks[idx].get("agent", {}).get("model", "sonnet")
+        model_counts[m] += 1
+    return max(model_counts, key=lambda k: model_counts[k])
+
+
+def _deduplicate_slug(slug: str, used_slugs: set[str]) -> str:
+    """Return a unique slug by appending numeric suffixes if needed."""
+    if slug not in used_slugs:
+        return slug
+    suffix = 2
+    while f"{slug}-{suffix}" in used_slugs:
+        suffix += 1
+    return f"{slug}-{suffix}"
+
+
+def cmd_worker_pool(args: argparse.Namespace) -> NoReturn:
+    """Compute optimal worker count and role assignments from dependency graph."""
     plan = load_plan(args.plan_path)
     tasks = plan.get("tasks", [])
 
-    ready = []
-    pending_count = 0
-
+    # Collect pending tasks grouped by role
+    role_tasks: dict[str, list[int]] = defaultdict(list)
     for i, task in enumerate(tasks):
-        status = task.get("status", "pending")
+        if task.get("status", "pending") != "pending":
+            continue
+        role = task.get("agent", {}).get("role", f"worker-{i}")
+        role_tasks[role].append(i)
 
-        if status == "pending":
-            pending_count += 1
-            blocked_by = task.get("blockedBy", [])
+    if not role_tasks:
+        output_json({"ok": True, "workers": [], "maxConcurrency": 0, "totalWorkers": 0})
 
-            # Check if all dependencies are completed
-            all_deps_completed = all(
-                tasks[dep].get("status") == "completed"
-                for dep in blocked_by
-                if dep < len(tasks)
-            )
+    # Compute max dependency graph width
+    depths = compute_depths(tasks)
+    depth_groups: dict[int, list[int]] = defaultdict(list)
+    for i, task in enumerate(tasks):
+        if task.get("status", "pending") == "pending":
+            depth_groups[depths.get(i, 1)].append(i)
+    max_width = max((len(g) for g in depth_groups.values()), default=1)
 
-            if all_deps_completed:
-                ready.append(
-                    {
-                        "planIndex": i,
-                        "subject": task.get("subject", ""),
-                        "model": task.get("agent", {}).get("model", ""),
-                        "hasBlockedBy": len(blocked_by) > 0,
-                        "fileOverlaps": task.get("fileOverlaps", []),
-                    }
-                )
+    # Worker count = min(max_width, unique_roles, cap)
+    worker_count = min(max_width, len(role_tasks), 8)
 
-    is_deadlock = pending_count > 0 and len(ready) == 0
+    # Sort roles by task count descending, take top N
+    sorted_roles = sorted(role_tasks.items(), key=lambda x: len(x[1]), reverse=True)
+
+    workers = []
+    used_slugs: set[str] = set()
+    for role_name, task_indices in sorted_roles[:worker_count]:
+        model = _most_common_model(tasks, task_indices)
+        slug = _deduplicate_slug(_slugify_role(role_name), used_slugs)
+        used_slugs.add(slug)
+
+        workers.append(
+            {
+                "name": slug,
+                "role": role_name,
+                "model": model,
+                "taskCount": len(task_indices),
+            }
+        )
 
     output_json(
         {
             "ok": True,
-            "ready": ready,
-            "pendingCount": pending_count,
-            "isDeadlock": is_deadlock,
+            "workers": workers,
+            "maxConcurrency": max_width,
+            "totalWorkers": len(workers),
         }
     )
 
@@ -796,89 +837,73 @@ def cmd_validate_structure(args: argparse.Namespace) -> NoReturn:
     output_json({"ok": len(issues) == 0, "issues": issues})
 
 
-def _build_preflight_section(assumptions: list[dict[str, Any]]) -> str:
-    """Build pre-flight section from assumptions."""
+def _format_assumptions(assumptions: list[dict[str, Any]]) -> str:
+    """Format assumptions as compact checklist lines."""
     if not assumptions:
         return ""
+    lines = []
+    for a in assumptions:
+        sev = "BLOCKING" if a.get("severity") == "blocking" else "warning"
+        lines.append(f"- [{sev}] {a.get('claim', '')}: `{a.get('verify', '')}`")
+    return "\n".join(lines)
 
-    checks = []
-    for assumption in assumptions:
-        severity = assumption.get("severity", "warning")
-        label = "blocking" if severity == "blocking" else "warning"
-        checks.append(
-            f"- [ ] [{label}] {assumption.get('claim', '')}: "
-            f"`{assumption.get('verify', '')}`"
-        )
 
-    return (
-        "## Pre-flight\n"
-        "Verify before starting. If BLOCKING check fails, "
-        "return BLOCKED: followed by the reason.\n" + "\n".join(checks) + "\n"
+def _format_acceptance(criteria: list[dict[str, Any]]) -> str:
+    """Format acceptance criteria as compact checklist lines."""
+    if not criteria:
+        return ""
+    return "\n".join(
+        f"- {ac.get('criterion', '')}: `{ac.get('check', '')}`" for ac in criteria
     )
 
 
-def _build_context_section(
-    context_files: list[dict[str, Any]], context: dict[str, Any]
-) -> str:
-    """Build context section from context files and plan context."""
+def _format_files_section(metadata: dict[str, Any]) -> str:
+    """Format file create/modify metadata into a single line."""
+    files = metadata.get("files", {})
+    create = files.get("create", [])
+    modify = files.get("modify", [])
+    if not create and not modify:
+        return ""
+    file_lines = []
+    if create:
+        file_lines.append(f"Create: {', '.join(create)}")
+    if modify:
+        file_lines.append(f"Modify: {', '.join(modify)}")
+    return "**Files**: " + " | ".join(file_lines)
+
+
+def _format_context_files(agent: dict[str, Any]) -> str:
+    """Format contextFiles into a read-first section."""
+    context_files = agent.get("contextFiles", [])
     if not context_files:
         return ""
-
-    lines = [f"- {cf.get('path', '')} — {cf.get('reason', '')}" for cf in context_files]
-    return (
-        "## Context\n"
-        "Read before implementing:\n"
-        + "\n".join(lines)
-        + "\n"
-        + f"Project: {context.get('stack', '')}. "
-        f"Conventions: {context.get('conventions', '')}.\n"
-        f"Test: {context.get('testCommand', 'N/A')}\n"
-    )
+    cf_lines = [
+        f"- {cf.get('path', '')} ({cf.get('reason', '')})" for cf in context_files
+    ]
+    return "**Read first**:\n" + "\n".join(cf_lines)
 
 
-def _build_optional_sections(agent: dict[str, Any]) -> dict[str, str]:
-    """Build optional sections (constraints, approach, rollback)."""
-    sections: dict[str, str] = {}
+def _format_agent_sections(agent: dict[str, Any]) -> list[str]:
+    """Format agent constraints, rollback triggers, and acceptance criteria."""
+    parts: list[str] = []
+
+    assumptions = _format_assumptions(agent.get("assumptions", []))
+    if assumptions:
+        parts.append(f"**Pre-checks** (BLOCKING = stop if fails):\n{assumptions}")
 
     constraints = agent.get("constraints", [])
-    sections["constraints"] = (
-        ("Constraints:\n" + "\n".join(f"- {c}" for c in constraints) + "\n")
-        if constraints
-        else ""
-    )
-
-    approach = agent.get("approach", "")
-    sections["approach"] = f"Approach: {approach}\n" if approach else ""
+    if constraints:
+        parts.append("**Constraints**: " + "; ".join(constraints))
 
     rollback = agent.get("rollbackTriggers", [])
-    sections["rollback"] = (
-        (
-            "\nRollback triggers — STOP immediately if any occur:\n"
-            + "\n".join(f"- {t}" for t in rollback)
-            + "\n"
-        )
-        if rollback
-        else ""
-    )
+    if rollback:
+        parts.append("**Stop if**: " + " | ".join(rollback))
 
-    return sections
+    acceptance = _format_acceptance(agent.get("acceptanceCriteria", []))
+    if acceptance:
+        parts.append(f"**Done when**:\n{acceptance}")
 
-
-def _build_acceptance_section(acceptance_criteria: list[dict[str, Any]]) -> str:
-    """Build acceptance criteria section."""
-    if not acceptance_criteria:
-        return ""
-
-    checks = [
-        f"- [ ] {ac.get('criterion', '')}: `{ac.get('check', '')}`"
-        for ac in acceptance_criteria
-    ]
-    return (
-        "## After implementing\n"
-        "1. Verify acceptance criteria:\n" + "\n".join(checks) + "\n"
-        "   Fix failures before proceeding.\n"
-        "2. Do NOT stage or commit — the lead handles git after the batch completes.\n"
-    )
+    return parts
 
 
 def _assemble_task_prompt(
@@ -887,50 +912,33 @@ def _assemble_task_prompt(
     metadata: dict[str, Any],
     context: dict[str, Any],
 ) -> str:
-    """Assemble full S1-S9 prompt for a single task."""
-    role = agent.get("role", "Agent")
+    """Assemble a concise task brief for workers."""
+    parts = [
+        f"**Role**: {agent.get('role', 'Agent')}",
+        f"**Task**: {task.get('subject', '')}",
+        task.get("description", ""),
+    ]
 
-    preflight = _build_preflight_section(agent.get("assumptions", []))
-    context_section = _build_context_section(agent.get("contextFiles", []), context)
+    approach = agent.get("approach", "")
+    if approach:
+        parts.append(f"**Approach**: {approach}")
 
-    files_create = metadata.get("files", {}).get("create", [])
-    files_modify = metadata.get("files", {}).get("modify", [])
-    task_section = (
-        f"## Task: {task.get('subject', '')}\n"
-        f"{task.get('description', '')}\n"
-        f"Files to create: {', '.join(files_create) or '(none)'}\n"
-        f"Files to modify: {', '.join(files_modify) or '(none)'}\n"
-    )
+    for section in (_format_files_section(metadata), _format_context_files(agent)):
+        if section:
+            parts.append(section)
 
-    optional = _build_optional_sections(agent)
-    acceptance = _build_acceptance_section(agent.get("acceptanceCriteria", []))
+    parts.extend(_format_agent_sections(agent))
 
-    output_section = (
-        "\n## Output format\n"
-        "The FINAL line of your output MUST be one of:\n"
-        "- COMPLETED: {one-line summary}\n"
-        "- FAILED: {reason}\n"
-        "- BLOCKED: {reason}\n"
-        "\n"
-        "Do NOT write log files. Your FINAL status line is the only output "
-        "consumed by the orchestrator."
-    )
+    stack = context.get("stack", "")
+    conventions = context.get("conventions", "")
+    if stack or conventions:
+        parts.append(f"**Project**: {stack}. {conventions}".strip())
 
-    return (
-        f"You are a {role}\n\n"
-        f"{preflight}\n"
-        f"{context_section}\n"
-        f"{task_section}\n"
-        f"{optional['constraints']}\n"
-        f"{optional['approach']}\n"
-        f"{optional['rollback']}\n"
-        f"{acceptance}\n"
-        f"{output_section}"
-    ).strip()
+    return "\n\n".join(parts)
 
 
 def cmd_assemble_prompts(args: argparse.Namespace) -> NoReturn:
-    """Assemble S1-S9 template for all tasks and update plan.json."""
+    """Assemble concise task briefs for all tasks and update plan.json."""
     plan_path = args.plan_path
     plan = load_plan(plan_path)
     tasks = plan.get("tasks", [])
@@ -1032,9 +1040,11 @@ def main() -> None:
     p.add_argument("plan_path", nargs="?", default=".design/plan.json")
     p.set_defaults(func=cmd_tasklist_data)
 
-    p = subparsers.add_parser("ready-set", help="Compute next ready task set")
+    p = subparsers.add_parser(
+        "worker-pool", help="Compute optimal worker pool from dependency graph"
+    )
     p.add_argument("plan_path", nargs="?", default=".design/plan.json")
-    p.set_defaults(func=cmd_ready_set)
+    p.set_defaults(func=cmd_worker_pool)
 
     p = subparsers.add_parser(
         "extract-fields", help="Extract specific fields from JSON file"
@@ -1086,7 +1096,7 @@ def main() -> None:
     p.set_defaults(func=cmd_validate_structure)
 
     p = subparsers.add_parser(
-        "assemble-prompts", help="Assemble S1-S9 prompts for all tasks"
+        "assemble-prompts", help="Assemble concise task briefs for all tasks"
     )
     p.add_argument("plan_path", nargs="?", default=".design/plan.json")
     p.set_defaults(func=cmd_assemble_prompts)

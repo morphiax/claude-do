@@ -27,7 +27,7 @@ Both skills must be tested end-to-end. A change to one skill may affect the othe
 
 - `.claude-plugin/plugin.json` — Plugin manifest (name, version, metadata)
 - `.claude-plugin/marketplace.json` — Marketplace distribution config
-- `scripts/plan.py` — Shared helper script (17 commands: 12 query, 2 mutation, 3 build)
+- `scripts/plan.py` — Shared helper script (17 commands: 12 query, 2 mutation, 3 build including `worker-pool`)
 - `skills/design/SKILL.md` — `/do:design` skill definition
 - `skills/design/scripts/plan.py` — Symlink → `../../../scripts/plan.py`
 - `skills/execute/SKILL.md` — `/do:execute` skill definition
@@ -43,11 +43,11 @@ Each SKILL.md has YAML frontmatter (`name`, `description`, `argument-hint`) that
 
 A single `scripts/plan.py` at the repo root provides all deterministic operations. Each skill symlinks to it from `skills/{name}/scripts/plan.py` so SKILL.md can resolve a skill-local path.
 
-- **Query** (12 commands): validate, status-counts, summary, overlap-matrix, tasklist-data, ready-set, extract-fields, model-distribution, retry-candidates, collect-files, circuit-breaker, extract-task
+- **Query** (12 commands): validate, status-counts, summary, overlap-matrix, tasklist-data, worker-pool, extract-fields, model-distribution, retry-candidates, collect-files, circuit-breaker, extract-task
 - **Mutation** (2 commands): resume-reset, update-status — atomically modify plan.json via temp file + rename
 - **Build** (3 commands): validate-structure, assemble-prompts, compute-overlaps — used by the plan-writer for deterministic finalization
 
-Design uses a subset (query + build). Execute uses all commands. `extract-task` writes per-worker `.design/worker-task-{N}.json` files to reduce context window usage.
+Design uses a subset (query + build). Execute uses all commands. `worker-pool` computes optimal worker count and role-based naming from the dependency graph. `extract-task` writes per-worker `.design/worker-task-{N}.json` files to reduce context window usage.
 
 Scripts use python3 stdlib only (no dependencies), support Python 3.8+, and follow a consistent CLI pattern: `python3 plan.py <command> [plan_path] [options]`. All output is JSON to stdout with exit code 0 for success, 1 for errors.
 
@@ -57,8 +57,8 @@ The two skills communicate through `.design/plan.json` (schemaVersion 3) written
 
 - `.design/plan.json` is the authoritative state; the TaskList is a derived view
 - Schema version 3 is required
-- Tasks use dependency-only scheduling — no wave field in task schema, execute computes batches dynamically from `blockedBy`
-- Each task includes assembled worker prompts (`prompt` field) and file overlap analysis (`fileOverlaps` field) — design produces these during plan generation
+- Tasks use dependency-only scheduling — no wave field in task schema, workers self-organize by claiming unblocked tasks from the TaskList based on `blockedBy` dependencies
+- Each task includes a concise assembled worker brief (`prompt` field) and file overlap analysis (`fileOverlaps` field) — design produces these during plan generation via scripts
 - Progressive trimming: completed tasks are stripped of verbose agent fields (including `prompt`) to reduce plan size as execution proceeds
 - Analysis artifacts (goal-analysis.json, expert-\*.json, critic.json) are preserved after plan generation for execute workers to reference via contextFiles
 - Plan history: completed plans are archived to `.design/history/{timestamp}-plan.json` on successful execution; design pre-flight preserves this subdirectory during cleanup
@@ -81,19 +81,21 @@ Both skills use the **main conversation as team lead** with Agent Teams for coor
   - **Full** (9+ tasks, multiple approaches, cross-cutting concerns): spawn experts + critic + plan-writer. Critic blockedBy experts, plan-writer blockedBy critic.
 - **Expert agents** (standard/full only): Two types. **Architects** analyze the codebase through a domain lens — structure, patterns, what needs to change. **Researchers** search externally via WebSearch/WebFetch — community patterns, libraries, idiomatic solutions, best practices. Each writes `.design/expert-{name}.json`.
 - **Critic** (full only): blockedBy all experts. Stress-tests proposals: challenges assumptions, evaluates approach coherence, identifies missing risks, flags over/under-engineering, checks goal alignment. Writes `.design/critic.json` with challenges and a verdict.
-- **Plan-writer** (standard/full only): teammate blockedBy critic (full) or experts (standard). Merges expert analyses, incorporates critique (full only), validates, enriches. Assembles worker prompts (S1-S9 template) and computes file overlap matrix. Records approach decisions in `progress.decisions`. Writes `.design/plan.json` with fully assembled prompts.
+- **Plan-writer** (standard/full only): teammate blockedBy critic (full) or experts (standard). Merges expert analyses, incorporates critique (full only), validates, enriches. Runs script-assisted finalization (validate-structure, assemble-prompts, compute-overlaps) and writes `.design/plan.json`.
 - **Two-tier fallback** (standard/full only): If the team fails to produce `.design/plan.json` (1) retry with a single plan-writer Task subagent, or (2) perform merge and plan writing inline with context minimization (process expert files one at a time)
 
-`/do:execute` — dependency-graph scheduling with worker teammates (`do-execute` team):
+`/do:execute` — persistent self-organizing workers with event-driven lead (`do-execute` team):
 
-- **Lead responsibilities**: plan reading/validation/TaskList creation (inline — purely mechanical, no subagent), spawn worker teammates, collect results via `SendMessage`, verify results (batched spot-checks + acceptance criteria), update `.design/plan.json` (status, trimming, cascading failures via `update-status` script), git commits, user interaction (`AskUserQuestion`), circuit breaker evaluation, compute ready-sets from dependencies, assemble retry prompts
-- **Worker teammates** (name: `worker-{planIndex}`): one per task in each ready-set batch, receive pre-extracted task files (`.design/worker-task-{N}.json`) via `extract-task` script, report results via `SendMessage` to the lead with JSON payload (`planIndex`, `status`, `result`). Workers are shut down after each round.
-- **Dependency-graph scheduling**: orchestration uses ready-set loop (spawn all tasks whose `blockedBy` dependencies are completed), no pre-computed waves
+- **Lead responsibilities**: plan reading/validation/TaskList creation (inline — purely mechanical, no subagent), spawn persistent worker teammates once, monitor execution via event-driven messaging, update `.design/plan.json` (status, trimming, cascading failures via `update-status` script), wake idle workers when new tasks unblock, final batched verification after all tasks complete, user interaction (`AskUserQuestion`), circuit breaker evaluation, retry coordination
+- **Worker teammates** (named by `agent.role`, e.g. `api-developer`, `test-writer`): persistent workers spawned once via `worker-pool` command. Workers self-organize: check TaskList for pending unblocked tasks, claim one, read pre-extracted task file (`.design/worker-task-{N}.json`), execute, commit their own changes (`git add` + `git commit`), mark complete, report to lead naturally, then claim the next available task. Workers go idle when no tasks are available and are woken by the lead when new tasks unblock.
+- **Peer communication**: workers message each other directly when they find issues with prior work (e.g., a bug in code committed by another worker). The affected worker fixes the issue and confirms. Lead is CC'd but does not intervene unless escalated.
+- **File ownership via dependencies**: the lead augments TaskList dependencies at setup using the overlap matrix — concurrent tasks touching the same files get runtime `blockedBy` constraints so they serialize naturally. No explicit file ownership assignment needed.
+- **Deferred verification**: workers verify their own acceptance criteria during execution. The lead runs a single batched final verification (spot-checks + acceptance criteria) after all tasks complete, instead of per-round checks.
 - Progressive trimming: completed tasks are stripped of verbose agent fields including `prompt` (keep only subject, status, result, metadata.files, blockedBy, agent.role, agent.model)
 - Retry budget: max 3 attempts per task with failure context passed to retries
 - Cascading failures: failed/blocked tasks automatically skip dependents
 - Circuit breaker: abort if >50% of remaining tasks would be skipped (plans with ≤3 tasks bypass this check)
-- Resume support: status-scan based (reset `in_progress` tasks to `pending` with artifact cleanup), no wave tracking needed; successful completions archive plan to `.design/history/`
+- Resume support: status-scan based (reset `in_progress` tasks to `pending` with artifact cleanup); successful completions archive plan to `.design/history/`
 
 ## Requirements
 
