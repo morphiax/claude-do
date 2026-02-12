@@ -35,7 +35,7 @@ All script calls: `python3 $PLAN_CLI <command> [args]` via Bash. Output: JSON wi
 Mechanical setup — no subagent needed.
 
 1. Validate: `python3 $PLAN_CLI status .design/plan.json`. On failure: `not_found` = "No plan found. Run `/do:design <goal>` first." and stop; `bad_schema` = unsupported schema, stop; `empty_tasks` = no tasks, stop.
-2. Resume detection: `python3 $PLAN_CLI status-counts .design/plan.json`. If `isResume`: run `python3 $PLAN_CLI resume-reset .design/plan.json`, then for each `resetTasks` entry: `git checkout -- {filesToRevert}` and `rm -f {filesToDelete}`. If `noWorkRemaining`: "All tasks already resolved." and stop.
+2. Resume detection: `python3 $PLAN_CLI status .design/plan.json`. If `isResume`: run `python3 $PLAN_CLI resume-reset .design/plan.json`, then for each `resetTasks` entry: `git checkout -- {filesToRevert}` and `rm -f {filesToDelete}`. If `noWorkRemaining`: "All tasks already resolved." and stop.
 3. Create team: `TeamDelete(team_name: "do-execute")` (ignore errors), then `TeamCreate(team_name: "do-execute")`. If TeamCreate fails, tell user Agent Teams is required and stop.
 4. Create TaskList: `python3 $PLAN_CLI tasklist-data .design/plan.json`. For each task: `TaskCreate` with subject `"Task {planIndex}: {subject}"`, record returned ID in `taskIdMapping`. Wire `blockedBy` via `TaskUpdate(addBlockedBy)`. If resuming, mark completed tasks. Add overlap constraints: `python3 $PLAN_CLI overlap-matrix .design/plan.json` — for each pair `(i, j)` where `j > i`, files overlap, and no existing dependency: `TaskUpdate(taskId: taskIdMapping[j], addBlockedBy: [taskIdMapping[i]])`.
 5. **Worker Selection**: Analyze the tasks and determine what workers you need. Trust your judgment.
@@ -92,7 +92,7 @@ Event-driven loop — process worker messages as they arrive.
 **On idle**: Worker reports no tasks available. Track idle workers. Check completion.
 
 **Completion check** (after each idle/completion):
-1. `python3 $PLAN_CLI status-counts .design/plan.json`
+1. `python3 $PLAN_CLI status .design/plan.json`
 2. No pending tasks and all workers idle: shut down workers, go to Final Verification
 3. Pending tasks exist but all workers idle (deadlock): report deadlock, shut down, go to Final Verification
 
@@ -106,7 +106,7 @@ For verification failures with attempts < 3: update plan.json to failed, spawn a
 
 ### 5. Complete
 
-1. Summary: `python3 $PLAN_CLI status-counts .design/plan.json`. Display completed/failed/blocked/skipped counts with subjects. Recommend follow-ups for failures.
+1. Summary: `python3 $PLAN_CLI status .design/plan.json`. Display completed/failed/blocked/skipped counts with subjects. Recommend follow-ups for failures.
 2. Archive: If all completed: `mkdir -p .design/history && mv .design/plan.json ".design/history/$(date -u +%Y%m%dT%H%M%SZ)-plan.json"`. If partial: leave plan for resume.
 3. Cleanup: `TeamDelete(team_name: "do-execute")`.
 
