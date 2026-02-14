@@ -8,6 +8,8 @@ argument-hint: "<goal description>"
 
 Decompose a goal into `.design/plan.json` with role briefs — goal-directed scopes for specialist workers. **This skill only designs — it does NOT execute.**
 
+**PROTOCOL REQUIREMENT: Do NOT answer the goal directly. Your FIRST action after reading the goal MUST be the pre-flight check. Follow the Flow step-by-step.**
+
 **Do NOT use `EnterPlanMode`** — this skill IS the plan.
 
 **CRITICAL: Always use agent teams.** When spawning any expert via Task tool, you MUST include `team_name: "do-design"` and `name: "{role}"` parameters. Without these, agents are standalone and cannot coordinate.
@@ -68,23 +70,35 @@ The lead directly assesses the goal to determine needed perspectives.
 |---|---|---|
 | Trivial (1-2 roles, obvious approach) | 1-2 | None |
 | Standard (clear domain) | 2-4 | Integration verifier |
-| Complex (cross-cutting concerns) | 4-6 | Challenger + integration verifier |
+| Complex (cross-cutting concerns) | 4-6 | Challenger + scout + integration verifier |
 | High-stakes (production, security, data) | 3-8 | Challenger + scout + integration verifier |
 
 4. Report the planned team composition and complexity tier to the user.
 
 **Expert Selection**
 
-Analyze the goal and spawn the experts you need:
-- **architect** — system design, patterns, trade-offs (nearly always useful)
-- **researcher** — prior art, libraries, best practices (when external solutions exist)
-- **domain specialists** — spawn based on goal domain (security, performance, UX, data, etc.)
+Analyze the goal type and spawn appropriate experts:
 
-Not exhaustive. If the goal involves authentication, spawn a security specialist. If it's a UI overhaul, spawn a UX specialist. If unsure, ask the user.
+**Implementation goals** (build/add/create/implement):
+- **architect** — system design, patterns, trade-offs
+- **researcher** — prior art, libraries, best practices
+- **domain specialists** — security, performance, UX, data, etc.
+
+**Meta goals** (improve this plugin, modify SKILL.md, refactor plan.py):
+- **prompt-engineer** — for skill improvements (analyzes SKILL.md structure, protocol gaps)
+- **maintainer** — for codebase refactoring (analyzes current architecture, proposes improvements)
+- **domain specialist** — if goal targets specific domain (e.g., 'improve memory search' → information-retrieval specialist)
+
+**Research/analysis goals** (analyze/audit/document):
+- **researcher** — investigates the area being analyzed
+- **documenter** — if output is documentation
+- **domain specialist** — for domain-specific analysis (security audit → security specialist)
 
 **For complex/high-stakes goals with >=3 experts**: Choose at least 2 experts with contrasting priorities (e.g., performance vs maintainability, security vs usability) to enable productive debate.
 
 **For trivial goals** (1-2 roles, single obvious approach): skip experts. Write the plan directly.
+
+**When uncertain about goal type**: Ask the user to clarify intent before spawning experts.
 
 ### 3. Spawn Experts
 
@@ -101,12 +115,25 @@ Create the team and spawn experts in parallel.
 
 After all experts have saved artifacts and sent initial messages:
 
-1. Lead broadcasts to all experts: "All experts: read artifacts at {paths}. Identify disagreements, gaps, or invalid assumptions in others' findings. Challenge specific claims via SendMessage."
-2. Each expert reads OTHER experts' artifacts (not their own).
-3. Each expert sends challenge messages to lead citing specific sections from other artifacts.
-4. Lead collects all challenges (timeout: if no challenges in 2 turns, proceed to synthesis).
+1. Lead broadcasts to all experts: "All experts: read artifacts at {paths}. Identify disagreements, gaps, or invalid assumptions in others' findings. Challenge specific claims via SendMessage to lead using this format:
 
-Challenges inform conflict resolution in the next step.
+   **Challenge to {expert-name}**
+   - **Claim challenged**: '{exact quote from their artifact}'
+   - **Severity**: [blocking|important|minor]
+   - **Evidence**: {why this claim is incorrect or problematic}
+   - **Alternative**: {your proposed alternative approach}
+
+   Send one message per challenge. If you have no challenges, send 'No challenges found'."
+
+2. Each expert reads OTHER experts' artifacts (not their own).
+3. Each expert sends structured challenge messages to lead.
+4. Lead collects all challenges. For each challenge:
+   - Forward the challenge to the targeted expert via SendMessage
+   - Wait for the targeted expert to defend their position or concede
+   - Targeted expert responds with either: (a) defense of their claim with additional evidence, or (b) acknowledgment and revision
+5. After all challenged experts have responded (timeout: if no defense after 2 turns, proceed), lead resolves conflicts.
+
+Challenges and defenses inform conflict resolution in the next step.
 
 ### 4. Synthesize into Role Briefs
 
