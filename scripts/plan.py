@@ -906,6 +906,10 @@ def cmd_finalize(args: argparse.Namespace) -> NoReturn:
     if issues:
         output_json({"ok": False, "error": "validation_failed", "issues": issues})
 
+    # Validate-only mode: check structure without assembling or writing
+    if getattr(args, "validate_only", False):
+        output_json({"ok": True, "validated": True})
+
     # Step 2: Assemble prompts
     assembled = _assemble_prompts(plan)
 
@@ -988,6 +992,11 @@ def main() -> None:
         "finalize", help="Validate structure, assemble prompts, compute overlaps"
     )
     p.add_argument("plan_path", nargs="?", default=".design/plan.json")
+    p.add_argument(
+        "--validate-only",
+        action="store_true",
+        help="Only validate structure, skip prompt assembly and overlap computation",
+    )
     p.set_defaults(func=cmd_finalize)
 
     args = parser.parse_args()

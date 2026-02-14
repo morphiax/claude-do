@@ -104,7 +104,15 @@ The lead collects expert findings and writes the plan directly.
   "status": "pending",
   "blockedBy": [0],
   "metadata": { "type": "feature", "files": { "create": ["src/middleware/rateLimit.ts"], "modify": ["src/routes/api.ts"] } },
-  "agent": { "role": "api-developer", "model": "sonnet", "approach": "1. Create rateLimit.ts with token-bucket algorithm\n2. Wire middleware into api.ts router", "contextFiles": [{ "path": "src/routes/api.ts", "reason": "Existing route structure" }], "constraints": ["Use stdlib only, no Redis"], "acceptanceCriteria": [{ "criterion": "Rate limit enforced", "check": "curl -s returns 429 after N requests" }] }
+  "agent": {
+    "role": "api-developer", "model": "sonnet",
+    "approach": "1. Create rateLimit.ts with token-bucket algorithm\n2. Wire middleware into api.ts router",
+    "contextFiles": [{ "path": "src/routes/api.ts", "reason": "Existing route structure" }],
+    "constraints": ["Use stdlib only, no Redis"],
+    "acceptanceCriteria": [{ "criterion": "Rate limit enforced", "check": "curl -s returns 429 after N requests" }],
+    "assumptions": [{ "text": "Express middleware pattern used", "severity": "non-blocking" }],
+    "rollbackTriggers": ["Existing tests fail"], "fallback": "Use simple counter if token-bucket too complex"
+  }
 }
 ```
 
@@ -143,9 +151,18 @@ Run /do:execute to begin.
 
 The authoritative interface between design and execute. Execute reads this file; design produces it.
 
-**Top-level fields**: schemaVersion, goal, context {stack, conventions, testCommand, buildCommand, lsp}, progress {completedTasks}, tasks[]
+**Top-level fields**: schemaVersion, goal, context {stack, conventions, testCommand, buildCommand, lsp}, progress {completedTasks: []}, tasks[]
 
-**Task fields**: subject, description, activeForm, status, result, attempts, blockedBy, prompt (assembled by finalize), fileOverlaps (computed by finalize), metadata {type, files {create, modify}}, agent {role, model, approach, contextFiles, constraints, acceptanceCriteria, assumptions, rollbackTriggers, fallback}
+Note: `progress.completedTasks` MUST be an empty array `[]`, not `0` or `null`.
+
+**Task fields**: subject, description, activeForm, status (`"pending"`), result (null), attempts (0), blockedBy (array of task indices), prompt (null — assembled by finalize), fileOverlaps ([] — computed by finalize), metadata, agent
+
+**Agent sub-field formats** (finalize expects these exact structures):
+- `contextFiles`: array of `{"path": "...", "reason": "..."}` objects
+- `acceptanceCriteria`: array of `{"criterion": "...", "check": "..."}` objects
+- `assumptions`: array of `{"text": "...", "severity": "blocking"|"non-blocking"}` objects
+- `rollbackTriggers`: array of strings
+- `constraints`: array of strings
 
 Scripts validate via `finalize` command.
 
