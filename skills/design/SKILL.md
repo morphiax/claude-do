@@ -82,6 +82,8 @@ Analyze the goal and spawn the experts you need:
 
 Not exhaustive. If the goal involves authentication, spawn a security specialist. If it's a UI overhaul, spawn a UX specialist. If unsure, ask the user.
 
+**For complex/high-stakes goals with >=3 experts**: Choose at least 2 experts with contrasting priorities (e.g., performance vs maintainability, security vs usability) to enable productive debate.
+
 **For trivial goals** (1-2 roles, single obvious approach): skip experts. Write the plan directly.
 
 ### 3. Spawn Experts
@@ -89,15 +91,29 @@ Not exhaustive. If the goal involves authentication, spawn a security specialist
 Create the team and spawn experts in parallel.
 
 1. `TeamDelete(team_name: "do-design")` (ignore errors), `TeamCreate(team_name: "do-design")`. If TeamCreate fails, tell user Agent Teams is required and stop.
-2. `TaskCreate` for each expert.
-3. Spawn experts as teammates using the Task tool with `team_name: "do-design"` and `name: "{expert-name}"`. Write prompts appropriate to the goal and each expert's focus area. Experts report findings via `SendMessage` to the lead. Experts MUST save detailed artifacts to `.design/expert-{name}.json` — these flow directly to execution workers. Expert artifacts are structured JSON with sections that can be referenced selectively.
+2. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "{goal}" --stack "{stack}"`. If `ok: true` and memories exist, inject top 3-5 into expert prompts as a "Past Learnings" section (format: `- {category}: {summary} (from {created})`).
+3. `TaskCreate` for each expert.
+4. Spawn experts as teammates using the Task tool with `team_name: "do-design"` and `name: "{expert-name}"`. Write prompts appropriate to the goal and each expert's focus area. Experts report findings via `SendMessage` to the lead. Experts MUST save detailed artifacts to `.design/expert-{name}.json` — these flow directly to execution workers. Expert artifacts are structured JSON with sections that can be referenced selectively.
+
+### 3.5. Expert Cross-Review (optional)
+
+**When**: Complex or high-stakes tiers with >=3 experts. Skip for <3 experts or trivial/standard tiers.
+
+After all experts have saved artifacts and sent initial messages:
+
+1. Lead broadcasts to all experts: "All experts: read artifacts at {paths}. Identify disagreements, gaps, or invalid assumptions in others' findings. Challenge specific claims via SendMessage."
+2. Each expert reads OTHER experts' artifacts (not their own).
+3. Each expert sends challenge messages to lead citing specific sections from other artifacts.
+4. Lead collects all challenges (timeout: if no challenges in 2 turns, proceed to synthesis).
+
+Challenges inform conflict resolution in the next step.
 
 ### 4. Synthesize into Role Briefs
 
 The lead collects expert findings and writes the plan.
 
 1. Collect all expert findings (messages and `.design/expert-*.json` files).
-2. When experts disagree, evaluate trade-offs and decide. Note reasoning.
+2. **Resolve conflicts from cross-review** (if debate occurred): For each challenge, evaluate trade-offs and decide. Document resolution in plan.json under `designDecisions[]` (schema: {conflict, experts, decision, reasoning}).
 3. Identify the specialist roles needed to execute this goal:
    - Each role scopes a **coherent problem domain** for one worker
    - If a role would cross two unrelated domains, split into two roles
@@ -232,7 +248,9 @@ Run /do:execute to begin.
 
 The authoritative interface between design and execute. Execute reads this file; design produces it.
 
-**Top-level fields**: schemaVersion (4), goal, context {stack, conventions, testCommand, buildCommand, lsp}, expertArtifacts [{name, path, summary}], roles[], auxiliaryRoles[], progress {completedRoles: []}
+**Top-level fields**: schemaVersion (4), goal, context {stack, conventions, testCommand, buildCommand, lsp}, expertArtifacts [{name, path, summary}], designDecisions [], roles[], auxiliaryRoles[], progress {completedRoles: []}
+
+**designDecisions fields**: conflict (string), experts (array of expert names), decision (string), reasoning (string). Documents how lead resolved expert disagreements during cross-review.
 
 **Role fields**: name, goal, model, scope {directories, patterns, dependencies}, expertContext [{expert, artifact, relevance}], constraints [], acceptanceCriteria [{criterion, check}], assumptions [{text, severity}], rollbackTriggers [], fallback
 
