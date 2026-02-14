@@ -943,7 +943,11 @@ def _tokenize(text: str) -> set[str]:
 def _score_memory(
     entry: dict[str, Any], query_tokens: set[str], current_time: float
 ) -> float:
-    """Score a memory entry by keyword overlap + recency decay."""
+    """Score a memory entry by keyword overlap + recency decay + importance.
+
+    Importance scale: 1-10 (10 = most important). Default: 5.
+    Formula: keyword_score * recency_factor * (importance / 10)
+    """
     # Keyword overlap score
     entry_keywords = set(entry.get("keywords", []))
     content_tokens = _tokenize(entry.get("content", ""))
@@ -961,7 +965,11 @@ def _score_memory(
     age_months = age_seconds / (30 * 24 * 60 * 60)
     recency_factor = 0.9**age_months
 
-    return keyword_score * recency_factor
+    # Importance factor: 1-10 scale, default 5 for backward compatibility
+    importance = entry.get("importance", 5)
+    importance_factor = importance / 10
+
+    return keyword_score * recency_factor * importance_factor
 
 
 def _load_memory_entries(memory_path: str) -> list[dict[str, Any]]:
@@ -1063,6 +1071,11 @@ def cmd_memory_add(args: argparse.Namespace) -> NoReturn:
     content = args.content
     source = args.source or "unknown"
     goal_context = args.goal_context or ""
+    importance = args.importance
+
+    # Validate importance range
+    if importance < 1 or importance > 10:
+        error_exit("Importance must be between 1 and 10 (inclusive)")
 
     # Validate and parse inputs
     keywords = _validate_memory_input(category, content, keywords_str)
@@ -1076,6 +1089,7 @@ def cmd_memory_add(args: argparse.Namespace) -> NoReturn:
         "content": content,
         "source": source,
         "goal_context": goal_context,
+        "importance": importance,
     }
 
     # Append to JSONL file
@@ -1092,6 +1106,7 @@ def cmd_memory_add(args: argparse.Namespace) -> NoReturn:
             "id": entry["id"],
             "category": category,
             "keywords": keywords,
+            "importance": importance,
         }
     )
 
@@ -1161,6 +1176,12 @@ def main() -> None:
     p.add_argument("--content", required=True, help="Memory content")
     p.add_argument("--source", help="Source of the memory")
     p.add_argument("--goal-context", help="Goal context for the memory")
+    p.add_argument(
+        "--importance",
+        type=int,
+        default=5,
+        help="Importance rating 1-10 (10 = most important, default: 5)",
+    )
     p.set_defaults(func=cmd_memory_add)
 
     p = subparsers.add_parser(
