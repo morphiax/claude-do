@@ -61,7 +61,7 @@ The two skills communicate through `.design/plan.json` (schemaVersion 3) written
 - Each task includes a concise assembled worker brief (`prompt` field) and file overlap analysis (`fileOverlaps` field) — design produces these during plan generation via scripts
 - Progressive trimming: completed tasks are stripped of verbose agent fields (including `prompt`) to reduce plan size as execution proceeds
 - Expert artifacts (`expert-*.json`) are optional and preserved after plan generation for execute workers to reference via contextFiles
-- Plan history: completed plans are archived to `.design/history/{timestamp}-plan.json` on successful execution; design pre-flight preserves this subdirectory during cleanup
+- Plan history: completed runs are archived to `.design/history/{timestamp}/` as a folder containing plan.json, expert files, and handoff.md together; design pre-flight archives (not deletes) stale artifacts to avoid triggering destructive-command hooks
 
 ### Execution Model
 
@@ -72,11 +72,11 @@ Both skills use the **main conversation as team lead** with Agent Teams for coor
 
 `/do:design` — lead-determined dynamic team (`do-design` team):
 
-- **Lead responsibilities** (never delegated): pre-flight, quick goal research (WebSearch/codebase scan), determine which expert perspectives are needed, spawn experts, collect findings, merge or delegate to plan-writer, run `finalize` script, summary output.
+- **Lead responsibilities** (never delegated): pre-flight, quick goal research (WebSearch/codebase scan), determine which expert perspectives are needed, spawn experts, collect findings, synthesize plan directly, adversarial review, run `finalize` script, summary output.
 - **Dynamic expert team**: The lead reads the goal, does brief research, then determines team composition. Expert types include: **architect** (codebase structure, patterns), **researcher** (external libraries, best practices), **domain-specialist** (security, performance, i18n, etc.). Team size varies by goal complexity — simple goals may need only an architect; complex goals may need multiple perspectives.
 - **Expert prompts**: Each expert receives goal + focus area (e.g., "codebase architecture", "external research"). Experts analyze and recommend tasks with full agent specs. May write `.design/expert-{name}.json` or report directly to lead.
-- **Plan assembly**: Lead merges expert findings (inline or via plan-writer Task), runs `python3 $PLAN_CLI finalize .design/plan.json` to validate structure, assemble prompts, and compute overlaps in one atomic operation.
-- **Two-tier fallback**: If the team fails to produce `.design/plan.json` (1) retry with a single plan-writer Task subagent, or (2) merge inline with context minimization
+- **Plan synthesis**: The lead merges expert findings directly (no plan-writer delegate — the lead has full context from every expert). Before finalizing, the lead performs an adversarial review: challenging assumptions, identifying missing/unnecessary tasks, checking dependency ordering, and flagging integration risks. Then runs `python3 $PLAN_CLI finalize .design/plan.json` to validate structure, assemble prompts, and compute overlaps.
+- **Fallback**: If finalize fails, fix validation errors and re-run. If structure is fundamentally broken, rebuild from expert findings inline.
 
 `/do:execute` — persistent self-organizing workers with event-driven lead (`do-execute` team):
 
@@ -85,6 +85,9 @@ Both skills use the **main conversation as team lead** with Agent Teams for coor
 - **Peer communication**: workers message each other directly when they find issues with prior work (e.g., a bug in code committed by another worker). The affected worker fixes the issue and confirms. Lead is CC'd but does not intervene unless escalated.
 - **File ownership via dependencies**: the lead augments TaskList dependencies at setup using the overlap matrix — concurrent tasks touching the same files get runtime `blockedBy` constraints so they serialize naturally. No explicit file ownership assignment needed.
 - **Deferred verification**: workers verify their own acceptance criteria during execution. The lead runs a single batched final verification (spot-checks + acceptance criteria) after all tasks complete, instead of per-round checks.
+- **Goal review**: after individual verification, the lead evaluates whether the sum of completed tasks actually achieves the original goal — checking for completeness gaps, coherence across tasks, and alignment with user intent. Workers execute tasks mechanically; the lead holds the big picture and catches forest-vs-trees issues. Gaps spawn targeted fix workers.
+- **Integration testing**: after goal review, an `integration-tester` worker runs the full test suite, checks for cross-task conflicts, and verifies independently-completed tasks connect correctly. Skipped for single-task or fully-independent plans.
+- **Session handoff**: on completion, a structured `.design/handoff.md` summarizes what was done, what failed, integration status, key decisions, files changed, known gaps, and next steps — enabling context recovery across sessions.
 - Progressive trimming: completed tasks are stripped of verbose agent fields including `prompt` (keep only subject, status, result, metadata.files, blockedBy, agent.role, agent.model)
 - Retry budget: max 3 attempts per task with failure context passed to retries
 - Cascading failures: failed/blocked tasks automatically skip dependents

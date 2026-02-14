@@ -53,7 +53,16 @@ All script calls: `python3 $PLAN_CLI <command> [args]` via Bash. Output is JSON 
 1. **Check for ambiguity**: If the goal has multiple valid interpretations per the Clarification Protocol, use `AskUserQuestion` before proceeding.
 2. If >12 tasks likely needed, suggest phases. Design only phase 1.
 3. Check existing plan: `python3 $PLAN_CLI status .design/plan.json`. If `ok` and `isResume`: ask user "Existing plan has {counts} tasks. Overwrite?" If declined, stop.
-4. Clean stale staging: `mkdir -p .design/history && find .design -mindepth 1 -maxdepth 1 ! -name history -exec rm -rf {} +`
+4. Archive stale artifacts (instead of deleting — avoids destructive commands):
+   ```bash
+   mkdir -p .design/history
+   # If .design/ has artifacts beyond history/, archive them
+   if [ "$(find .design -mindepth 1 -maxdepth 1 ! -name history | head -1)" ]; then
+     ARCHIVE_DIR=".design/history/$(date -u +%Y%m%dT%H%M%SZ)"
+     mkdir -p "$ARCHIVE_DIR"
+     find .design -mindepth 1 -maxdepth 1 ! -name history -exec mv {} "$ARCHIVE_DIR/" \;
+   fi
+   ```
 
 ### 2. Lead Research
 
@@ -81,16 +90,29 @@ The list is not exhaustive. If the goal involves authentication, spawn a securit
 Create the team and spawn experts in parallel.
 
 1. `TeamDelete(team_name: "do-design")` (ignore errors), `TeamCreate(team_name: "do-design")`. If TeamCreate fails, tell user Agent Teams is required and stop.
-2. `TaskCreate` for each expert and a plan-writer. Wire the plan-writer `blockedBy` all experts via TaskUpdate.
-3. Spawn experts as teammates using the Task tool. Write prompts appropriate to the goal and each expert's focus area. Tell them what you need — don't follow a template.
+2. `TaskCreate` for each expert. No plan-writer — the lead writes the plan (it has full context from all experts).
+3. Spawn experts as teammates using the Task tool. Write prompts appropriate to the goal and each expert's focus area. Tell them what you need — don't follow a template. Experts report findings via `SendMessage` to the lead (or write `.design/expert-{name}.json`).
 
 **CRITICAL: Always use agent teams.** When spawning experts via Task tool, you MUST include:
 - `team_name: "do-design"` — to make them team members, not standalone agents
 - `name: "{expert-name}"` — their role name (architect, researcher, etc.)
 
-### 4. Collect and Finalize
+### 4. Synthesize and Challenge
 
-Wait for the plan-writer's message. Then:
+The lead collects expert findings and writes the plan directly. The lead has the broadest context — it heard from every expert — so it is the best synthesizer.
+
+1. Collect all expert findings (messages and/or `.design/expert-*.json` files).
+2. Merge findings into `.design/plan.json` — resolve conflicts, deduplicate, sequence tasks.
+3. **Adversarial review** — Before finalizing, the lead challenges its own plan:
+   - Are there implicit assumptions that could fail? (e.g., "assumes API exists", "assumes schema won't change")
+   - Are there missing tasks? (error handling, migrations, edge cases, rollback)
+   - Are there unnecessary tasks? (over-engineering, premature abstraction)
+   - Do the dependencies make sense? Could parallelism be improved?
+   - Are there integration risks between tasks that touch related files?
+   Revise the plan based on this review. Add/remove/reorder tasks as needed.
+4. Run `python3 $PLAN_CLI finalize .design/plan.json` to validate structure, assemble prompts, compute overlaps.
+
+### 5. Complete
 
 1. Validate: `python3 $PLAN_CLI status .design/plan.json`. Stop if `ok: false`.
 2. Shut down teammates, delete team.
@@ -113,9 +135,9 @@ Test: {testCommand}
 Run /do:execute to begin.
 ```
 
-**Fallback** (if team fails to produce plan.json):
-1. Retry with single plan-writer Task subagent reading expert files.
-2. Merge inline: process expert files one at a time, validate, run scripts, write plan.json directly.
+**Fallback** (if finalize fails):
+1. Fix validation errors and re-run finalize.
+2. If structure is fundamentally broken: rebuild plan inline from expert findings, one task at a time.
 
 ---
 

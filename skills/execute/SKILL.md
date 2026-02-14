@@ -104,10 +104,71 @@ Build a Bash script that for each completed task: checks created files exist (`t
 
 For verification failures with attempts < 3: update plan.json to failed, spawn a retry worker to try again. For non-retryable: leave as failed.
 
-### 5. Complete
+### 5. Goal Review
+
+Workers execute tasks mechanically — none of them hold the full picture. The lead does. Before checking mechanical correctness, the lead steps back and evaluates whether the completed work actually achieves the original goal.
+
+Review against the goal from `plan.json`:
+1. **Completeness** — Does the sum of completed tasks deliver the goal end-to-end? Or did tasks get done but leave a gap? (e.g., API built but no route registered, component created but never rendered, migration written but no seed data)
+2. **Coherence** — Do the pieces fit together as a whole? Are naming conventions consistent across tasks? Do data models from one task match what another task consumes?
+3. **User intent** — Would a user looking at the result say "this is what I asked for"? Or did the plan drift from the goal during execution?
+
+If gaps are found: spawn a targeted worker to address them (or assign to an idle worker). These are goal-level fixes, not task retries — they may require new work that no task covered.
+
+### 6. Integration Testing
+
+After the goal review, test that the combined work integrates correctly at the mechanical level.
+
+1. Spawn an `integration-tester` worker into the team. Its prompt should include:
+   - The full list of completed tasks (subjects + files touched)
+   - The project's test command from `plan.json context.testCommand`
+   - Instructions to: run the full test suite, attempt a build (`context.buildCommand` if present), check for import/dependency conflicts between files created by different tasks, verify that tasks referencing each other's outputs actually connect (e.g., API endpoint + client call, component + route registration)
+2. The integration-tester reports findings: PASS (all clean) or FAIL (list of issues with affected tasks).
+3. On FAIL: the lead assigns fix tasks to appropriate idle workers or spawns a targeted fix worker. Re-run integration test after fixes.
+4. On PASS or after max 2 fix rounds: proceed to Complete.
+
+**Skip integration testing when**: only 1 task was executed, or all tasks were independent (no shared files, no cross-references).
+
+### 7. Complete
 
 1. Summary: `python3 $PLAN_CLI status .design/plan.json`. Display completed/failed/blocked/skipped counts with subjects. Recommend follow-ups for failures.
-2. Archive: If all completed: `mkdir -p .design/history && mv .design/plan.json ".design/history/$(date -u +%Y%m%dT%H%M%SZ)-plan.json"`. If partial: leave plan for resume.
-3. Cleanup: `TeamDelete(team_name: "do-execute")`.
+2. **Session handoff** — Write `.design/handoff.md` with structured summary for future context:
+
+```markdown
+# Session Handoff — {goal}
+Date: {ISO timestamp}
+
+## What Was Done
+- {completed count} of {total count} tasks completed
+- {For each completed task: "Task N: {subject} — {one-line result}"}
+
+## What Failed
+- {For each failed task: "Task N: {subject} — {failure reason}"}
+
+## Integration Status
+- {PASS/FAIL/SKIPPED + details}
+
+## Key Decisions Made During Execution
+- {Any deviations from the plan, retries, workarounds}
+
+## Files Changed
+- {Deduplicated list of all files created/modified across tasks}
+
+## Known Gaps and Risks
+- {Missing test coverage, TODOs left in code, edge cases deferred}
+- {Tasks that were skipped/blocked and why}
+
+## Next Steps
+- {Concrete actions: what should happen next if work continues}
+```
+
+3. Archive: If all completed, move all artifacts to a timestamped history folder:
+   ```bash
+   ARCHIVE_DIR=".design/history/$(date -u +%Y%m%dT%H%M%SZ)"
+   mkdir -p "$ARCHIVE_DIR"
+   find .design -mindepth 1 -maxdepth 1 ! -name history -exec mv {} "$ARCHIVE_DIR/" \;
+   ```
+   This preserves plan.json, expert files, and handoff.md together for future reference. If partial (failures remain): leave artifacts in `.design/` for resume.
+4. Cleanup: `TeamDelete(team_name: "do-execute")`.
 
 **Arguments**: $ARGUMENTS

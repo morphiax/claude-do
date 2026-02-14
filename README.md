@@ -3,7 +3,7 @@
 > Team-based planning and production-grade execution for Claude Code
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Version](https://img.shields.io/badge/version-1.6.0-green.svg)
+![Version](https://img.shields.io/badge/version-1.8.0-green.svg)
 ![Claude Code](https://img.shields.io/badge/Claude%20Code-2.1.32%2B-orange.svg)
 
 ## Why do?
@@ -44,9 +44,9 @@ The lead reads the goal, does quick research, then determines which expert persp
 1. **Pre-flight** — Checks for existing plans, cleans stale artifacts, preserves `.design/history/`
 2. **Lead research** — Quick WebSearch/codebase scan to understand goal context and determine which experts are needed
 3. **Spawn experts** — Dynamic team based on goal nature: architects (codebase), researchers (external), domain specialists (security, performance, etc.)
-4. **Collect & Finalize** — Merge expert findings, run `finalize` script for validation + prompt assembly + overlap computation, produce `.design/plan.json`
+4. **Synthesize & Challenge** — The lead merges expert findings and writes the plan directly (it has full context from every expert). Before finalizing, the lead performs an adversarial review: challenging assumptions, identifying missing tasks, removing over-engineering, and checking integration risks. The `finalize` script then validates structure, assembles prompts, and computes overlaps.
 
-Expert types vary by goal: **architects** analyze codebase structure, **researchers** find external libraries and patterns, **domain specialists** handle security, performance, i18n, etc. For simple goals, the lead may handle it directly without spawning experts. Two-tier fallback ensures plan generation even if the team fails.
+Expert types vary by goal: **architects** analyze codebase structure, **researchers** find external libraries and patterns, **domain specialists** handle security, performance, i18n, etc. For simple goals, the lead may handle it directly without spawning experts.
 
 ### /do:execute — Persistent self-organizing workers
 
@@ -55,8 +55,11 @@ An event-driven lead with persistent worker teammates:
 - **Setup** — The lead validates the plan, creates a TaskList with dependency and file-overlap constraints, and computes the worker pool via the `worker-pool` script (role-based naming, optimal concurrency).
 - **Workers** — Persistent teammates named by their `agent.role` (e.g., `api-developer`, `test-writer`). Workers self-organize: check TaskList for pending unblocked tasks, claim one, read the task prompt directly from `.design/plan.json`, commit their own changes, and claim the next available task. Workers communicate directly with each other when they find issues with prior work.
 - **Deferred verification** — Workers verify their own acceptance criteria during execution. The lead runs a single batched final verification after all tasks complete instead of per-round checks.
+- **Goal review** — After individual verification, the lead steps back from the tasks and evaluates whether the completed work actually achieves the original goal. Workers execute mechanically — they don't hold the big picture. The lead checks for completeness gaps (tasks done but goal not met), coherence (do the pieces fit together?), and user intent (is this what was asked for?). Gaps spawn targeted fix workers.
+- **Integration testing** — After goal review, an `integration-tester` worker runs the full test suite, checks for cross-task conflicts, and verifies that independently-completed tasks connect correctly (e.g., API endpoints match client calls, components are registered in routes). Issues are routed back to workers for fixing.
+- **Session handoff** — On completion, a structured `.design/handoff.md` summarizes what was done, what failed, integration status, key decisions, files changed, known gaps, and concrete next steps — so you can resume work hours or days later without losing context.
 
-The lead monitors execution via an event-driven message loop, handles cascading failures, wakes idle workers when new tasks unblock, manages retries, and evaluates the circuit breaker. Completed plans archive to `.design/history/`.
+The lead monitors execution via an event-driven message loop, handles cascading failures, wakes idle workers when new tasks unblock, manages retries, and evaluates the circuit breaker. Completed runs archive all artifacts (plan, expert files, handoff) to `.design/history/{timestamp}/`.
 
 ## Installation
 
