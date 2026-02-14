@@ -1001,13 +1001,26 @@ def _format_memory_result(score: float, entry: dict[str, Any]) -> dict[str, Any]
     }
 
 
+def _rank_memories(
+    entries: list[dict[str, Any]], query_tokens: set[str], limit: int
+) -> list[dict[str, Any]]:
+    """Score, rank, and return top memory entries."""
+    current_time = time.time()
+    scored = [
+        (score, entry)
+        for entry in entries
+        if (score := _score_memory(entry, query_tokens, current_time)) > 0
+    ]
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [_format_memory_result(score, entry) for score, entry in scored[:limit]]
+
+
 def cmd_memory_search(args: argparse.Namespace) -> NoReturn:
     """Search memory.jsonl for relevant entries matching query keywords."""
     memory_path = args.memory_path
-    query = args.query or ""
-    limit = args.limit
+    parts = [args.goal or "", args.stack or "", args.keywords or ""]
+    query = " ".join(p for p in parts if p)
 
-    # Handle missing file or empty query
     if not os.path.exists(memory_path):
         output_json({"ok": True, "memories": []})
 
@@ -1023,21 +1036,9 @@ def cmd_memory_search(args: argparse.Namespace) -> NoReturn:
     if not entries:
         output_json({"ok": True, "memories": []})
 
-    # Score and rank entries
-    current_time = time.time()
-    scored = [
-        (score, entry)
-        for entry in entries
-        if (score := _score_memory(entry, query_tokens, current_time)) > 0
-    ]
-    scored.sort(key=lambda x: x[0], reverse=True)
-
-    # Return top N
-    top_entries = [
-        _format_memory_result(score, entry) for score, entry in scored[:limit]
-    ]
-
-    output_json({"ok": True, "memories": top_entries})
+    output_json(
+        {"ok": True, "memories": _rank_memories(entries, query_tokens, args.limit)}
+    )
 
 
 def _validate_memory_input(category: str, content: str, keywords_str: str) -> list[str]:
@@ -1160,7 +1161,9 @@ def main() -> None:
         "memory-search", help="Search memory for relevant entries"
     )
     p.add_argument("memory_path", nargs="?", default=".design/memory.jsonl")
-    p.add_argument("--query", type=str, help="Search query text")
+    p.add_argument("--goal", type=str, help="Goal or role goal text")
+    p.add_argument("--stack", type=str, help="Technology stack context")
+    p.add_argument("--keywords", type=str, help="Additional search keywords")
     p.add_argument("--limit", type=int, default=5, help="Max results to return")
     p.set_defaults(func=cmd_memory_search)
 
