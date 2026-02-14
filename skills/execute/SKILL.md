@@ -14,7 +14,7 @@ Execute `.design/plan.json` with persistent, self-organizing workers. Design pro
 
 **Lead boundaries**: Use only `TeamCreate`, `TeamDelete`, `TaskCreate`, `TaskUpdate`, `TaskList`, `SendMessage`, `Task`, `AskUserQuestion`, and `Bash` (only for `python3 $PLAN_CLI`, `git`, verification scripts, and cleanup). Never read source files, use MCP tools, `Grep`, `Glob`, or `LSP`. Never execute tasks directly — spawn a worker.
 
-**Silent execution**: Output nothing between the initial summary and the final summary.
+**Progress reporting**: After the initial summary, output brief progress updates for significant events. Keep updates to one line each. Suppress intermediate worker tool calls and chatter.
 
 **No polling**: Messages auto-deliver automatically. Never use `sleep`, loops, or Bash waits. When a teammate sends a message, it appears in your next turn.
 
@@ -42,11 +42,11 @@ All script calls: `python3 $PLAN_CLI <command> [args]` via Bash. Output: JSON wi
 
 ### 2. Pre-Execution Auxiliaries
 
-Check `auxiliaryRoles[]` in plan.json for `type: "pre-execution"` roles. Spawn them sequentially before execution workers.
+Check `auxiliaryRoles[]` in plan.json for `type: "pre-execution"` roles. Spawn them sequentially before execution workers. **Progress update** for each auxiliary: "Running {auxiliary.name}..."
 
-**Challenger**: Spawn as a teammate. Prompt includes: "Read `.design/plan.json` and all `.design/expert-*.json` artifacts. Challenge assumptions, find gaps, identify risks. Report findings via SendMessage." Wait for report. If critical issues found, adjust plan (update plan.json) or ask user. If no critical issues, proceed.
+**Challenger**: Spawn as a teammate. Prompt includes: "Read `.design/plan.json` and all `.design/expert-*.json` artifacts. Challenge assumptions, find gaps, identify risks. Save findings to `.design/challenger-report.json` with this structure: `{\"issues\": [{\"category\": \"scope-gap|overlap|invalid-assumption|missing-dependency|criteria-gap|constraint-conflict\", \"severity\": \"blocking|high-risk|low-risk\", \"description\": \"...\", \"affectedRoles\": [...], \"recommendation\": \"...\"}], \"summary\": \"...\"}`. SendMessage with count of blocking/high-risk/low-risk issues found." Wait for report. If critical issues found, adjust plan (update plan.json) or ask user. If no critical issues, proceed.
 
-**Scout**: Spawn as a teammate. Prompt includes: "Read actual codebase in scope directories from plan.json roles. Map patterns, conventions, integration points. Flag discrepancies with expert assumptions. Save report to `.design/scout-report.json` and SendMessage summary." Wait for report. If discrepancies found, update role briefs in plan.json or note for workers.
+**Scout**: Spawn as a teammate. Prompt includes: "Read actual codebase in scope directories from plan.json roles. Map patterns, conventions, integration points. Flag discrepancies with expert assumptions. Save report to `.design/scout-report.json` with this structure: `{\"scopeAreas\": [{\"directory\": \"...\", \"affectedRoles\": [...], \"actualStructure\": {\"files\": [...], \"patterns\": [...], \"conventions\": [...]}, \"expertAssumptions\": [{\"expert\": \"...\", \"assumption\": \"...\", \"verified\": true|false, \"actualReality\": \"...\"}], \"integrationPoints\": [{\"type\": \"import|export|shared-type\", \"description\": \"...\"}]}], \"discrepancies\": [{\"area\": \"...\", \"expected\": \"...\", \"actual\": \"...\", \"impact\": \"high|medium|low\", \"recommendation\": \"...\"}], \"summary\": \"...\"}`. SendMessage with count of discrepancies found." Wait for report. If discrepancies found, update role briefs in plan.json or note for workers.
 
 ### 3. Report and Spawn Workers
 
@@ -75,11 +75,12 @@ Spawn workers as teammates using the Task tool. Each worker prompt MUST include:
 6. **Task discovery**: "Check TaskList for your pending unblocked task. Claim by setting status to in_progress."
 7. **Constraints**: "{constraints from role brief}"
 8. **Done when**: "{acceptanceCriteria from role brief}"
-9. **Committing**: "git add specific files + git commit with conventional commit message (feat:/fix:/refactor: etc). Never git add -A."
-10. **Completion reporting**: "When done, SendMessage to lead with: role name, what you achieved, files changed, acceptance criteria results (pass/fail each)."
-11. **Failure handling**: "If you cannot complete your goal, SendMessage to lead with: role name, what failed, why, what you tried, suggested alternative. If rollback triggers fire ({rollbackTriggers}), stop immediately and report."
-12. **Fallback**: If role has a fallback: "If your primary approach fails: {fallback}"
-13. **Scope boundaries**: "Stay within your scope directories. Do not modify files outside your scope unless absolutely necessary for integration."
+9. **Pre-completion verification**: "Before reporting done, re-read each acceptance criterion independently — treat each as a fresh question about the file. Don't rely on your memory of what you wrote. Actually verify: for each criterion, run the check method independently (without referring to your implementation notes — treat as if you're seeing this for the first time), document the result (pass/fail with evidence), then report."
+10. **Committing**: "git add specific files + git commit with conventional commit message (feat:/fix:/refactor: etc). Never git add -A."
+11. **Completion reporting**: "When done, SendMessage to lead with: role name, what you achieved, files changed, acceptance criteria results (pass/fail each with evidence)."
+12. **Failure handling**: "If you cannot complete your goal, SendMessage to lead with: role name, what failed, why, what you tried, suggested alternative. If rollback triggers fire ({rollbackTriggers}), stop immediately and report."
+13. **Fallback**: If role has a fallback: "If your primary approach fails: {fallback}"
+14. **Scope boundaries**: "Stay within your scope directories. Do not modify files outside your scope unless absolutely necessary for integration."
 
 ```
 Task(subagent_type: "general-purpose", team_name: "do-execute", name: "{worker-name}", model: "{model}", prompt: <role-specific prompt with all above>)
@@ -93,12 +94,19 @@ Event-driven loop — process worker messages as they arrive.
 1. Update plan.json: `echo '[{"roleIndex": N, "status": "completed", "result": "..."}]' | python3 $PLAN_CLI update-status .design/plan.json`
 2. Handle any `cascaded` entries by marking them in TaskList.
 3. Wake idle workers — tell them to check for new tasks.
+4. **Progress update**: Output "✓ Completed: {role.name} — {one-line summary}"
 
 **On role failure**: Worker reports what failed and why.
 1. Update plan.json: `echo '[{"roleIndex": N, "status": "failed", "result": "..."}]' | python3 $PLAN_CLI update-status .design/plan.json`
-2. Handle cascaded entries in TaskList.
-3. Circuit breaker: `python3 $PLAN_CLI circuit-breaker .design/plan.json`. If `shouldAbort`: shut down all workers, go to Post-Execution.
-4. Retries: `python3 $PLAN_CLI retry-candidates .design/plan.json`. If retryable (attempts < 3): clean up partial work (`git checkout` + `rm`), reset in TaskList, tell the worker to retry with context: what failed, why, suggested alternative approach, fallback strategy.
+2. Handle cascaded entries in TaskList. For each skipped role: **Progress update** "⊘ Skipped: {role.name} (dependency failed)"
+3. **Progress update**: Output "✗ Failed: {role.name} — {failure reason}"
+4. Circuit breaker: `python3 $PLAN_CLI circuit-breaker .design/plan.json`. If `shouldAbort`: shut down all workers, go to Post-Execution.
+5. Retries: `python3 $PLAN_CLI retry-candidates .design/plan.json`. If retryable (attempts < 3):
+   a. **Reflexion step**: Before retry, generate a 2-3 sentence reflection analyzing what went wrong. Ask: What was the root cause? What assumptions were incorrect? What should be done differently? Store reflection in role.result field as "Reflection for retry {attempt+1}: {reflection text}".
+   b. Clean up partial work: `git checkout` + `rm` any artifacts from failed attempt.
+   c. Reset in TaskList: `TaskUpdate(taskId, status: pending)`.
+   d. Tell the worker to retry via SendMessage with structured context: "Retry {attempt+1}/3 for {role.name}. Previous attempt failed: {result}. Reflection: {generated reflection}. What to try differently: {suggested alternative or fallback}. Re-read acceptance criteria and verify each independently before reporting."
+   e. **Progress update**: Output "↻ Retry {attempt+1}/3: {role.name}"
 
 **On idle**: Worker reports no tasks available. Track idle workers. Check completion.
 
@@ -111,7 +119,7 @@ Event-driven loop — process worker messages as they arrive.
 
 ### 5. Post-Execution Auxiliaries
 
-Check `auxiliaryRoles[]` for `type: "post-execution"` roles.
+Check `auxiliaryRoles[]` for `type: "post-execution"` roles. **Progress update** for each auxiliary: "Running {auxiliary.name}..."
 
 **Integration Verifier**: Spawn as a teammate. Prompt includes:
 - "Verify all completed roles' work integrates correctly."
@@ -119,9 +127,9 @@ Check `auxiliaryRoles[]` for `type: "post-execution"` roles.
 - Test command from `plan.json context.testCommand`
 - All `acceptanceCriteria` from all completed roles
 - "Run the full test suite. Check for import/dependency conflicts. Verify cross-role connections. Test the goal end-to-end."
-- "Report: PASS (all criteria met) or FAIL (list specific failures with suggested fixes)."
+- "Save findings to `.design/integration-verifier-report.json` with this structure: `{\"status\": \"PASS|FAIL\", \"acceptanceCriteria\": [{\"role\": \"...\", \"criterion\": \"...\", \"result\": \"pass|fail\", \"details\": \"...\"}], \"crossRoleIssues\": [{\"issue\": \"...\", \"affectedRoles\": [...], \"severity\": \"blocking|high|medium|low\", \"suggestedFix\": \"...\"}], \"testResults\": {\"command\": \"...\", \"exitCode\": 0, \"output\": \"...\"}, \"endToEndVerification\": {\"tested\": true|false, \"result\": \"pass|fail\", \"details\": \"...\"}, \"summary\": \"...\"}`. SendMessage with PASS or FAIL and summary."
 
-On FAIL: spawn targeted fix workers for specific issues. Re-run verifier after fixes (max 2 fix rounds).
+On FAIL: spawn targeted fix workers for specific issues. Re-run verifier after fixes (max 2 fix rounds). **Progress update** after verifier runs: "Integration verification: {PASS|FAIL}"
 
 **Skip when**: only 1 role was executed, or all roles were independent (no shared directories, no cross-references).
 
@@ -169,13 +177,14 @@ Date: {ISO timestamp}
 3. **Memory curation** — Spawn memory-curator auxiliary agent:
 
 Prompt includes:
-- "Read `.design/handoff.md` and `.design/plan.json` all roles (completed, failed, skipped)."
-- "Extract actionable patterns: successful approaches, failed approaches, discovered conventions, blockers overcome, mistakes to avoid."
-- "For failed roles: read `result` field for failure reasons. Extract mistake/failure category memories."
-- "For each pattern: determine category (pattern|mistake|convention|approach|failure), generate keywords, write concise body (<200 words)."
+- "Read all artifacts: `.design/handoff.md`, `.design/plan.json` (all roles including completed, failed, skipped, in_progress, pending — read result field for each), `.design/challenger-report.json` (if exists), `.design/scout-report.json` (if exists), `.design/integration-verifier-report.json` (if exists)."
+- "Extract actionable patterns in these categories: pattern (successful approaches), mistake (failed approaches to avoid), convention (discovered codebase conventions), approach (how a problem was solved), failure (why something failed), tool (specific tools/libraries useful or problematic)."
+- "For each pattern: determine category, generate keywords (include role names, file paths, technology names, error types), write concise body (<200 words) with specifics: file paths, code patterns, command examples, error messages. Include 'what' and 'why', not just 'what'."
+- "For failed/skipped roles: always create a memory explaining the failure root cause."
 - "Call `python3 $PLAN_CLI memory-add .design/memory.jsonl --category <cat> --keywords <csv> --body <text>` for each entry."
 - "Focus on: specific file/pattern/tool references (actionable), not vague lessons. Reference role names and file paths."
 - "Skip generic insights. Only record learnings that would help future similar goals."
+- "SendMessage to lead when complete: 'Memory curation complete. Added {count} memories ({breakdown by category}).'."
 
 ```
 Task(subagent_type: "general-purpose", team_name: "do-execute", name: "memory-curator", model: "haiku", prompt: <above>)
