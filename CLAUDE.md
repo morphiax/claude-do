@@ -101,11 +101,7 @@ Both skills use the **main conversation as team lead** with Agent Teams. Runtime
 - Memory injection: lead searches .design/memory.jsonl for relevant past learnings (using importance-weighted scoring) and injects top 3-5 into expert prompts
 - Lead spawns expert teammates (architect, researcher, domain-specialists) based on goal type awareness (implementation/meta/research)
 - Diverse debate: for complex/high-stakes goals with >=3 experts, experts cross-review each other's artifacts, challenge assumptions with structured format, defend their positions; lead resolves conflicts in designDecisions[]
-- Complexity tier (trivial/standard/complex/high-stakes) drives auxiliary role selection:
-  - Trivial (1-2 roles): no auxiliaries
-  - Standard (2-4 roles): integration verifier
-  - Complex (4-6 roles): challenger + scout + integration verifier
-  - High-stakes (3-8 roles): challenger + scout + integration verifier
+- Auxiliary selection is independent of complexity tier: challenger and integration-verifier always run. Scout runs when the goal touches code (implementation, refactoring, bug fixes — not pure docs/research/config)
 - Lead synthesizes expert findings into role briefs in plan.json directly (no plan-writer delegate)
 - `finalize` validates role briefs and computes directory overlaps (no prompt assembly)
 

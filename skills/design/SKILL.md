@@ -64,16 +64,17 @@ The lead directly assesses the goal to determine needed perspectives.
 
 1. Read the goal. Quick WebSearch (if external patterns/libraries relevant) or scan project metadata (CLAUDE.md, package.json) via Bash to understand stack.
 2. Decide what expert perspectives would help.
-3. Assess complexity tier (drives auxiliary role selection):
+3. Assess complexity tier (drives role count and expert depth):
 
-| Tier | Roles | Auxiliaries |
-|---|---|---|
-| Trivial (1-2 roles, obvious approach) | 1-2 | None |
-| Standard (clear domain) | 2-4 | Integration verifier |
-| Complex (cross-cutting concerns) | 4-6 | Challenger + scout + integration verifier |
-| High-stakes (production, security, data) | 3-8 | Challenger + scout + integration verifier |
+| Tier | Roles |
+|---|---|
+| Trivial (1-2 roles, obvious approach) | 1-2 |
+| Standard (clear domain) | 2-4 |
+| Complex (cross-cutting concerns) | 4-6 |
+| High-stakes (production, security, data) | 3-8 |
 
-4. Report the planned team composition and complexity tier to the user.
+4. Select auxiliary roles. Challenger and integration-verifier always run. Scout runs when the goal touches code (implementation, refactoring, bug fixes — not pure docs/research/config).
+5. Report the planned team composition and auxiliaries to the user.
 
 **Expert Selection**
 
@@ -213,7 +214,7 @@ The lead collects expert findings and writes the plan.
 4. Write `.design/plan.json` with role briefs (see schema below).
 5. For each role, include `expertContext[]` referencing specific expert artifacts and the sections relevant to that role. **Do not lossy-compress expert findings into terse fields** — reference the full artifacts.
 6. Write criteria-based `acceptanceCriteria` — define WHAT should work, not WHICH files should exist. Workers verify against criteria, not file lists. **Every criterion MUST have a `check` that is a concrete, independently runnable shell command** (e.g., `"bun run build 2>&1 | tail -5"`, `"bun test --run 2>&1 | tail -10"`). Never leave checks as prose descriptions — workers execute these literally. If a role touches compiled code, include BOTH a build check AND a test check as separate criteria.
-7. If complexity tier warrants, add `auxiliaryRoles[]` (see Auxiliary Roles section).
+7. Add `auxiliaryRoles[]` (see Auxiliary Roles section).
 8. Run `python3 $PLAN_CLI finalize .design/plan.json` to validate structure and compute overlaps.
 
 **Role brief principles**:
@@ -264,7 +265,7 @@ The lead collects expert findings and writes the plan.
 
 ### 5. Auxiliary Roles
 
-Based on complexity tier, add auxiliary roles to `auxiliaryRoles[]` in plan.json. These are meta-agents that improve quality without directly implementing features.
+Add auxiliary roles to `auxiliaryRoles[]` in plan.json. Challenger and integration-verifier are always included. Scout is included when the goal touches code. These are meta-agents that improve quality without directly implementing features.
 
 #### Challenger (pre-execution)
 Reviews the plan before execution. Challenges assumptions, finds gaps, identifies risks, questions scope.
