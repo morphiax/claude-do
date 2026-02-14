@@ -74,7 +74,7 @@ The two skills communicate through `.design/plan.json` (schemaVersion 4) written
 - `scope` — `{directories, patterns, dependencies}` where dependencies are role names resolved to indices
 - `expertContext` — array of `{expert, artifact, relevance}` referencing full expert artifacts
 - `constraints` — array of hard rules the worker must follow
-- `acceptanceCriteria` — array of `{criterion, check}` defining goal-based success conditions
+- `acceptanceCriteria` — array of `{criterion, check}` where `check` is a concrete, independently runnable shell command (e.g., `"bun run build 2>&1 | tail -20"`). Workers execute these literally during CoVe verification
 - `assumptions` — array of `{text, severity}` documenting assumptions (`blocking` or `non-blocking`)
 - `rollbackTriggers` — array of conditions that should cause the worker to stop and report
 - `fallback` — alternative approach if primary fails (included in initial brief)
@@ -113,7 +113,7 @@ Both skills use the **main conversation as team lead** with Agent Teams. Runtime
 - Pre-execution auxiliaries (challenger, scout) run before workers spawn with structured output formats
 - Memory injection: lead searches .design/memory.jsonl per role (using importance-weighted scoring with role.goal + scope as context) and injects top 2-3 into worker prompts
 - Lead creates TaskList from plan.json, spawns one persistent worker per role via `worker-pool`
-- Workers use CoVe-style self-verification: before reporting completion, independently re-read and verify each acceptance criterion as a fresh question (not from memory)
+- Workers use CoVe-style self-verification: before reporting completion, MUST run every acceptance criterion's `check` command as a separate shell invocation (not assumed from other checks). Each criterion's check is a concrete shell command; workers execute them literally and report exit codes
 - Workers provide progress reporting for significant events (no silent execution)
 - Directory overlap serialization: concurrent roles touching overlapping directories get runtime `blockedBy` constraints
 - Retry budget: max 3 attempts per role with reflexion (analyze root cause, incorrect assumptions, alternative approaches before retry)
