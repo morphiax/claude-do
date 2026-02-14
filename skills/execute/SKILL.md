@@ -6,7 +6,7 @@ argument-hint: ""
 
 # Execute
 
-Execute `.design/plan.json` with persistent, self-organizing workers. Design produced the plan — now execute makes it happen. **This skill only executes — it does NOT design.**
+Execute `.design/plan.json` with persistent, self-organizing workers. Design produced the plan with role briefs — now workers read the codebase and achieve their goals. **This skill only executes — it does NOT design.**
 
 **Do NOT use `EnterPlanMode`** — this skill IS the plan.
 
@@ -32,93 +32,106 @@ All script calls: `python3 $PLAN_CLI <command> [args]` via Bash. Output: JSON wi
 
 ### 1. Setup
 
-1. Validate: `python3 $PLAN_CLI status .design/plan.json`. On failure: `not_found` = "No plan found. Run `/do:design <goal>` first." and stop; `bad_schema` = unsupported schema, stop; `empty_tasks` = no tasks, stop.
-2. Resume detection: If `isResume`: run `python3 $PLAN_CLI resume-reset .design/plan.json`, then for each `resetTasks` entry: `git checkout -- {filesToRevert}` and `rm -f {filesToDelete}`. If `noWorkRemaining`: "All tasks already resolved." and stop.
+1. Validate: `python3 $PLAN_CLI status .design/plan.json`. On failure: `not_found` = "No plan found. Run `/do:design <goal>` first." and stop; `bad_schema` = unsupported schema, stop; `empty_roles` = no roles, stop.
+2. Resume detection: If `isResume`: run `python3 $PLAN_CLI resume-reset .design/plan.json`. If `noWorkRemaining`: "All roles already resolved." and stop.
 3. Create team: `TeamDelete(team_name: "do-execute")` (ignore errors), then `TeamCreate(team_name: "do-execute")`. If TeamCreate fails, tell user Agent Teams is required and stop.
-4. Create TaskList: `python3 $PLAN_CLI tasklist-data .design/plan.json`. For each task: `TaskCreate` with subject `"Task {planIndex}: {subject}"`, record returned ID in `taskIdMapping`. Wire `blockedBy` via `TaskUpdate(addBlockedBy)`. If resuming, mark completed tasks. Add overlap constraints: `python3 $PLAN_CLI overlap-matrix .design/plan.json` — for each pair `(i, j)` where `j > i`, files overlap, and no existing dependency: `TaskUpdate(taskId: taskIdMapping[j], addBlockedBy: [taskIdMapping[i]])`.
-5. **Role-based worker selection**: Run `python3 $PLAN_CLI worker-pool .design/plan.json` to get unique roles and worker count. Spawn one specialist per unique `agent.role` — workers are experts in their domain, not generic executors.
-6. Summary: `python3 $PLAN_CLI summary .design/plan.json`. Store `goal`, `taskCount`, `maxDepth`.
-7. Pre-flight: Build a Bash script that checks `git status --porcelain`, runs any blocking checks, and tests context files exist.
+4. Create TaskList: `python3 $PLAN_CLI tasklist-data .design/plan.json`. For each role: `TaskCreate` with subject `"Role {roleIndex}: {name} — {goal}"`, record returned ID in `roleIdMapping`. Wire `blockedBy` via `TaskUpdate(addBlockedBy)`. If resuming, mark completed roles. Add overlap constraints: `python3 $PLAN_CLI overlap-matrix .design/plan.json` — for each pair `(i, j)` where `j > i` and directories overlap: `TaskUpdate(taskId: roleIdMapping[j], addBlockedBy: [roleIdMapping[i]])`.
+5. **Worker pool**: Run `python3 $PLAN_CLI worker-pool .design/plan.json` to get workers (one per role).
+6. Summary: `python3 $PLAN_CLI summary .design/plan.json`. Store `goal`, `roleCount`, `maxDepth`.
+7. Pre-flight: Build a Bash script that checks `git status --porcelain` and runs any blocking checks.
 
-### 2. Report and Spawn
+### 2. Pre-Execution Auxiliaries
+
+Check `auxiliaryRoles[]` in plan.json for `type: "pre-execution"` roles. Spawn them sequentially before execution workers.
+
+**Challenger**: Spawn as a teammate. Prompt includes: "Read `.design/plan.json` and all `.design/expert-*.json` artifacts. Challenge assumptions, find gaps, identify risks. Report findings via SendMessage." Wait for report. If critical issues found, adjust plan (update plan.json) or ask user. If no critical issues, proceed.
+
+**Scout**: Spawn as a teammate. Prompt includes: "Read actual codebase in scope directories from plan.json roles. Map patterns, conventions, integration points. Flag discrepancies with expert assumptions. Save report to `.design/scout-report.json` and SendMessage summary." Wait for report. If discrepancies found, update role briefs in plan.json or note for workers.
+
+### 3. Report and Spawn Workers
 
 Report to user:
 ```
 Executing: {goal}
-Tasks: {taskCount} (depth: {maxDepth})
+Roles: {roleCount} (depth: {maxDepth})
 Workers: {totalWorkers} ({names})
+Auxiliaries: {pre-execution auxiliaries run, post-execution pending}
 ```
 Warn if git is dirty. If resuming: "Resuming execution."
 
-Spawn workers as teammates using the Task tool. Each worker prompt MUST include these invariants:
+Spawn workers as teammates using the Task tool. Each worker prompt MUST include:
 
-1. **Task discovery**: "Check TaskList for pending unblocked tasks matching your role. Claim by setting status to in_progress."
-2. **Brief location**: "Read your task brief from `.design/plan.json` at `tasks[{planIndex}].prompt`. The planIndex is the number in the task subject."
-3. **Completion reporting**: "When done, SendMessage to lead with: task subject, what you did, files changed."
-4. **Committing**: "git add specific files + git commit with conventional commit message (feat:/fix:/refactor: etc). Never git add -A."
-5. **Failure handling**: "If you cannot complete a task, SendMessage to lead with: task subject, what failed, why it failed, what you tried, suggested alternative."
-
-Beyond invariants, include: scope boundaries (what NOT to touch), expected output files, success criteria from the plan's `agent.acceptanceCriteria`, and any `agent.contextFiles` to read first.
+1. **Identity**: "You are a specialist: {role.name}. Your goal: {role.goal}"
+2. **Brief location**: "Read your full role brief from `.design/plan.json` at `roles[{roleIndex}]`."
+3. **Expert context**: "Read these expert artifacts for context: {expertContext entries with artifact paths and relevance notes}." If a scout report exists: "Also read `.design/scout-report.json` for codebase reality check."
+4. **Process**: "Explore your scope directories ({scope.directories}). Plan your own approach based on what you find in the actual codebase. Implement, test, verify against your acceptance criteria."
+5. **Task discovery**: "Check TaskList for your pending unblocked task. Claim by setting status to in_progress."
+6. **Constraints**: "{constraints from role brief}"
+7. **Done when**: "{acceptanceCriteria from role brief}"
+8. **Committing**: "git add specific files + git commit with conventional commit message (feat:/fix:/refactor: etc). Never git add -A."
+9. **Completion reporting**: "When done, SendMessage to lead with: role name, what you achieved, files changed, acceptance criteria results (pass/fail each)."
+10. **Failure handling**: "If you cannot complete your goal, SendMessage to lead with: role name, what failed, why, what you tried, suggested alternative. If rollback triggers fire ({rollbackTriggers}), stop immediately and report."
+11. **Fallback**: If role has a fallback: "If your primary approach fails: {fallback}"
+12. **Scope boundaries**: "Stay within your scope directories. Do not modify files outside your scope unless absolutely necessary for integration."
 
 ```
-Task(subagent_type: "general-purpose", team_name: "do-execute", name: "{role}", prompt: <role-specific prompt with invariants>)
+Task(subagent_type: "general-purpose", team_name: "do-execute", name: "{worker-name}", model: "{model}", prompt: <role-specific prompt with all above>)
 ```
 
-### 3. Monitor
+### 4. Monitor
 
 Event-driven loop — process worker messages as they arrive.
 
-**On task completion**: Worker tells you which task they finished and what they did.
-1. Update plan.json: `echo '[{"planIndex": N, "status": "completed", "result": "..."}]' | python3 $PLAN_CLI update-status .design/plan.json`
-2. Progressive trimming: completed tasks are automatically stripped of verbose agent fields by `update-status`.
-3. Handle any `cascaded` entries by marking them in TaskList.
-4. Wake idle workers — tell them to check for new tasks.
+**On role completion**: Worker reports what they achieved and acceptance criteria results.
+1. Update plan.json: `echo '[{"roleIndex": N, "status": "completed", "result": "..."}]' | python3 $PLAN_CLI update-status .design/plan.json`
+2. Handle any `cascaded` entries by marking them in TaskList.
+3. Wake idle workers — tell them to check for new tasks.
 
-**On task failure**: Worker tells you which task failed and why.
-1. Update plan.json: `echo '[{"planIndex": N, "status": "failed", "result": "..."}]' | python3 $PLAN_CLI update-status .design/plan.json`
+**On role failure**: Worker reports what failed and why.
+1. Update plan.json: `echo '[{"roleIndex": N, "status": "failed", "result": "..."}]' | python3 $PLAN_CLI update-status .design/plan.json`
 2. Handle cascaded entries in TaskList.
-3. Circuit breaker: `python3 $PLAN_CLI circuit-breaker .design/plan.json`. If `shouldAbort`: shut down all workers, go to Final Verification.
-4. Retries: `python3 $PLAN_CLI retry-candidates .design/plan.json`. If retryable (attempts < 3): clean up partial work (`git checkout` + `rm`), reset in TaskList, tell the worker to retry with context: what failed, why, what was tried, suggested alternative approach.
+3. Circuit breaker: `python3 $PLAN_CLI circuit-breaker .design/plan.json`. If `shouldAbort`: shut down all workers, go to Post-Execution.
+4. Retries: `python3 $PLAN_CLI retry-candidates .design/plan.json`. If retryable (attempts < 3): clean up partial work (`git checkout` + `rm`), reset in TaskList, tell the worker to retry with context: what failed, why, suggested alternative approach, fallback strategy.
 
 **On idle**: Worker reports no tasks available. Track idle workers. Check completion.
 
 **Completion check** (after each idle/completion):
 1. `python3 $PLAN_CLI status .design/plan.json`
-2. No pending tasks and all workers idle: shut down workers, go to Final Verification.
-3. Pending tasks exist but all workers idle (deadlock): report deadlock, shut down, go to Final Verification.
+2. No pending roles and all workers idle: shut down workers, go to Post-Execution.
+3. Pending roles exist but all workers idle (deadlock): report deadlock, shut down, go to Post-Execution.
 
 **On peer issues**: Workers handle these directly. The lead does not intervene unless asked.
 
-### 4. Final Verification
+### 5. Post-Execution Auxiliaries
 
-Build a Bash script that for each completed task: checks created files exist (`test -f`), checks modified files in git log. Output JSON array with per-task results.
+Check `auxiliaryRoles[]` for `type: "post-execution"` roles.
 
-For verification failures with attempts < 3: update plan.json to failed, spawn a retry worker to try again. For non-retryable: leave as failed.
+**Integration Verifier**: Spawn as a teammate. Prompt includes:
+- "Verify all completed roles' work integrates correctly."
+- Completed roles: subjects, files changed (from worker reports)
+- Test command from `plan.json context.testCommand`
+- All `acceptanceCriteria` from all completed roles
+- "Run the full test suite. Check for import/dependency conflicts. Verify cross-role connections. Test the goal end-to-end."
+- "Report: PASS (all criteria met) or FAIL (list specific failures with suggested fixes)."
 
-### 5. Goal Review
+On FAIL: spawn targeted fix workers for specific issues. Re-run verifier after fixes (max 2 fix rounds).
 
-Before checking mechanical correctness, evaluate whether the completed work actually achieves the original goal.
+**Skip when**: only 1 role was executed, or all roles were independent (no shared directories, no cross-references).
+
+### 6. Goal Review
+
+Before declaring completion, evaluate whether the work achieves the original goal.
 
 Review against the goal from `plan.json`:
-1. **Completeness** — Does the sum of completed tasks deliver the goal end-to-end? (e.g., API built but no route registered, component created but never rendered)
-2. **Coherence** — Do the pieces fit together? Naming conventions consistent? Data models match across tasks?
+1. **Completeness** — Does the sum of completed roles deliver the goal end-to-end?
+2. **Coherence** — Do the pieces fit together? Naming conventions consistent? Data models match across roles?
 3. **User intent** — Would a user looking at the result say "this is what I asked for"?
 
-If gaps are found: spawn a targeted worker to address them. These are goal-level fixes, not task retries.
-
-### 6. Integration Testing
-
-After the goal review, test that the combined work integrates correctly.
-
-1. Spawn an `integration-tester` worker. Its prompt should include: completed tasks (subjects + files), test command from `plan.json context.testCommand`, instructions to run the full test suite, attempt a build, check for import/dependency conflicts, verify cross-task connections.
-2. On FAIL: assign fix tasks to appropriate workers or spawn a targeted fix worker. Re-run after fixes.
-3. On PASS or after max 2 fix rounds: proceed to Complete.
-
-**Skip when**: only 1 task was executed, or all tasks were independent (no shared files, no cross-references).
+If gaps are found: spawn a targeted worker to address them.
 
 ### 7. Complete
 
-1. Summary: `python3 $PLAN_CLI status .design/plan.json`. Display completed/failed/blocked/skipped counts with subjects. Recommend follow-ups for failures.
+1. Summary: `python3 $PLAN_CLI status .design/plan.json`. Display completed/failed/blocked/skipped counts with names. Recommend follow-ups for failures.
 2. **Session handoff** — Write `.design/handoff.md`:
 
 ```markdown
@@ -126,10 +139,10 @@ After the goal review, test that the combined work integrates correctly.
 Date: {ISO timestamp}
 
 ## Completed
-{For each: "Task N: {subject} — {one-line result}"}
+{For each: "Role: {name} — {one-line result}"}
 
 ## Failed
-{For each: "Task N: {subject} — {failure reason}"}
+{For each: "Role: {name} — {failure reason}"}
 
 ## Integration: {PASS/FAIL/SKIPPED}
 
@@ -140,7 +153,7 @@ Date: {ISO timestamp}
 {Deduplicated list of all files created/modified}
 
 ## Known Gaps
-{Missing coverage, TODOs, skipped tasks and why}
+{Missing coverage, TODOs, skipped roles and why}
 
 ## Next Steps
 {Concrete actions if work continues}

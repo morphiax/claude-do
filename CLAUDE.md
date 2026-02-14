@@ -45,38 +45,46 @@ A single `scripts/plan.py` at the repo root provides all deterministic operation
 
 - **Query** (7 commands): status, summary, overlap-matrix, tasklist-data, worker-pool, retry-candidates, circuit-breaker
 - **Mutation** (2 commands): resume-reset, update-status — atomically modify plan.json via temp file + rename
-- **Build** (1 command): finalize — validates structure, assembles prompts, computes overlaps in one atomic operation
+- **Build** (1 command): finalize — validates role briefs and computes directory overlaps in one atomic operation
 
-Design uses query + finalize. Execute uses all commands. `worker-pool` computes role-based specialist allocation from the plan's `agent.role` fields — one worker per unique role, named by role (e.g., `api-developer`, `test-writer`). Workers read `plan.json` directly — no per-worker task files needed.
+Design uses query + finalize. Execute uses all commands. `worker-pool` reads roles directly — one worker per role, named by role (e.g., `api-developer`, `test-writer`). Workers read `plan.json` directly — no per-worker task files needed.
 
 Scripts use python3 stdlib only (no dependencies), support Python 3.8+, and follow a consistent CLI pattern: `python3 plan.py <command> [plan_path] [options]`. All output is JSON to stdout with exit code 0 for success, 1 for errors.
 
 ### Data Contract: .design/plan.json
 
-The two skills communicate through `.design/plan.json` (schemaVersion 3) written to the `.design/` directory at runtime (gitignored). Key points:
+The two skills communicate through `.design/plan.json` (schemaVersion 4) written to the `.design/` directory at runtime (gitignored). Key points:
 
 - `.design/plan.json` is the authoritative state; the TaskList is a derived view
-- Schema version 3 is required
-- Tasks use dependency-only scheduling — workers self-organize by claiming unblocked tasks from the TaskList based on `blockedBy` dependencies
-- `finalize` assembles each task's `prompt` field (worker brief) and computes `fileOverlaps` from the dependency graph
-- Progressive trimming: completed tasks are stripped of verbose agent fields (including `prompt`), keeping only subject, status, result, metadata.files, blockedBy, agent.role, agent.model
-- Expert artifacts (`expert-*.json`) are optional and preserved for execute workers to reference via `agent.contextFiles`
-- Plan history: completed runs are archived to `.design/history/{timestamp}/`; design pre-flight archives (not deletes) stale artifacts
+- Schema version 4 is required
+- Roles use name-based dependencies resolved to indices by `finalize`
+- `finalize` validates role briefs and computes `directoryOverlaps` from scope directories/patterns
+- No prompt assembly — workers read role briefs directly from plan.json and decide their own implementation approach
+- Expert artifacts (`expert-*.json`) are preserved in `.design/` for execute workers to reference via `expertContext` entries
+- Plan history: completed runs are archived to `.design/history/{timestamp}/`; design pre-flight archives stale artifacts
 
-**Top-level fields**: schemaVersion, goal, context {stack, conventions, testCommand, buildCommand, lsp}, progress {completedTasks}, tasks[]
+**Top-level fields**: schemaVersion (4), goal, context {stack, conventions, testCommand, buildCommand, lsp}, expertArtifacts [{name, path, summary}], roles[], auxiliaryRoles[], progress {completedRoles: []}
 
-**Task fields**: subject, description, activeForm, status, result, attempts, blockedBy, prompt (assembled by finalize), fileOverlaps (computed by finalize), metadata {type, files {create, modify}}, agent
-
-**Agent field** — drives worker specialization. Design assigns `agent.role` per task; execute spawns one specialist per unique role via `worker-pool`:
-- `role` — worker specialization (e.g., `api-developer`, `prompt-writer`). Used for worker naming and task claiming.
+**Role fields** — each role is a goal-directed scope for one specialist worker:
+- `name` — worker identity and naming (e.g., `api-developer`, `prompt-writer`)
+- `goal` — clear statement of what this role must achieve
 - `model` — preferred Claude model (`sonnet`, `opus`, `haiku`)
-- `approach` — step-by-step implementation strategy
-- `contextFiles` — array of `{path, reason}` files the worker should read first
-- `constraints` — array of rules the worker must follow
-- `acceptanceCriteria` — array of `{criterion, check}` defining done conditions
+- `scope` — `{directories, patterns, dependencies}` where dependencies are role names resolved to indices
+- `expertContext` — array of `{expert, artifact, relevance}` referencing full expert artifacts
+- `constraints` — array of hard rules the worker must follow
+- `acceptanceCriteria` — array of `{criterion, check}` defining goal-based success conditions
 - `assumptions` — array of `{text, severity}` documenting assumptions (`blocking` or `non-blocking`)
 - `rollbackTriggers` — array of conditions that should cause the worker to stop and report
-- `fallback` — alternative approach if primary approach fails
+- `fallback` — alternative approach if primary fails (included in initial brief)
+
+**Status fields** (initialized by finalize): status (`pending`), result (null), attempts (0), directoryOverlaps (computed)
+
+**Auxiliary roles** — meta-agents that improve quality without directly implementing features:
+- `challenger` (pre-execution) — reviews plan, challenges assumptions, finds gaps
+- `scout` (pre-execution) — reads actual codebase to verify expert assumptions match reality
+- `integration-verifier` (post-execution) — verifies cross-role integration, runs full test suite
+
+**Auxiliary role fields**: name, type (pre-execution|post-execution), goal, model, trigger
 
 ### Execution Model
 
@@ -87,16 +95,19 @@ Both skills use the **main conversation as team lead** with Agent Teams. Runtime
 
 **`/do:design`** — team name: `do-design`
 - Lead spawns expert teammates (architect, researcher, domain-specialists) based on goal analysis
-- Lead synthesizes expert findings into plan.json directly (no plan-writer delegate)
-- `finalize` validates structure, assembles worker prompts, computes file overlaps
+- Complexity tier (trivial/standard/complex/high-stakes) drives auxiliary role selection
+- Lead synthesizes expert findings into role briefs in plan.json directly (no plan-writer delegate)
+- `finalize` validates role briefs and computes directory overlaps (no prompt assembly)
 
 **`/do:execute`** — team name: `do-execute`
-- Lead creates TaskList from plan.json, spawns one persistent worker per unique `agent.role` via `worker-pool`
-- Workers self-organize: claim unblocked tasks from TaskList, execute, commit, report completion
-- File overlap serialization: concurrent tasks touching the same files get runtime `blockedBy` constraints
-- Retry budget: max 3 attempts per task | Cascading failures: skip dependents of failed tasks
-- Circuit breaker: abort if >50% remaining tasks would be skipped (bypassed for plans with 3 or fewer tasks)
-- Goal review + integration testing after all tasks complete
+- Pre-execution auxiliaries (challenger, scout) run before workers spawn
+- Lead creates TaskList from plan.json, spawns one persistent worker per role via `worker-pool`
+- Workers explore their scope directories, plan their own approach, implement, test, and verify against acceptance criteria
+- Directory overlap serialization: concurrent roles touching overlapping directories get runtime `blockedBy` constraints
+- Retry budget: max 3 attempts per role | Cascading failures: skip dependents of failed roles
+- Circuit breaker: abort if >50% remaining roles would be skipped (bypassed for plans with 3 or fewer roles)
+- Post-execution auxiliaries (integration verifier) after all roles complete
+- Goal review evaluates whether completed work achieves the original goal
 - Session handoff: `.design/handoff.md` written on completion for context recovery
 
 ## Requirements
