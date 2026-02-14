@@ -3,7 +3,7 @@
 > Team-based planning and production-grade execution for Claude Code
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Version](https://img.shields.io/badge/version-1.8.0-green.svg)
+![Version](https://img.shields.io/badge/version-1.9.0-green.svg)
 ![Claude Code](https://img.shields.io/badge/Claude%20Code-2.1.32%2B-orange.svg)
 
 ## Why do?
@@ -13,7 +13,7 @@ Most planning plugins use a single agent to decompose goals. `do` is different:
 - **Dynamic expert teams, not rigid tiers.** `/do:design` spawns experts based on the goal's nature — architects for codebase analysis, researchers for external libraries, domain specialists for security/performance/etc. The lead determines team composition, not a fixed pipeline.
 - **Plans are execution blueprints, not task lists.** Every task includes assumptions with shell-verified pre-flight checks, acceptance criteria with automated validation, rollback triggers, context files, and agent specialization (role, model, approach).
 - **Execution has safety rails.** `/do:execute` spawns persistent, self-organizing workers that claim tasks from the dependency graph, commit their own changes, and communicate with each other when issues arise. Safety rails include retry budgets (3 attempts with failure context), cascading failure propagation, a circuit breaker (abort at >50% skip rate), progressive plan trimming, and deferred final verification.
-- **Script-assisted orchestration.** Both skills use per-skill python3 helper scripts (`skills/{name}/scripts/plan.py`) for deterministic operations like validation, dependency computation, and plan manipulation, reserving LLM usage for analytical and creative work.
+- **Script-assisted orchestration.** A shared python3 helper script (10 commands: 7 query, 2 mutation, 1 build) handles deterministic operations — validation, dependency computation, prompt assembly, overlap analysis, and plan manipulation — reserving LLM usage for analytical and creative work.
 
 ## Quick Start
 
@@ -52,7 +52,7 @@ Expert types vary by goal: **architects** analyze codebase structure, **research
 
 An event-driven lead with persistent worker teammates:
 
-- **Setup** — The lead validates the plan, creates a TaskList with dependency and file-overlap constraints, and computes the worker pool via the `worker-pool` script (role-based naming, optimal concurrency).
+- **Setup** — The lead validates the plan, creates a TaskList with dependency and file-overlap constraints, and computes the worker pool via the `worker-pool` script — one specialist per unique `agent.role`, named by role.
 - **Workers** — Persistent teammates named by their `agent.role` (e.g., `api-developer`, `test-writer`). Workers self-organize: check TaskList for pending unblocked tasks, claim one, read the task prompt directly from `.design/plan.json`, commit their own changes, and claim the next available task. Workers communicate directly with each other when they find issues with prior work.
 - **Deferred verification** — Workers verify their own acceptance criteria during execution. The lead runs a single batched final verification after all tasks complete instead of per-round checks.
 - **Goal review** — After individual verification, the lead steps back from the tasks and evaluates whether the completed work actually achieves the original goal. Workers execute mechanically — they don't hold the big picture. The lead checks for completeness gaps (tasks done but goal not met), coherence (do the pieces fit together?), and user intent (is this what was asked for?). Gaps spawn targeted fix workers.
