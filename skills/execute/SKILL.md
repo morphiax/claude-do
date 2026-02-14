@@ -169,8 +169,9 @@ Date: {ISO timestamp}
 3. **Memory curation** — Spawn memory-curator auxiliary agent:
 
 Prompt includes:
-- "Read `.design/handoff.md` and `.design/plan.json` completed roles."
+- "Read `.design/handoff.md` and `.design/plan.json` all roles (completed, failed, skipped)."
 - "Extract actionable patterns: successful approaches, failed approaches, discovered conventions, blockers overcome, mistakes to avoid."
+- "For failed roles: read `result` field for failure reasons. Extract mistake/failure category memories."
 - "For each pattern: determine category (pattern|mistake|convention|approach|failure), generate keywords, write concise body (<200 words)."
 - "Call `python3 $PLAN_CLI memory-add .design/memory.jsonl --category <cat> --keywords <csv> --body <text>` for each entry."
 - "Focus on: specific file/pattern/tool references (actionable), not vague lessons. Reference role names and file paths."
