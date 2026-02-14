@@ -1169,26 +1169,6 @@ def main() -> None:
     p.add_argument("plan_path", nargs="?", default=".design/plan.json")
     p.set_defaults(func=cmd_update_status)
 
-    # Memory commands
-    p = subparsers.add_parser(
-        "memory-search", help="Search memory.jsonl for relevant entries"
-    )
-    p.add_argument("memory_path", nargs="?", default=".design/memory.jsonl")
-    p.add_argument("--query", required=True, help="Search query")
-    p.add_argument("--limit", type=int, default=5, help="Max results (default: 5)")
-    p.set_defaults(func=cmd_memory_search)
-
-    p = subparsers.add_parser(
-        "memory-add", help="Add a new memory entry to memory.jsonl"
-    )
-    p.add_argument("memory_path", nargs="?", default=".design/memory.jsonl")
-    p.add_argument("--category", required=True, help="Entry category")
-    p.add_argument("--keywords", required=True, help="Comma-separated keywords")
-    p.add_argument("--content", required=True, help="Memory content")
-    p.add_argument("--source", help="Source of the memory")
-    p.add_argument("--goal-context", help="Goal context when memory was created")
-    p.set_defaults(func=cmd_memory_add)
-
     # Build commands
     p = subparsers.add_parser(
         "finalize", help="Validate structure and compute directory overlaps"
