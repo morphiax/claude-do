@@ -59,20 +59,27 @@ Auxiliaries: {pre-execution auxiliaries run, post-execution pending}
 ```
 Warn if git is dirty. If resuming: "Resuming execution."
 
+**Memory injection** — For each role, retrieve relevant memories:
+```bash
+python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "{role.goal}" --stack "{context.stack}" --keywords "{role.scope.directories + role.name}"
+```
+Parse JSON output. Take top 2-3 `memories[]` per role.
+
 Spawn workers as teammates using the Task tool. Each worker prompt MUST include:
 
 1. **Identity**: "You are a specialist: {role.name}. Your goal: {role.goal}"
 2. **Brief location**: "Read your full role brief from `.design/plan.json` at `roles[{roleIndex}]`."
 3. **Expert context**: "Read these expert artifacts for context: {expertContext entries with artifact paths and relevance notes}." If a scout report exists: "Also read `.design/scout-report.json` for codebase reality check."
-4. **Process**: "Explore your scope directories ({scope.directories}). Plan your own approach based on what you find in the actual codebase. Implement, test, verify against your acceptance criteria."
-5. **Task discovery**: "Check TaskList for your pending unblocked task. Claim by setting status to in_progress."
-6. **Constraints**: "{constraints from role brief}"
-7. **Done when**: "{acceptanceCriteria from role brief}"
-8. **Committing**: "git add specific files + git commit with conventional commit message (feat:/fix:/refactor: etc). Never git add -A."
-9. **Completion reporting**: "When done, SendMessage to lead with: role name, what you achieved, files changed, acceptance criteria results (pass/fail each)."
-10. **Failure handling**: "If you cannot complete your goal, SendMessage to lead with: role name, what failed, why, what you tried, suggested alternative. If rollback triggers fire ({rollbackTriggers}), stop immediately and report."
-11. **Fallback**: If role has a fallback: "If your primary approach fails: {fallback}"
-12. **Scope boundaries**: "Stay within your scope directories. Do not modify files outside your scope unless absolutely necessary for integration."
+4. **Past learnings** (if memories found): "Relevant past learnings: {bullet list of memories with format: '- {category}: {summary} (from {created})'}"
+5. **Process**: "Explore your scope directories ({scope.directories}). Plan your own approach based on what you find in the actual codebase. Implement, test, verify against your acceptance criteria."
+6. **Task discovery**: "Check TaskList for your pending unblocked task. Claim by setting status to in_progress."
+7. **Constraints**: "{constraints from role brief}"
+8. **Done when**: "{acceptanceCriteria from role brief}"
+9. **Committing**: "git add specific files + git commit with conventional commit message (feat:/fix:/refactor: etc). Never git add -A."
+10. **Completion reporting**: "When done, SendMessage to lead with: role name, what you achieved, files changed, acceptance criteria results (pass/fail each)."
+11. **Failure handling**: "If you cannot complete your goal, SendMessage to lead with: role name, what failed, why, what you tried, suggested alternative. If rollback triggers fire ({rollbackTriggers}), stop immediately and report."
+12. **Fallback**: If role has a fallback: "If your primary approach fails: {fallback}"
+13. **Scope boundaries**: "Stay within your scope directories. Do not modify files outside your scope unless absolutely necessary for integration."
 
 ```
 Task(subagent_type: "general-purpose", team_name: "do-execute", name: "{worker-name}", model: "{model}", prompt: <role-specific prompt with all above>)
@@ -159,13 +166,29 @@ Date: {ISO timestamp}
 {Concrete actions if work continues}
 ```
 
-3. Archive: If all completed, move artifacts to history:
+3. **Memory curation** — Spawn memory-curator auxiliary agent:
+
+Prompt includes:
+- "Read `.design/handoff.md` and `.design/plan.json` completed roles."
+- "Extract actionable patterns: successful approaches, failed approaches, discovered conventions, blockers overcome, mistakes to avoid."
+- "For each pattern: determine category (pattern|mistake|convention|approach|failure), generate keywords, write concise body (<200 words)."
+- "Call `python3 $PLAN_CLI memory-add .design/memory.jsonl --category <cat> --keywords <csv> --body <text>` for each entry."
+- "Focus on: specific file/pattern/tool references (actionable), not vague lessons. Reference role names and file paths."
+- "Skip generic insights. Only record learnings that would help future similar goals."
+
+```
+Task(subagent_type: "general-purpose", team_name: "do-execute", name: "memory-curator", model: "haiku", prompt: <above>)
+```
+
+Wait for curator completion. On failure: proceed (memory curation is optional).
+
+4. Archive: If all completed, move artifacts to history:
    ```bash
    ARCHIVE_DIR=".design/history/$(date -u +%Y%m%dT%H%M%SZ)"
    mkdir -p "$ARCHIVE_DIR"
-   find .design -mindepth 1 -maxdepth 1 ! -name history -exec mv {} "$ARCHIVE_DIR/" \;
+   find .design -mindepth 1 -maxdepth 1 ! -name history ! -name memory.jsonl -exec mv {} "$ARCHIVE_DIR/" \;
    ```
    If partial (failures remain): leave artifacts in `.design/` for resume.
-4. Cleanup: `TeamDelete(team_name: "do-execute")`.
+5. Cleanup: `TeamDelete(team_name: "do-execute")`.
 
 **Arguments**: $ARGUMENTS
