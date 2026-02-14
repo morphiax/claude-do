@@ -27,7 +27,7 @@ Both skills must be tested end-to-end. A change to one skill may affect the othe
 
 - `.claude-plugin/plugin.json` — Plugin manifest (name, version, metadata)
 - `.claude-plugin/marketplace.json` — Marketplace distribution config
-- `scripts/plan.py` — Shared helper script (12 commands: 9 query, 2 mutation, 1 build)
+- `scripts/plan.py` — Shared helper script (12 commands: 8 query, 3 mutation, 1 build)
 - `skills/design/SKILL.md` — `/do:design` skill definition
 - `skills/design/scripts/plan.py` — Symlink → `../../../scripts/plan.py`
 - `skills/execute/SKILL.md` — `/do:execute` skill definition
@@ -43,8 +43,8 @@ Each SKILL.md has YAML frontmatter (`name`, `description`, `argument-hint`) that
 
 A single `scripts/plan.py` at the repo root provides all deterministic operations. Each skill symlinks to it from `skills/{name}/scripts/plan.py` so SKILL.md can resolve a skill-local path.
 
-- **Query** (9 commands): status, summary, overlap-matrix, tasklist-data, worker-pool, retry-candidates, circuit-breaker, memory-search (keyword-based search in .design/memory.jsonl with recency weighting), resume-reset (returns isResume and counts)
-- **Mutation** (2 commands): update-status (atomically modify plan.json via temp file + rename), memory-add (append JSONL entry with UUID)
+- **Query** (8 commands): status, summary, overlap-matrix, tasklist-data, worker-pool, retry-candidates, circuit-breaker, memory-search (keyword-based search in .design/memory.jsonl with recency weighting)
+- **Mutation** (3 commands): update-status (atomically modify plan.json via temp file + rename), memory-add (append JSONL entry with UUID), resume-reset (resets in_progress roles to pending, increments attempts)
 - **Build** (1 command): finalize — validates role briefs and computes directory overlaps in one atomic operation
 
 Design uses query + finalize. Execute uses all commands. `worker-pool` reads roles directly — one worker per role, named by role (e.g., `api-developer`, `test-writer`). Workers read `plan.json` directly — no per-worker task files needed.
