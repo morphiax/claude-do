@@ -61,7 +61,7 @@ The two skills communicate through `.design/plan.json` (schemaVersion 4) written
 - `finalize` validates role briefs and computes `directoryOverlaps` from scope directories/patterns
 - No prompt assembly — workers read role briefs directly from plan.json and decide their own implementation approach
 - Expert artifacts (`expert-*.json`) are preserved in `.design/` for execute workers to reference via `expertContext` entries
-- Memory storage: `.design/memory.jsonl` contains cross-session learnings (JSONL format with UUID, category, keywords, content, timestamp, importance 1-10)
+- Memory storage: `.design/memory.jsonl` contains cross-session learnings (JSONL format with UUID, category, keywords, content, timestamp, importance 1-10). Entries must pass five quality gates: transferability, category fit, surprise-based importance, deduplication, and specificity. Session-specific observations (metrics, counts, file lists) are rejected
 - Memory retrieval uses keyword matching with recency decay (10%/30 days) and importance weighting (score = keyword_match * recency_factor * importance/10)
 - Plan history: completed runs are archived to `.design/history/{timestamp}/`; design pre-flight archives stale artifacts
 
@@ -120,7 +120,7 @@ Both skills use the **main conversation as team lead** with Agent Teams. Runtime
 - Cascading failures: skip dependents of failed roles
 - Circuit breaker: abort if >50% remaining roles would be skipped (bypassed for plans with 3 or fewer roles)
 - Post-execution auxiliaries (integration verifier with structured report format, memory curator) after all roles complete
-- Memory curator: distills handoff.md and role results (including all failed/skipped roles) into .design/memory.jsonl entries (max 200 words each, category-tagged, keyword-indexed, importance-rated 1-10)
+- Memory curator: distills handoff.md and role results into .design/memory.jsonl entries, applying five quality gates before storing: transferability (useful in a new session?), category fit (convention/pattern/mistake/approach/failure), surprise (unexpected findings score higher), deduplication (no redundant entries), and specificity (must contain concrete references). Importance scored 1-10 based on surprise value, not uniform. Session-specific data (test counts, metrics, file lists) is explicitly rejected
 - Goal review evaluates whether completed work achieves the original goal
 - Session handoff: `.design/handoff.md` written on completion for context recovery
 

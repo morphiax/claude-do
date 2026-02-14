@@ -54,7 +54,7 @@ All script calls: `python3 $PLAN_CLI <command> [args]` via Bash. Output is JSON 
    if [ "$(find .design -mindepth 1 -maxdepth 1 ! -name history | head -1)" ]; then
      ARCHIVE_DIR=".design/history/$(date -u +%Y%m%dT%H%M%SZ)"
      mkdir -p "$ARCHIVE_DIR"
-     find .design -mindepth 1 -maxdepth 1 ! -name history -exec mv {} "$ARCHIVE_DIR/" \;
+     find .design -mindepth 1 -maxdepth 1 ! -name history ! -name memory.jsonl -exec mv {} "$ARCHIVE_DIR/" \;
    fi
    ```
 

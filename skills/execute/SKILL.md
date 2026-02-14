@@ -178,13 +178,22 @@ Date: {ISO timestamp}
 
 Prompt includes:
 - "Read all artifacts: `.design/handoff.md`, `.design/plan.json` (all roles including completed, failed, skipped, in_progress, pending — read result field for each), `.design/challenger-report.json` (if exists), `.design/scout-report.json` (if exists), `.design/integration-verifier-report.json` (if exists)."
-- "Extract actionable patterns in these categories: pattern (successful approaches), mistake (failed approaches to avoid), convention (discovered codebase conventions), approach (how a problem was solved), failure (why something failed), tool (specific tools/libraries useful or problematic)."
-- "For each pattern: determine category, generate keywords (include role names, file paths, technology names, error types), write concise body (<200 words) with specifics: file paths, code patterns, command examples, error messages. Include 'what' and 'why', not just 'what'."
-- "For failed/skipped roles: always create a memory explaining the failure root cause."
-- "Call `python3 $PLAN_CLI memory-add .design/memory.jsonl --category <cat> --keywords <csv> --body <text>` for each entry."
-- "Focus on: specific file/pattern/tool references (actionable), not vague lessons. Reference role names and file paths."
-- "Skip generic insights. Only record learnings that would help future similar goals."
-- "SendMessage to lead when complete: 'Memory curation complete. Added {count} memories ({breakdown by category}).'."
+- "Read existing memories: `.design/memory.jsonl` (if exists). Note what is already recorded to avoid duplicates."
+
+**Quality gates — apply BEFORE storing each candidate memory:**
+
+- "TRANSFERABILITY TEST: Ask 'Would this be useful in a NEW session on a SIMILAR goal?' If no, discard. Session-specific data — test counts, bundle sizes, line counts, exit codes, specific file lists, timing — is never transferable."
+- "CATEGORY TEST: Each memory must be exactly one of: `convention` (codebase/domain facts: 'this repo uses Bun not Node'), `pattern` (reusable procedures: 'to deploy, run A then B'), `mistake` (failed approaches with root cause: 'approach X fails because Y, use Z'), `approach` (how a class of problem was solved: 'for rate limiting in Express, middleware pattern works because...'), `failure` (why a role/task failed — always record these). If it doesn't fit a category, it's not a memory."
+- "SURPRISE TEST: Routine successes on well-understood tasks are LOW value (importance 1-3). Record high importance (7-10) only for: unexpected failures, contradictions with prior assumptions, novel patterns not previously documented, or discovered conventions that differ from defaults."
+- "DEDUPLICATION: If an existing memory already covers this learning, skip it. If new evidence refines an existing memory, note the refinement rather than creating a duplicate."
+- "SPECIFICITY TEST: Each memory must contain at least one concrete reference — a file path, command, error message, code pattern, or tool name. 'Tests pass after changes' is not a memory. 'Bun test requires --run flag for CI (no watch mode)' is."
+
+**Format:**
+- "For each memory that passes all gates: call `python3 $PLAN_CLI memory-add .design/memory.jsonl --category <cat> --keywords <csv> --content <text> --importance <1-10>`"
+- "Keywords: include technology names, directory paths, error types, tool names — terms a future goal description would contain."
+- "Content: <200 words. State what you learned AND why it matters. Not what happened."
+- "For failed/skipped roles: always create a `failure` or `mistake` memory with root cause analysis."
+- "SendMessage to lead when complete: 'Memory curation complete. Added {count} memories ({breakdown by category}). Rejected {rejected_count} candidates (not transferable or duplicates).'."
 
 ```
 Task(subagent_type: "general-purpose", team_name: "do-execute", name: "memory-curator", model: "haiku", prompt: <above>)
