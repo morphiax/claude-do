@@ -10,29 +10,22 @@ Decompose a goal into `.design/plan.json`. Spawn the experts you need, get their
 
 **Do NOT use `EnterPlanMode`** — this skill IS the plan.
 
-**CRITICAL: Always use agent teams.** When spawning any expert or worker via Task tool, you MUST include `team_name: "do-design"` and `name: "{role}"` parameters. Without these, agents are standalone and cannot coordinate.
+**CRITICAL: Always use agent teams.** When spawning any expert via Task tool, you MUST include `team_name: "do-design"` and `name: "{role}"` parameters. Without these, agents are standalone and cannot coordinate.
 
-**Lead boundaries**: Use only `TeamCreate`, `TeamDelete`, `TaskCreate`, `TaskUpdate`, `TaskList`, `SendMessage`, `Task`, `AskUserQuestion`, and `Bash` (cleanup, verification, `python3 $PLAN_CLI` only). Never read source files, use MCP tools, `Grep`, `Glob`, or `LSP`. The lead orchestrates — agents think.
+**Lead boundaries**: Use only `TeamCreate`, `TeamDelete`, `TaskCreate`, `TaskUpdate`, `TaskList`, `SendMessage`, `Task`, `AskUserQuestion`, and `Bash` (cleanup, verification, `python3 $PLAN_CLI` only). Project metadata (CLAUDE.md, package.json, README) allowed. Application source code prohibited. The lead orchestrates — agents think.
 
-**No polling**: Messages auto-deliver to your conversation automatically. Never use `sleep`, `for i in {1..N}`, or Bash loops to wait. Simply proceed with your work — when a teammate sends a message, it appears in your next turn. The system handles all delivery.
+**No polling**: Messages auto-deliver automatically. Never use `sleep`, loops, or Bash waits. When a teammate sends a message, it appears in your next turn.
 
 ---
 
 ## Clarification Protocol
 
-Ask clarifying questions before spawning agents when the goal has ambiguity that affects implementation approach.
-
-**Ask `AskUserQuestion` when:**
-- Multiple valid interpretations exist (e.g., "add pictures" = real photos vs stock images vs icons)
-- Scope is underspecified (e.g., "upgrade" = visual refresh vs full rewrite vs new feature)
-- Technology choice is open and impacts implementation significantly
-- Data source is ambiguous (e.g., "show car images" — from where? user-provided? API? scraped?)
-
-**Do NOT ask when:**
-- Codebase contains the answer (existing patterns, conventions, similar features)
-- Standard practice is clear (use existing test framework, follow existing component patterns)
-- User preference doesn't materially change the approach
-- The ambiguity is minor and any reasonable choice works
+| ASK (`AskUserQuestion`) when | SKIP when |
+|---|---|
+| Multiple valid interpretations exist | Codebase contains the answer |
+| Scope is underspecified | Standard practice is clear |
+| Technology choice is open and impacts approach | Any reasonable choice works |
+| Data source is ambiguous | User preference doesn't change approach |
 
 ### Script Setup
 
@@ -56,7 +49,6 @@ All script calls: `python3 $PLAN_CLI <command> [args]` via Bash. Output is JSON 
 4. Archive stale artifacts (instead of deleting — avoids destructive commands):
    ```bash
    mkdir -p .design/history
-   # If .design/ has artifacts beyond history/, archive them
    if [ "$(find .design -mindepth 1 -maxdepth 1 ! -name history | head -1)" ]; then
      ARCHIVE_DIR=".design/history/$(date -u +%Y%m%dT%H%M%SZ)"
      mkdir -p "$ARCHIVE_DIR"
@@ -68,20 +60,18 @@ All script calls: `python3 $PLAN_CLI <command> [args]` via Bash. Output is JSON 
 
 The lead directly assesses the goal to determine needed perspectives.
 
-1. Read the goal. Quick WebSearch (if external patterns/libraries relevant) or scan CLAUDE.md/package.json via Bash to understand stack.
-2. Decide what expert perspectives would help. Trust your judgment.
+1. Read the goal. Quick WebSearch (if external patterns/libraries relevant) or scan project metadata (CLAUDE.md, package.json) via Bash to understand stack.
+2. Decide what expert perspectives would help.
 3. Report the planned team composition to the user.
 
 **Expert Selection**
 
-Analyze the goal and spawn the experts you need. Trust your judgment.
-
-Common perspectives that add value:
+Analyze the goal and spawn the experts you need:
 - **architect** — system design, patterns, trade-offs (nearly always useful)
 - **researcher** — prior art, libraries, best practices (when external solutions exist)
 - **domain specialists** — spawn based on goal domain (security, performance, UX, data, etc.)
 
-The list is not exhaustive. If the goal involves authentication, spawn a security specialist. If it's a UI overhaul, spawn a UX specialist. If you're unsure what perspectives are needed, ask the user.
+Not exhaustive. If the goal involves authentication, spawn a security specialist. If it's a UI overhaul, spawn a UX specialist. If unsure, ask the user.
 
 **For trivial goals** (1-3 tasks, single obvious approach): skip experts. Write the plan directly.
 
@@ -90,27 +80,33 @@ The list is not exhaustive. If the goal involves authentication, spawn a securit
 Create the team and spawn experts in parallel.
 
 1. `TeamDelete(team_name: "do-design")` (ignore errors), `TeamCreate(team_name: "do-design")`. If TeamCreate fails, tell user Agent Teams is required and stop.
-2. `TaskCreate` for each expert. No plan-writer — the lead writes the plan (it has full context from all experts).
-3. Spawn experts as teammates using the Task tool. Write prompts appropriate to the goal and each expert's focus area. Tell them what you need — don't follow a template. Experts report findings via `SendMessage` to the lead (or write `.design/expert-{name}.json`).
-
-**CRITICAL: Always use agent teams.** When spawning experts via Task tool, you MUST include:
-- `team_name: "do-design"` — to make them team members, not standalone agents
-- `name: "{expert-name}"` — their role name (architect, researcher, etc.)
+2. `TaskCreate` for each expert. No plan-writer — the lead writes the plan.
+3. Spawn experts as teammates using the Task tool with `team_name: "do-design"` and `name: "{expert-name}"`. Write prompts appropriate to the goal and each expert's focus area. Experts report findings via `SendMessage` to the lead. Supplementary artifacts go in `.design/expert-{name}.json`. Expert budget: report findings in ≤500 words.
 
 ### 4. Synthesize and Challenge
 
-The lead collects expert findings and writes the plan directly. The lead has the broadest context — it heard from every expert — so it is the best synthesizer.
+The lead collects expert findings and writes the plan directly.
 
-1. Collect all expert findings (messages and/or `.design/expert-*.json` files).
-2. Merge findings into `.design/plan.json` — resolve conflicts, deduplicate, sequence tasks.
-3. **Adversarial review** — Before finalizing, the lead challenges its own plan:
-   - Are there implicit assumptions that could fail? (e.g., "assumes API exists", "assumes schema won't change")
-   - Are there missing tasks? (error handling, migrations, edge cases, rollback)
-   - Are there unnecessary tasks? (over-engineering, premature abstraction)
-   - Do the dependencies make sense? Could parallelism be improved?
-   - Are there integration risks between tasks that touch related files?
-   Revise the plan based on this review. Add/remove/reorder tasks as needed.
-4. Run `python3 $PLAN_CLI finalize .design/plan.json` to validate structure, assemble prompts, compute overlaps.
+1. Collect all expert findings (messages and `.design/expert-*.json` files).
+2. When experts disagree, evaluate trade-offs and decide. Note reasoning.
+3. Merge findings into `.design/plan.json` — resolve conflicts, deduplicate, sequence tasks.
+4. **Adversarial review checklist**: implicit assumptions that could fail? | missing tasks (error handling, migrations, edge cases)? | unnecessary tasks (over-engineering)? | dependency ordering and parallelism optimal? | integration risks between tasks touching related files? Revise as needed.
+5. Run `python3 $PLAN_CLI finalize .design/plan.json` to validate structure, assemble prompts, compute overlaps.
+
+**Task granularity**: Each task completable by one worker in one session. If it needs multiple files AND multiple approaches, split it.
+
+**Task example** (all fields — `finalize` assembles `prompt` and computes `fileOverlaps`):
+```json
+{
+  "subject": "Add rate limiting middleware to API routes",
+  "description": "Implement token-bucket rate limiting on /api/* endpoints.",
+  "activeForm": "Adding rate limiting middleware",
+  "status": "pending",
+  "blockedBy": [0],
+  "metadata": { "type": "feature", "files": { "create": ["src/middleware/rateLimit.ts"], "modify": ["src/routes/api.ts"] } },
+  "agent": { "role": "api-developer", "model": "sonnet", "approach": "1. Create rateLimit.ts with token-bucket algorithm\n2. Wire middleware into api.ts router", "contextFiles": [{ "path": "src/routes/api.ts", "reason": "Existing route structure" }], "constraints": ["Use stdlib only, no Redis"], "acceptanceCriteria": [{ "criterion": "Rate limit enforced", "check": "curl -s returns 429 after N requests" }] }
+}
+```
 
 ### 5. Complete
 
@@ -147,11 +143,9 @@ Run /do:execute to begin.
 
 The authoritative interface between design and execute. Execute reads this file; design produces it.
 
-**Fields**: schemaVersion, goal, context {stack, conventions, testCommand, buildCommand, lsp}, progress {completedTasks, surprises, decisions}, tasks[]
+**Top-level fields**: schemaVersion, goal, context {stack, conventions, testCommand, buildCommand, lsp}, progress {completedTasks}, tasks[]
 
-**Task fields**: subject, description, activeForm, status, result, attempts, blockedBy, prompt, fileOverlaps, metadata {type, files {create, modify}, reads}
-
-Keep tasks focused on the work, not the worker. Write clear descriptions that make it obvious what needs to be done.
+**Task fields**: subject, description, activeForm, status, result, attempts, blockedBy, prompt (assembled by finalize), fileOverlaps (computed by finalize), metadata {type, files {create, modify}}, agent {role, model, approach, contextFiles, constraints, acceptanceCriteria, assumptions, rollbackTriggers, fallback}
 
 Scripts validate via `finalize` command.
 
