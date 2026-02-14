@@ -109,31 +109,95 @@ Create the team and spawn experts in parallel.
 3. `TaskCreate` for each expert.
 4. Spawn experts as teammates using the Task tool with `team_name: "do-design"` and `name: "{expert-name}"`. Write prompts appropriate to the goal and each expert's focus area. Experts report findings via `SendMessage` to the lead. Experts MUST save detailed artifacts to `.design/expert-{name}.json` — these flow directly to execution workers. Expert artifacts are structured JSON with sections that can be referenced selectively.
 
-### 3.5. Expert Cross-Review (optional)
+### 3.5. Interface Negotiation & Cross-Review
 
-**When**: Complex or high-stakes tiers with >=3 experts. Skip for <3 experts or trivial/standard tiers.
+Research on boundary objects (Star & Griesemer 1989), consumer-driven contracts (Fowler/Robinson), and the Delphi method shows that expert coordination prevents two distinct failure modes: **integration failures** (domains don't fit together) and **convergence failures** (experts with different lenses reach incompatible conclusions about the same thing). The protocol addresses both.
 
-After all experts have saved artifacts and sent initial messages:
+#### Two coordination needs
 
-1. Lead broadcasts to all experts: "All experts: read artifacts at {paths}. Identify disagreements, gaps, or invalid assumptions in others' findings. Challenge specific claims via SendMessage to lead using this format:
+| Need | When it applies | Example |
+|---|---|---|
+| **Interface negotiation** | Experts in *different domains* produce/consume across boundaries | Backend architect + frontend designer must agree on API response shape |
+| **Perspective reconciliation** | Experts with *different lenses* analyze the *same domain* | Architect, researcher, and prompt-engineer all analyze a SKILL.md — architect wants more structure, researcher finds simpler protocols have better adherence |
+
+Both can apply in the same design session. Assess each independently.
+
+#### Decision Matrix — When to Run Each
+
+| Condition | Interface negotiation | Perspective reconciliation |
+|---|---|---|
+| >=2 experts whose execution roles will share data, APIs, or file boundaries | **Mandatory** | — |
+| >=2 experts analyzed the same artifact/domain from different angles | — | **Mandatory** |
+| Both conditions apply | **Run both** | **Run both** |
+| All experts operate on fully independent domains with no shared interfaces or overlapping analysis | Skip | Skip |
+| <2 experts or trivial tier | Skip | Skip |
+
+#### Phase A: Interface Negotiation
+
+**Trigger**: Execution roles will share data, APIs, or file boundaries.
+
+After all experts have saved artifacts:
+
+1. **Lead identifies domain boundaries**: Read expert artifacts and list every point where one role's output feeds another role's input (API response shapes, database schemas consumed by multiple roles, file formats, shared state).
+
+2. **Lead drafts interface contracts**: For each boundary, write a concrete contract specifying the shared interface. Use **consumer-driven contracts** — define what the *consuming* side expects:
+
+   ```
+   Interface: {boundary-name}
+   Producer: {expert/role-name}
+   Consumer: {expert/role-name}
+   Contract: {concrete specification — field names, types, response shape, error format}
+   ```
+
+3. **Send contracts to both sides**: Message each producer-consumer pair with their shared contract. Ask: "Does this interface work for your domain? Flag any constraints that make this infeasible."
+
+4. **Collect responses**: Each expert confirms feasibility or proposes modifications. **Maximum 2 rounds** of negotiation per interface (Delphi research: diminishing returns after 2-3 rounds). If no convergence after 2 rounds, lead decides and documents reasoning.
+
+5. **Save agreed interfaces**: Store finalized contracts in `.design/interfaces.json` (array of `{boundary, producer, consumer, contract, negotiationNotes}`). These flow to execution workers as binding constraints.
+
+#### Phase B: Perspective Reconciliation
+
+**Trigger**: Multiple experts analyzed the same domain/artifact from different angles, OR complex/high-stakes tier with >=3 experts.
+
+This resolves conflicting recommendations when experts with different priorities (performance vs maintainability, structure vs simplicity, security vs usability) examine the same thing.
+
+1. **Lead identifies overlapping analysis**: Find topics where >=2 experts made recommendations about the same thing. List specific conflicts or tensions.
+
+2. Lead messages the relevant experts (not broadcast — only those with overlapping analysis): "Experts {A} and {B}: you both analyzed {topic}. Your recommendations differ:
+   - {Expert A}: '{summary of their position}'
+   - {Expert B}: '{summary of their position}'
+
+   Read each other's artifact at {path}. Then each send me: (a) where you agree, (b) where you disagree and why your approach is better, (c) any synthesis that combines both perspectives."
+
+3. Experts read the other's artifact and respond with agreements, disagreements, and proposed synthesis.
+
+4. **Maximum 2 rounds**. If experts converge — great. If they don't converge after 2 rounds, lead decides based on the goal's priorities and documents the trade-off.
+
+#### Phase C: Cross-Domain Challenge (for complex/high-stakes with >=3 experts)
+
+**Trigger**: Complex or high-stakes tier with >=3 experts. Runs after Phase A and/or B if applicable.
+
+This catches cross-domain assumptions that neither interface negotiation nor perspective reconciliation would surface — e.g., a metadata expert assuming the database supports a feature that the architect flagged as unavailable.
+
+1. Lead broadcasts to all experts: "Read OTHER experts' artifacts at {paths}. Challenge claims that make assumptions about your domain or affect shared interfaces.
 
    **Challenge to {expert-name}**
    - **Claim challenged**: '{exact quote from their artifact}'
    - **Severity**: [blocking|important|minor]
-   - **Evidence**: {why this claim is incorrect or problematic}
-   - **Alternative**: {your proposed alternative approach}
+   - **Evidence**: {why this claim is incorrect or problematic for your domain}
+   - **Alternative**: {your proposed alternative}
 
    Send one message per challenge. If you have no challenges, send 'No challenges found'."
 
 2. Each expert reads OTHER experts' artifacts (not their own).
 3. Each expert sends structured challenge messages to lead.
-4. Lead collects all challenges. For each challenge:
-   - Forward the challenge to the targeted expert via SendMessage
-   - Wait for the targeted expert to defend their position or concede
-   - Targeted expert responds with either: (a) defense of their claim with additional evidence, or (b) acknowledgment and revision
-5. After all challenged experts have responded (timeout: if no defense after 2 turns, proceed), lead resolves conflicts.
+4. Lead collects challenges. For each:
+   - Forward to the targeted expert
+   - Targeted expert responds with defense or concession
+   - **Maximum 2 rounds per challenge** — if unresolved, lead decides
+5. Lead resolves all conflicts. Update `.design/interfaces.json` if any interface contracts changed.
 
-Challenges and defenses inform conflict resolution in the next step.
+Interfaces, reconciled perspectives, and challenge resolutions all inform conflict resolution in the next step.
 
 ### 4. Synthesize into Role Briefs
 
@@ -141,6 +205,7 @@ The lead collects expert findings and writes the plan.
 
 1. Collect all expert findings (messages and `.design/expert-*.json` files).
 2. **Resolve conflicts from cross-review** (if debate occurred): For each challenge, evaluate trade-offs and decide. Document resolution in plan.json under `designDecisions[]` (schema: {conflict, experts, decision, reasoning}).
+2b. **Incorporate interface contracts**: If `.design/interfaces.json` was produced in Step 3.5, add each interface as a constraint on the relevant producer and consumer roles. Interface contracts are binding — workers must implement the agreed interface shape.
 3. Identify the specialist roles needed to execute this goal:
    - Each role scopes a **coherent problem domain** for one worker
    - If a role would cross two unrelated domains, split into two roles
@@ -276,7 +341,7 @@ Run /do:execute to begin.
 
 The authoritative interface between design and execute. Execute reads this file; design produces it.
 
-**Top-level fields**: schemaVersion (4), goal, context {stack, conventions, testCommand, buildCommand, lsp}, expertArtifacts [{name, path, summary}], designDecisions [], roles[], auxiliaryRoles[], progress {completedRoles: []}
+**Top-level fields**: schemaVersion (4), goal, context {stack, conventions, testCommand, buildCommand, lsp}, expertArtifacts [{name, path, summary}], interfaceContracts (path to .design/interfaces.json, if produced), designDecisions [], roles[], auxiliaryRoles[], progress {completedRoles: []}
 
 **designDecisions fields**: conflict (string), experts (array of expert names), decision (string), reasoning (string). Documents how lead resolved expert disagreements during cross-review.
 
@@ -288,9 +353,26 @@ The authoritative interface between design and execute. Execute reads this file;
 
 Scripts validate via `finalize` command.
 
+### Interface Contracts (interfaces.json)
+
+Produced during Step 3.5 Phase A when roles share domain boundaries. Array of:
+
+```json
+{
+  "boundary": "Game list API response shape",
+  "producer": "database-optimizer",
+  "consumer": "frontend-modernizer",
+  "contract": "GET /api/games returns {games: [{title, genres: string[], rating, ...}], total: int}",
+  "negotiationNotes": "Frontend needs genres as array (not JSON string) for badge rendering"
+}
+```
+
+Execution workers treat interface contracts as binding constraints alongside role briefs.
+
 ### Analysis Artifacts
 
 Preserved in `.design/` for execute workers to reference:
 - `expert-{name}.json` — per-expert findings (structured JSON, no word limit)
+- `interfaces.json` — agreed interface contracts between roles (if produced in Step 3.5)
 
 **Goal**: $ARGUMENTS
