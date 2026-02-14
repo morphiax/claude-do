@@ -27,7 +27,7 @@ Both skills must be tested end-to-end. A change to one skill may affect the othe
 
 - `.claude-plugin/plugin.json` — Plugin manifest (name, version, metadata)
 - `.claude-plugin/marketplace.json` — Marketplace distribution config
-- `scripts/plan.py` — Shared helper script (10 commands: 7 query, 2 mutation, 1 build)
+- `scripts/plan.py` — Shared helper script (12 commands: 9 query, 2 mutation, 1 build)
 - `skills/design/SKILL.md` — `/do:design` skill definition
 - `skills/design/scripts/plan.py` — Symlink → `../../../scripts/plan.py`
 - `skills/execute/SKILL.md` — `/do:execute` skill definition
@@ -43,8 +43,8 @@ Each SKILL.md has YAML frontmatter (`name`, `description`, `argument-hint`) that
 
 A single `scripts/plan.py` at the repo root provides all deterministic operations. Each skill symlinks to it from `skills/{name}/scripts/plan.py` so SKILL.md can resolve a skill-local path.
 
-- **Query** (7 commands): status, summary, overlap-matrix, tasklist-data, worker-pool, retry-candidates, circuit-breaker
-- **Mutation** (2 commands): resume-reset, update-status — atomically modify plan.json via temp file + rename
+- **Query** (9 commands): status, summary, overlap-matrix, tasklist-data, worker-pool, retry-candidates, circuit-breaker, memory-search (keyword-based search in .design/memory.jsonl with recency weighting), resume-reset (returns isResume and counts)
+- **Mutation** (2 commands): update-status (atomically modify plan.json via temp file + rename), memory-add (append JSONL entry with UUID)
 - **Build** (1 command): finalize — validates role briefs and computes directory overlaps in one atomic operation
 
 Design uses query + finalize. Execute uses all commands. `worker-pool` reads roles directly — one worker per role, named by role (e.g., `api-developer`, `test-writer`). Workers read `plan.json` directly — no per-worker task files needed.
@@ -61,9 +61,10 @@ The two skills communicate through `.design/plan.json` (schemaVersion 4) written
 - `finalize` validates role briefs and computes `directoryOverlaps` from scope directories/patterns
 - No prompt assembly — workers read role briefs directly from plan.json and decide their own implementation approach
 - Expert artifacts (`expert-*.json`) are preserved in `.design/` for execute workers to reference via `expertContext` entries
+- Memory storage: `.design/memory.jsonl` contains cross-session learnings (JSONL format with UUID, category, keywords, summary, created timestamp)
 - Plan history: completed runs are archived to `.design/history/{timestamp}/`; design pre-flight archives stale artifacts
 
-**Top-level fields**: schemaVersion (4), goal, context {stack, conventions, testCommand, buildCommand, lsp}, expertArtifacts [{name, path, summary}], roles[], auxiliaryRoles[], progress {completedRoles: []}
+**Top-level fields**: schemaVersion (4), goal, context {stack, conventions, testCommand, buildCommand, lsp}, expertArtifacts [{name, path, summary}], designDecisions [{conflict, experts, decision, reasoning}], roles[], auxiliaryRoles[], progress {completedRoles: []}
 
 **Role fields** — each role is a goal-directed scope for one specialist worker:
 - `name` — worker identity and naming (e.g., `api-developer`, `prompt-writer`)
@@ -83,6 +84,7 @@ The two skills communicate through `.design/plan.json` (schemaVersion 4) written
 - `challenger` (pre-execution) — reviews plan, challenges assumptions, finds gaps
 - `scout` (pre-execution) — reads actual codebase to verify expert assumptions match reality
 - `integration-verifier` (post-execution) — verifies cross-role integration, runs full test suite
+- `memory-curator` (post-execution) — distills handoff.md and role results into actionable memory entries in .design/memory.jsonl
 
 **Auxiliary role fields**: name, type (pre-execution|post-execution), goal, model, trigger
 
@@ -94,19 +96,23 @@ Both skills use the **main conversation as team lead** with Agent Teams. Runtime
 - **Teammates**: specialist agents spawned into the team. Discover lead name via `~/.claude/teams/{team-name}/config.json`.
 
 **`/do:design`** — team name: `do-design`
+- Memory injection: lead searches .design/memory.jsonl for relevant past learnings and injects top 3-5 into expert prompts
 - Lead spawns expert teammates (architect, researcher, domain-specialists) based on goal analysis
+- Diverse debate: for complex/high-stakes goals with >=3 experts, experts cross-review each other's artifacts and challenge assumptions; lead resolves conflicts in designDecisions[]
 - Complexity tier (trivial/standard/complex/high-stakes) drives auxiliary role selection
 - Lead synthesizes expert findings into role briefs in plan.json directly (no plan-writer delegate)
 - `finalize` validates role briefs and computes directory overlaps (no prompt assembly)
 
 **`/do:execute`** — team name: `do-execute`
 - Pre-execution auxiliaries (challenger, scout) run before workers spawn
+- Memory injection: lead searches .design/memory.jsonl per role (using role.goal + scope as context) and injects top 2-3 into worker prompts
 - Lead creates TaskList from plan.json, spawns one persistent worker per role via `worker-pool`
 - Workers explore their scope directories, plan their own approach, implement, test, and verify against acceptance criteria
 - Directory overlap serialization: concurrent roles touching overlapping directories get runtime `blockedBy` constraints
 - Retry budget: max 3 attempts per role | Cascading failures: skip dependents of failed roles
 - Circuit breaker: abort if >50% remaining roles would be skipped (bypassed for plans with 3 or fewer roles)
-- Post-execution auxiliaries (integration verifier) after all roles complete
+- Post-execution auxiliaries (integration verifier, memory curator) after all roles complete
+- Memory curator: distills handoff.md and role results into .design/memory.jsonl entries (max 200 words each, category-tagged, keyword-indexed)
 - Goal review evaluates whether completed work achieves the original goal
 - Session handoff: `.design/handoff.md` written on completion for context recovery
 
