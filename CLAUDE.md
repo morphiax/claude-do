@@ -27,7 +27,7 @@ Both skills must be tested end-to-end. A change to one skill may affect the othe
 
 - `.claude-plugin/plugin.json` — Plugin manifest (name, version, metadata)
 - `.claude-plugin/marketplace.json` — Marketplace distribution config
-- `scripts/plan.py` — Shared helper script (17 commands: 12 query, 2 mutation, 3 build including `worker-pool`)
+- `scripts/plan.py` — Shared helper script (10 commands: 7 query, 2 mutation, 1 build)
 - `skills/design/SKILL.md` — `/do:design` skill definition
 - `skills/design/scripts/plan.py` — Symlink → `../../../scripts/plan.py`
 - `skills/execute/SKILL.md` — `/do:execute` skill definition
@@ -47,52 +47,57 @@ A single `scripts/plan.py` at the repo root provides all deterministic operation
 - **Mutation** (2 commands): resume-reset, update-status — atomically modify plan.json via temp file + rename
 - **Build** (1 command): finalize — validates structure, assembles prompts, computes overlaps in one atomic operation
 
-Design uses query + finalize. Execute uses all commands. `worker-pool` computes optimal worker count and role-based naming from the dependency graph. Workers read `plan.json` directly — no per-worker task files needed.
+Design uses query + finalize. Execute uses all commands. `worker-pool` computes role-based specialist allocation from the plan's `agent.role` fields — one worker per unique role, named by role (e.g., `api-developer`, `test-writer`). Workers read `plan.json` directly — no per-worker task files needed.
 
 Scripts use python3 stdlib only (no dependencies), support Python 3.8+, and follow a consistent CLI pattern: `python3 plan.py <command> [plan_path] [options]`. All output is JSON to stdout with exit code 0 for success, 1 for errors.
 
 ### Data Contract: .design/plan.json
 
-The two skills communicate through `.design/plan.json` (schemaVersion 3) written to the `.design/` directory at runtime (gitignored). The complete schema and validation rules are documented in the SKILL.md files. Key points:
+The two skills communicate through `.design/plan.json` (schemaVersion 3) written to the `.design/` directory at runtime (gitignored). Key points:
 
 - `.design/plan.json` is the authoritative state; the TaskList is a derived view
 - Schema version 3 is required
-- Tasks use dependency-only scheduling — no wave field in task schema, workers self-organize by claiming unblocked tasks from the TaskList based on `blockedBy` dependencies
-- Each task includes a concise assembled worker brief (`prompt` field) and file overlap analysis (`fileOverlaps` field) — design produces these during plan generation via scripts
-- Progressive trimming: completed tasks are stripped of verbose agent fields (including `prompt`) to reduce plan size as execution proceeds
-- Expert artifacts (`expert-*.json`) are optional and preserved after plan generation for execute workers to reference via contextFiles
-- Plan history: completed runs are archived to `.design/history/{timestamp}/` as a folder containing plan.json, expert files, and handoff.md together; design pre-flight archives (not deletes) stale artifacts to avoid triggering destructive-command hooks
+- Tasks use dependency-only scheduling — workers self-organize by claiming unblocked tasks from the TaskList based on `blockedBy` dependencies
+- `finalize` assembles each task's `prompt` field (worker brief) and computes `fileOverlaps` from the dependency graph
+- Progressive trimming: completed tasks are stripped of verbose agent fields (including `prompt`), keeping only subject, status, result, metadata.files, blockedBy, agent.role, agent.model
+- Expert artifacts (`expert-*.json`) are optional and preserved for execute workers to reference via `agent.contextFiles`
+- Plan history: completed runs are archived to `.design/history/{timestamp}/`; design pre-flight archives (not deletes) stale artifacts
+
+**Top-level fields**: schemaVersion, goal, context {stack, conventions, testCommand, buildCommand, lsp}, progress {completedTasks}, tasks[]
+
+**Task fields**: subject, description, activeForm, status, result, attempts, blockedBy, prompt (assembled by finalize), fileOverlaps (computed by finalize), metadata {type, files {create, modify}}, agent
+
+**Agent field** — drives worker specialization. Design assigns `agent.role` per task; execute spawns one specialist per unique role via `worker-pool`:
+- `role` — worker specialization (e.g., `api-developer`, `prompt-writer`). Used for worker naming and task claiming.
+- `model` — preferred Claude model (`sonnet`, `opus`, `haiku`)
+- `approach` — step-by-step implementation strategy
+- `contextFiles` — array of `{path, reason}` files the worker should read first
+- `constraints` — array of rules the worker must follow
+- `acceptanceCriteria` — array of `{criterion, check}` defining done conditions
+- `assumptions` — array of `{text, severity}` documenting assumptions (`blocking` or `non-blocking`)
+- `rollbackTriggers` — array of conditions that should cause the worker to stop and report
+- `fallback` — alternative approach if primary approach fails
 
 ### Execution Model
 
-Both skills use the **main conversation as team lead** with Agent Teams for coordination:
+Both skills use the **main conversation as team lead** with Agent Teams. Runtime behavior is defined in each SKILL.md file — this section covers structural facts only.
 
-- **Lead** (main conversation): creates team via `TeamCreate`, spawns teammates, manages lifecycle via `SendMessage`/`TaskCreate`/`TaskUpdate`/`TaskList`, performs verification, updates plan state. Tool-restricted to orchestration — never reads project source files.
-- **Teammates**: specialist agents (analysts, experts, workers) spawned into the team. Signal completion via `SendMessage` to the lead. Read `~/.claude/teams/{team-name}/config.json` to discover the lead's name.
+- **Lead** (main conversation): orchestration only via `TeamCreate`, `SendMessage`, `TaskCreate`/`TaskUpdate`/`TaskList`, `Bash` (scripts, git, verification), `AskUserQuestion`. Never reads project source files.
+- **Teammates**: specialist agents spawned into the team. Discover lead name via `~/.claude/teams/{team-name}/config.json`.
 
-`/do:design` — lead-determined dynamic team (`do-design` team):
+**`/do:design`** — team name: `do-design`
+- Lead spawns expert teammates (architect, researcher, domain-specialists) based on goal analysis
+- Lead synthesizes expert findings into plan.json directly (no plan-writer delegate)
+- `finalize` validates structure, assembles worker prompts, computes file overlaps
 
-- **Lead responsibilities** (never delegated): pre-flight, quick goal research (WebSearch/codebase scan), determine which expert perspectives are needed, spawn experts, collect findings, synthesize plan directly, adversarial review, run `finalize` script, summary output.
-- **Dynamic expert team**: The lead reads the goal, does brief research, then determines team composition. Expert types include: **architect** (codebase structure, patterns), **researcher** (external libraries, best practices), **domain-specialist** (security, performance, i18n, etc.). Team size varies by goal complexity — simple goals may need only an architect; complex goals may need multiple perspectives.
-- **Expert prompts**: Each expert receives goal + focus area (e.g., "codebase architecture", "external research"). Experts analyze and recommend tasks with full agent specs. May write `.design/expert-{name}.json` or report directly to lead.
-- **Plan synthesis**: The lead merges expert findings directly (no plan-writer delegate — the lead has full context from every expert). Before finalizing, the lead performs an adversarial review: challenging assumptions, identifying missing/unnecessary tasks, checking dependency ordering, and flagging integration risks. Then runs `python3 $PLAN_CLI finalize .design/plan.json` to validate structure, assemble prompts, and compute overlaps.
-- **Fallback**: If finalize fails, fix validation errors and re-run. If structure is fundamentally broken, rebuild from expert findings inline.
-
-`/do:execute` — persistent self-organizing workers with event-driven lead (`do-execute` team):
-
-- **Lead responsibilities**: plan reading/validation/TaskList creation (inline — purely mechanical, no subagent), spawn persistent worker teammates once, monitor execution via event-driven messaging, update `.design/plan.json` (status, trimming, cascading failures via `update-status` script), wake idle workers when new tasks unblock, final batched verification after all tasks complete, user interaction (`AskUserQuestion`), circuit breaker evaluation, retry coordination. Natural communication — the lead interprets worker messages in plain language.
-- **Worker teammates** (named by `agent.role`, e.g. `api-developer`, `test-writer`): persistent workers spawned once via `worker-pool` command. Workers self-organize: check TaskList for pending unblocked tasks, claim one, read `.design/plan.json tasks[planIndex].prompt` directly, execute, commit their own changes (`git add` + `git commit`), mark complete, report to lead naturally, then claim the next available task. Workers go idle when no tasks are available and are woken by the lead when new tasks unblock.
-- **Peer communication**: workers message each other directly when they find issues with prior work (e.g., a bug in code committed by another worker). The affected worker fixes the issue and confirms. Lead is CC'd but does not intervene unless escalated.
-- **File ownership via dependencies**: the lead augments TaskList dependencies at setup using the overlap matrix — concurrent tasks touching the same files get runtime `blockedBy` constraints so they serialize naturally. No explicit file ownership assignment needed.
-- **Deferred verification**: workers verify their own acceptance criteria during execution. The lead runs a single batched final verification (spot-checks + acceptance criteria) after all tasks complete, instead of per-round checks.
-- **Goal review**: after individual verification, the lead evaluates whether the sum of completed tasks actually achieves the original goal — checking for completeness gaps, coherence across tasks, and alignment with user intent. Workers execute tasks mechanically; the lead holds the big picture and catches forest-vs-trees issues. Gaps spawn targeted fix workers.
-- **Integration testing**: after goal review, an `integration-tester` worker runs the full test suite, checks for cross-task conflicts, and verifies independently-completed tasks connect correctly. Skipped for single-task or fully-independent plans.
-- **Session handoff**: on completion, a structured `.design/handoff.md` summarizes what was done, what failed, integration status, key decisions, files changed, known gaps, and next steps — enabling context recovery across sessions.
-- Progressive trimming: completed tasks are stripped of verbose agent fields including `prompt` (keep only subject, status, result, metadata.files, blockedBy, agent.role, agent.model)
-- Retry budget: max 3 attempts per task with failure context passed to retries
-- Cascading failures: failed/blocked tasks automatically skip dependents
-- Circuit breaker: abort if >50% of remaining tasks would be skipped (plans with ≤3 tasks bypass this check)
-- Resume support: status-scan based (reset `in_progress` tasks to `pending` with artifact cleanup); successful completions archive plan to `.design/history/`
+**`/do:execute`** — team name: `do-execute`
+- Lead creates TaskList from plan.json, spawns one persistent worker per unique `agent.role` via `worker-pool`
+- Workers self-organize: claim unblocked tasks from TaskList, execute, commit, report completion
+- File overlap serialization: concurrent tasks touching the same files get runtime `blockedBy` constraints
+- Retry budget: max 3 attempts per task | Cascading failures: skip dependents of failed tasks
+- Circuit breaker: abort if >50% remaining tasks would be skipped (bypassed for plans with 3 or fewer tasks)
+- Goal review + integration testing after all tasks complete
+- Session handoff: `.design/handoff.md` written on completion for context recovery
 
 ## Requirements
 
