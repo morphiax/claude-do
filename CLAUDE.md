@@ -74,7 +74,7 @@ The two skills communicate through `.design/plan.json` (schemaVersion 4) written
 - `scope` — `{directories, patterns, dependencies}` where dependencies are role names resolved to indices
 - `expertContext` — array of `{expert, artifact, relevance}` referencing full expert artifacts
 - `constraints` — array of hard rules the worker must follow
-- `acceptanceCriteria` — array of `{criterion, check}` where `check` is a concrete, independently runnable shell command (e.g., `"bun run build 2>&1 | tail -20"`). Workers execute these literally during CoVe verification
+- `acceptanceCriteria` — array of `{criterion, check}` where `check` is a concrete, independently runnable shell command (e.g., `"bun run build 2>&1 | tail -20"`). Checks must verify functional correctness, not just pattern existence (a grep confirming a rule exists is insufficient — verify it takes effect). Workers execute these literally during CoVe verification
 - `assumptions` — array of `{text, severity}` documenting assumptions (`blocking` or `non-blocking`)
 - `rollbackTriggers` — array of conditions that should cause the worker to stop and report
 - `fallback` — alternative approach if primary fails (included in initial brief)
@@ -82,9 +82,9 @@ The two skills communicate through `.design/plan.json` (schemaVersion 4) written
 **Status fields** (initialized by finalize): status (`pending`), result (null), attempts (0), directoryOverlaps (computed)
 
 **Auxiliary roles** — meta-agents that improve quality without directly implementing features:
-- `challenger` (pre-execution) — reviews plan, challenges assumptions, finds gaps
-- `scout` (pre-execution) — reads actual codebase to verify expert assumptions match reality
-- `integration-verifier` (post-execution) — verifies cross-role integration, runs full test suite
+- `challenger` (pre-execution) — reviews plan, challenges assumptions, finds gaps. Blocking issues are mandatory gates: lead must address each one before proceeding
+- `scout` (pre-execution) — reads actual codebase to verify expert assumptions match reality. Verifies that referenced dependencies resolve (classes→CSS, imports→modules, types→definitions)
+- `integration-verifier` (post-execution) — verifies cross-role integration, runs full test suite. Reports "skipped" for checks requiring unavailable capabilities (e.g., browser rendering) — never infers results
 - `memory-curator` (post-execution) — distills handoff.md and role results into actionable memory entries in .design/memory.jsonl
 
 **Auxiliary role fields**: name, type (pre-execution|post-execution), goal, model, trigger
