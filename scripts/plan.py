@@ -149,23 +149,21 @@ def cmd_status(args: argparse.Namespace) -> NoReturn:
     plan_path = args.plan_path
 
     if not os.path.exists(plan_path):
-        output_json({"ok": False, "error": "not_found"})
+        error_exit("not_found")
 
     try:
         with open(plan_path) as f:
             plan = json.load(f)
     except (json.JSONDecodeError, OSError):
-        output_json({"ok": False, "error": "invalid_json"})
+        error_exit("invalid_json")
 
     schema_version = plan.get("schemaVersion")
     if schema_version != 3:
-        output_json(
-            {"ok": False, "error": "bad_schema", "schemaVersion": schema_version}
-        )
+        error_exit(f"bad_schema (schemaVersion={schema_version})")
 
     tasks = plan.get("tasks", [])
     if not tasks:
-        output_json({"ok": False, "error": "empty_tasks"})
+        error_exit("empty_tasks")
 
     # Count by status
     counts: dict[str, int] = defaultdict(int)
@@ -271,15 +269,6 @@ def _slugify_role(role: str) -> str:
     return slug.strip("-") or "worker"
 
 
-def _most_common_model(tasks: list[dict[str, Any]], indices: list[int]) -> str:
-    """Return the most common agent.model among the given task indices."""
-    model_counts: dict[str, int] = defaultdict(int)
-    for idx in indices:
-        m = tasks[idx].get("agent", {}).get("model", "sonnet")
-        model_counts[m] += 1
-    return max(model_counts, key=lambda k: model_counts[k])
-
-
 def _deduplicate_slug(slug: str, used_slugs: set[str]) -> str:
     """Return a unique slug by appending numeric suffixes if needed."""
     if slug not in used_slugs:
@@ -290,43 +279,45 @@ def _deduplicate_slug(slug: str, used_slugs: set[str]) -> str:
     return f"{slug}-{suffix}"
 
 
-def cmd_worker_pool(args: argparse.Namespace) -> NoReturn:
-    """Compute optimal worker count and role assignments from dependency graph."""
-    plan = load_plan(args.plan_path)
-    tasks = plan.get("tasks", [])
-
-    # Collect pending tasks grouped by role
-    role_tasks: dict[str, list[int]] = defaultdict(list)
+def _find_unrunnable_tasks(tasks: list[dict[str, Any]]) -> set[int]:
+    """Find pending tasks that can never run due to failed/blocked/skipped deps."""
+    blocked_statuses = {"failed", "blocked", "skipped"}
+    unrunnable: set[int] = set()
     for i, task in enumerate(tasks):
         if task.get("status", "pending") != "pending":
             continue
+        for dep in task.get("blockedBy", []):
+            if dep < len(tasks) and tasks[dep].get("status") in blocked_statuses:
+                unrunnable.add(i)
+                break
+    return unrunnable
+
+
+def _group_runnable_by_role(
+    tasks: list[dict[str, Any]], unrunnable: set[int]
+) -> dict[str, list[int]]:
+    """Group runnable pending tasks by their agent role."""
+    role_tasks: dict[str, list[int]] = defaultdict(list)
+    for i, task in enumerate(tasks):
+        if task.get("status", "pending") != "pending" or i in unrunnable:
+            continue
         role = task.get("agent", {}).get("role", f"worker-{i}")
         role_tasks[role].append(i)
+    return role_tasks
 
-    if not role_tasks:
-        output_json({"ok": True, "workers": [], "maxConcurrency": 0, "totalWorkers": 0})
 
-    # Compute max dependency graph width
-    depths = compute_depths(tasks)
-    depth_groups: dict[int, list[int]] = defaultdict(list)
-    for i, task in enumerate(tasks):
-        if task.get("status", "pending") == "pending":
-            depth_groups[depths.get(i, 1)].append(i)
-    max_width = max((len(g) for g in depth_groups.values()), default=1)
-
-    # Worker count = min(max_width, unique_roles, cap)
-    worker_count = min(max_width, len(role_tasks), 8)
-
-    # Sort roles by task count descending, take top N
-    sorted_roles = sorted(role_tasks.items(), key=lambda x: len(x[1]), reverse=True)
-
+def _build_worker_list(
+    tasks: list[dict[str, Any]],
+    sorted_roles: list[tuple[str, list[int]]],
+    worker_count: int,
+) -> list[dict[str, Any]]:
+    """Build the worker descriptor list from sorted roles."""
     workers = []
     used_slugs: set[str] = set()
     for role_name, task_indices in sorted_roles[:worker_count]:
-        model = _most_common_model(tasks, task_indices)
+        model = tasks[task_indices[0]].get("agent", {}).get("model", "sonnet")
         slug = _deduplicate_slug(_slugify_role(role_name), used_slugs)
         used_slugs.add(slug)
-
         workers.append(
             {
                 "name": slug,
@@ -335,6 +326,32 @@ def cmd_worker_pool(args: argparse.Namespace) -> NoReturn:
                 "taskCount": len(task_indices),
             }
         )
+    return workers
+
+
+def cmd_worker_pool(args: argparse.Namespace) -> NoReturn:
+    """Compute optimal worker count and role assignments from dependency graph."""
+    plan = load_plan(args.plan_path)
+    tasks = plan.get("tasks", [])
+
+    unrunnable = _find_unrunnable_tasks(tasks)
+    role_tasks = _group_runnable_by_role(tasks, unrunnable)
+
+    if not role_tasks:
+        output_json({"ok": True, "workers": [], "maxConcurrency": 0, "totalWorkers": 0})
+
+    # Compute max dependency graph width using only runnable pending tasks
+    runnable_indices = {i for indices in role_tasks.values() for i in indices}
+    depths = compute_depths(tasks)
+    depth_groups: dict[int, list[int]] = defaultdict(list)
+    for i in runnable_indices:
+        depth_groups[depths.get(i, 1)].append(i)
+    max_width = max((len(g) for g in depth_groups.values()), default=1)
+
+    # Worker count = min(max_width, unique_roles) — no hardcoded cap
+    worker_count = min(max_width, len(role_tasks))
+    sorted_roles = sorted(role_tasks.items(), key=lambda x: len(x[1]), reverse=True)
+    workers = _build_worker_list(tasks, sorted_roles, worker_count)
 
     output_json(
         {
@@ -534,22 +551,30 @@ def _compute_cascading_failures(
         return cascaded
 
     affected = get_transitive_deps(tasks, newly_failed)
+    failed_set = set(newly_failed)
 
-    for idx in affected:
+    for idx in sorted(affected):
         if tasks[idx].get("status") == "pending":
             tasks[idx]["status"] = "skipped"
 
-            for failed_idx in newly_failed:
-                blocked_by = tasks[idx].get("blockedBy", [])
-                if failed_idx in blocked_by:
-                    cascaded.append(
-                        {
-                            "planIndex": idx,
-                            "status": "skipped",
-                            "reason": f"dependency on failed/blocked task {failed_idx}",
-                        }
-                    )
-                    break
+            # Find the root cause: a direct dependency that is failed/blocked/skipped
+            blocked_by = tasks[idx].get("blockedBy", [])
+            cause = next(
+                (
+                    dep
+                    for dep in blocked_by
+                    if dep in failed_set
+                    or tasks[dep].get("status") in ("failed", "blocked", "skipped")
+                ),
+                blocked_by[0] if blocked_by else -1,
+            )
+            cascaded.append(
+                {
+                    "planIndex": idx,
+                    "status": "skipped",
+                    "reason": f"dependency on failed/blocked task {cause}",
+                }
+            )
 
     return cascaded
 
@@ -619,9 +644,35 @@ def _check_cycle(tasks: list[dict[str, Any]]) -> bool:
     return any(i not in visited and visit(i) for i in range(len(tasks)))
 
 
+def _precompute_dep_closures(tasks: list[dict[str, Any]]) -> dict[int, set[int]]:
+    """Precompute transitive dependency closure (forward dependents) for each task."""
+    closures: dict[int, set[int]] = {}
+    for i in range(len(tasks)):
+        closures[i] = get_transitive_deps(tasks, [i])
+    return closures
+
+
+def _find_concurrent_conflicts(
+    file_writers: dict[str, list[int]], closures: dict[int, set[int]]
+) -> list[str]:
+    """Find pairs of tasks that concurrently modify the same file."""
+    issues: list[str] = []
+    for f, writers in file_writers.items():
+        if len(writers) <= 1:
+            continue
+        for i in range(len(writers)):
+            for j in range(i + 1, len(writers)):
+                idx1, idx2 = writers[i], writers[j]
+                if idx2 not in closures[idx1] and idx1 not in closures[idx2]:
+                    issues.append(
+                        f"File conflict: tasks {idx1} and {idx2} "
+                        f"both modify {f} concurrently"
+                    )
+    return issues
+
+
 def _check_file_conflicts(tasks: list[dict[str, Any]]) -> list[str]:
     """Check for concurrent tasks modifying same files."""
-    issues: list[str] = []
     file_writers: dict[str, list[int]] = defaultdict(list)
 
     for i, task in enumerate(tasks):
@@ -629,22 +680,11 @@ def _check_file_conflicts(tasks: list[dict[str, Any]]) -> list[str]:
         for f in files.get("modify", []) + files.get("create", []):
             file_writers[f].append(i)
 
-    for f, writers in file_writers.items():
-        if len(writers) <= 1:
-            continue
+    if not any(len(w) > 1 for w in file_writers.values()):
+        return []
 
-        for i in range(len(writers)):
-            for j in range(i + 1, len(writers)):
-                idx1, idx2 = writers[i], writers[j]
-                deps1 = get_transitive_deps(tasks, [idx1])
-                deps2 = get_transitive_deps(tasks, [idx2])
-
-                if idx2 not in deps1 and idx1 not in deps2:
-                    issues.append(
-                        f"File conflict: tasks {idx1} and {idx2} "
-                        f"both modify {f} concurrently"
-                    )
-    return issues
+    closures = _precompute_dep_closures(tasks)
+    return _find_concurrent_conflicts(file_writers, closures)
 
 
 def _check_task_count(tasks: list[dict[str, Any]]) -> list[str]:
@@ -835,26 +875,21 @@ def _compute_overlaps(plan: dict[str, Any]) -> int:
         all_files = set(files.get("create", []) + files.get("modify", []))
         task_files.append(all_files)
 
+    # Precompute all transitive dependency closures once
+    closures = _precompute_dep_closures(tasks)
+
     # Compute fileOverlaps: tasks that could run concurrently and touch same files
     for i, task in enumerate(tasks):
         overlaps: list[int] = []
-
         for j in range(len(tasks)):
             if i == j:
                 continue
-
-            # Get transitive closure to check dependency relationship
-            i_transitive = get_transitive_deps(tasks, [i])
-            j_transitive = get_transitive_deps(tasks, [j])
-
-            # If not in each other's dependency chains and files overlap, conflict
             if (
-                j not in i_transitive
-                and i not in j_transitive
+                j not in closures[i]
+                and i not in closures[j]
                 and task_files[i] & task_files[j]
             ):
                 overlaps.append(j)
-
         task["fileOverlaps"] = overlaps
 
     return len(tasks)
