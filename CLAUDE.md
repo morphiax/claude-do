@@ -43,8 +43,8 @@ Each SKILL.md has YAML frontmatter (`name`, `description`, `argument-hint`) that
 
 A single `scripts/plan.py` at the repo root provides all deterministic operations. Each skill symlinks to it from `skills/{name}/scripts/plan.py` so SKILL.md can resolve a skill-local path.
 
-- **Query** (8 commands): status, summary, overlap-matrix, tasklist-data, worker-pool, retry-candidates, circuit-breaker, memory-search (keyword-based search in .design/memory.jsonl with recency weighting)
-- **Mutation** (3 commands): update-status (atomically modify plan.json via temp file + rename), memory-add (append JSONL entry with UUID), resume-reset (resets in_progress roles to pending, increments attempts)
+- **Query** (8 commands): status, summary, overlap-matrix, tasklist-data, worker-pool, retry-candidates, circuit-breaker, memory-search (keyword-based search in .design/memory.jsonl with recency weighting and importance scoring)
+- **Mutation** (3 commands): update-status (atomically modify plan.json via temp file + rename), memory-add (append JSONL entry with UUID and importance rating 1-10), resume-reset (resets in_progress roles to pending, increments attempts)
 - **Build** (1 command): finalize — validates role briefs and computes directory overlaps in one atomic operation
 
 Design uses query + finalize. Execute uses all commands. `worker-pool` reads roles directly — one worker per role, named by role (e.g., `api-developer`, `test-writer`). Workers read `plan.json` directly — no per-worker task files needed.
@@ -61,7 +61,8 @@ The two skills communicate through `.design/plan.json` (schemaVersion 4) written
 - `finalize` validates role briefs and computes `directoryOverlaps` from scope directories/patterns
 - No prompt assembly — workers read role briefs directly from plan.json and decide their own implementation approach
 - Expert artifacts (`expert-*.json`) are preserved in `.design/` for execute workers to reference via `expertContext` entries
-- Memory storage: `.design/memory.jsonl` contains cross-session learnings (JSONL format with UUID, category, keywords, summary, created timestamp)
+- Memory storage: `.design/memory.jsonl` contains cross-session learnings (JSONL format with UUID, category, keywords, content, timestamp, importance 1-10)
+- Memory retrieval uses keyword matching with recency decay (10%/30 days) and importance weighting (score = keyword_match * recency_factor * importance/10)
 - Plan history: completed runs are archived to `.design/history/{timestamp}/`; design pre-flight archives stale artifacts
 
 **Top-level fields**: schemaVersion (4), goal, context {stack, conventions, testCommand, buildCommand, lsp}, expertArtifacts [{name, path, summary}], designDecisions [{conflict, experts, decision, reasoning}], roles[], auxiliaryRoles[], progress {completedRoles: []}
@@ -96,23 +97,30 @@ Both skills use the **main conversation as team lead** with Agent Teams. Runtime
 - **Teammates**: specialist agents spawned into the team. Discover lead name via `~/.claude/teams/{team-name}/config.json`.
 
 **`/do:design`** — team name: `do-design`
-- Memory injection: lead searches .design/memory.jsonl for relevant past learnings and injects top 3-5 into expert prompts
-- Lead spawns expert teammates (architect, researcher, domain-specialists) based on goal analysis
-- Diverse debate: for complex/high-stakes goals with >=3 experts, experts cross-review each other's artifacts and challenge assumptions; lead resolves conflicts in designDecisions[]
-- Complexity tier (trivial/standard/complex/high-stakes) drives auxiliary role selection
+- Protocol guardrail: lead must follow the flow step-by-step and never answer goals directly before pre-flight
+- Memory injection: lead searches .design/memory.jsonl for relevant past learnings (using importance-weighted scoring) and injects top 3-5 into expert prompts
+- Lead spawns expert teammates (architect, researcher, domain-specialists) based on goal type awareness (implementation/meta/research)
+- Diverse debate: for complex/high-stakes goals with >=3 experts, experts cross-review each other's artifacts, challenge assumptions with structured format, defend their positions; lead resolves conflicts in designDecisions[]
+- Complexity tier (trivial/standard/complex/high-stakes) drives auxiliary role selection:
+  - Trivial (1-2 roles): no auxiliaries
+  - Standard (2-4 roles): integration verifier
+  - Complex (4-6 roles): challenger + scout + integration verifier
+  - High-stakes (3-8 roles): challenger + scout + integration verifier
 - Lead synthesizes expert findings into role briefs in plan.json directly (no plan-writer delegate)
 - `finalize` validates role briefs and computes directory overlaps (no prompt assembly)
 
 **`/do:execute`** — team name: `do-execute`
-- Pre-execution auxiliaries (challenger, scout) run before workers spawn
-- Memory injection: lead searches .design/memory.jsonl per role (using role.goal + scope as context) and injects top 2-3 into worker prompts
+- Pre-execution auxiliaries (challenger, scout) run before workers spawn with structured output formats
+- Memory injection: lead searches .design/memory.jsonl per role (using importance-weighted scoring with role.goal + scope as context) and injects top 2-3 into worker prompts
 - Lead creates TaskList from plan.json, spawns one persistent worker per role via `worker-pool`
-- Workers explore their scope directories, plan their own approach, implement, test, and verify against acceptance criteria
+- Workers use CoVe-style self-verification: before reporting completion, independently re-read and verify each acceptance criterion as a fresh question (not from memory)
+- Workers provide progress reporting for significant events (no silent execution)
 - Directory overlap serialization: concurrent roles touching overlapping directories get runtime `blockedBy` constraints
-- Retry budget: max 3 attempts per role | Cascading failures: skip dependents of failed roles
+- Retry budget: max 3 attempts per role with reflexion (analyze root cause, incorrect assumptions, alternative approaches before retry)
+- Cascading failures: skip dependents of failed roles
 - Circuit breaker: abort if >50% remaining roles would be skipped (bypassed for plans with 3 or fewer roles)
-- Post-execution auxiliaries (integration verifier, memory curator) after all roles complete
-- Memory curator: distills handoff.md and role results into .design/memory.jsonl entries (max 200 words each, category-tagged, keyword-indexed)
+- Post-execution auxiliaries (integration verifier with structured report format, memory curator) after all roles complete
+- Memory curator: distills handoff.md and role results (including all failed/skipped roles) into .design/memory.jsonl entries (max 200 words each, category-tagged, keyword-indexed, importance-rated 1-10)
 - Goal review evaluates whether completed work achieves the original goal
 - Session handoff: `.design/handoff.md` written on completion for context recovery
 
