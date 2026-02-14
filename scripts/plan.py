@@ -5,10 +5,10 @@ Schema version 4: Role-based briefs with goal-directed execution.
 
 Query commands (read-only):
   status, summary, overlap-matrix, tasklist-data, worker-pool,
-  retry-candidates, circuit-breaker
+  retry-candidates, circuit-breaker, memory-search
 
 Mutation commands (modify plan.json):
-  resume-reset, update-status
+  resume-reset, update-status, memory-add
 
 Build commands (validation & enrichment):
   finalize
@@ -24,6 +24,8 @@ import json
 import os
 import re
 import sys
+import time
+import uuid
 from collections import defaultdict, deque
 from typing import TYPE_CHECKING, Any, NoReturn
 
@@ -924,6 +926,177 @@ def cmd_finalize(args: argparse.Namespace) -> NoReturn:
 
 
 # ============================================================================
+# Memory Commands
+# ============================================================================
+
+
+def _tokenize(text: str) -> set[str]:
+    """Tokenize text for keyword matching: lowercase, split on non-alphanumeric."""
+    if not text:
+        return set()
+    # Lowercase and split on whitespace/punctuation
+    tokens = re.findall(r"[a-z0-9]+", text.lower())
+    # Filter out very short tokens (noise)
+    return {t for t in tokens if len(t) > 2}
+
+
+def _score_memory(
+    entry: dict[str, Any], query_tokens: set[str], current_time: float
+) -> float:
+    """Score a memory entry by keyword overlap + recency decay."""
+    # Keyword overlap score
+    entry_keywords = set(entry.get("keywords", []))
+    content_tokens = _tokenize(entry.get("content", ""))
+    all_entry_tokens = entry_keywords.union(content_tokens)
+
+    if not all_entry_tokens or not query_tokens:
+        return 0.0
+
+    overlap = len(query_tokens.intersection(all_entry_tokens))
+    keyword_score = overlap / len(query_tokens)
+
+    # Recency decay: entries lose 10% relevance per 30 days
+    timestamp = entry.get("timestamp", current_time)
+    age_seconds = current_time - timestamp
+    age_months = age_seconds / (30 * 24 * 60 * 60)
+    recency_factor = 0.9**age_months
+
+    return keyword_score * recency_factor
+
+
+def _load_memory_entries(memory_path: str) -> list[dict[str, Any]]:
+    """Load and parse JSONL entries from memory file."""
+    entries: list[dict[str, Any]] = []
+    with open(memory_path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entries.append(json.loads(line))
+            except json.JSONDecodeError:
+                pass  # Skip malformed lines
+    return entries
+
+
+def _format_memory_result(score: float, entry: dict[str, Any]) -> dict[str, Any]:
+    """Format a memory entry for output."""
+    return {
+        "id": entry.get("id", ""),
+        "category": entry.get("category", ""),
+        "keywords": entry.get("keywords", []),
+        "content": entry.get("content", ""),
+        "source": entry.get("source", ""),
+        "timestamp": entry.get("timestamp", 0),
+        "goal_context": entry.get("goal_context", ""),
+        "score": round(score, 3),
+    }
+
+
+def cmd_memory_search(args: argparse.Namespace) -> NoReturn:
+    """Search memory.jsonl for relevant entries matching query keywords."""
+    memory_path = args.memory_path
+    query = args.query or ""
+    limit = args.limit
+
+    # Handle missing file or empty query
+    if not os.path.exists(memory_path):
+        output_json({"ok": True, "memories": []})
+
+    query_tokens = _tokenize(query)
+    if not query_tokens:
+        output_json({"ok": True, "memories": []})
+
+    try:
+        entries = _load_memory_entries(memory_path)
+    except OSError as e:
+        error_exit(f"Error reading memory file: {e}")
+
+    if not entries:
+        output_json({"ok": True, "memories": []})
+
+    # Score and rank entries
+    current_time = time.time()
+    scored = [
+        (score, entry)
+        for entry in entries
+        if (score := _score_memory(entry, query_tokens, current_time)) > 0
+    ]
+    scored.sort(key=lambda x: x[0], reverse=True)
+
+    # Return top N
+    top_entries = [
+        _format_memory_result(score, entry) for score, entry in scored[:limit]
+    ]
+
+    output_json({"ok": True, "memories": top_entries})
+
+
+def _validate_memory_input(category: str, content: str, keywords_str: str) -> list[str]:
+    """Validate memory add inputs. Returns list of keywords or exits on error."""
+    valid_categories = {"pattern", "mistake", "convention", "approach", "failure"}
+    if category not in valid_categories:
+        error_exit(f"Invalid category '{category}'. Must be one of: {valid_categories}")
+
+    if not content:
+        error_exit("Content is required")
+
+    keywords = [k.strip() for k in keywords_str.split(",") if k.strip()]
+    if not keywords:
+        error_exit("At least one keyword is required")
+
+    return keywords
+
+
+def _ensure_memory_dir(memory_path: str) -> None:
+    """Create parent directory for memory file if needed."""
+    memory_dir = os.path.dirname(memory_path)
+    if memory_dir and not os.path.exists(memory_dir):
+        os.makedirs(memory_dir)
+
+
+def cmd_memory_add(args: argparse.Namespace) -> NoReturn:
+    """Add a new memory entry to memory.jsonl."""
+    memory_path = args.memory_path
+    category = args.category
+    keywords_str = args.keywords or ""
+    content = args.content
+    source = args.source or "unknown"
+    goal_context = args.goal_context or ""
+
+    # Validate and parse inputs
+    keywords = _validate_memory_input(category, content, keywords_str)
+
+    # Create entry
+    entry = {
+        "id": str(uuid.uuid4()),
+        "timestamp": time.time(),
+        "category": category,
+        "keywords": keywords,
+        "content": content,
+        "source": source,
+        "goal_context": goal_context,
+    }
+
+    # Append to JSONL file
+    try:
+        _ensure_memory_dir(memory_path)
+        with open(memory_path, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+    except OSError as e:
+        error_exit(f"Error writing memory file: {e}")
+
+    output_json(
+        {
+            "ok": True,
+            "id": entry["id"],
+            "category": category,
+            "keywords": keywords,
+        }
+    )
+
+
+# ============================================================================
 # Main
 # ============================================================================
 
@@ -968,16 +1141,53 @@ def main() -> None:
     p.add_argument("plan_path", nargs="?", default=".design/plan.json")
     p.set_defaults(func=cmd_circuit_breaker)
 
+    p = subparsers.add_parser(
+        "memory-search", help="Search memory for relevant entries"
+    )
+    p.add_argument("memory_path", nargs="?", default=".design/memory.jsonl")
+    p.add_argument("--query", type=str, help="Search query text")
+    p.add_argument("--limit", type=int, default=5, help="Max results to return")
+    p.set_defaults(func=cmd_memory_search)
+
     # Mutation commands
     p = subparsers.add_parser("resume-reset", help="Reset in_progress roles to pending")
     p.add_argument("plan_path", nargs="?", default=".design/plan.json")
     p.set_defaults(func=cmd_resume_reset)
+
+    p = subparsers.add_parser("memory-add", help="Add a new memory entry")
+    p.add_argument("memory_path", nargs="?", default=".design/memory.jsonl")
+    p.add_argument("--category", required=True, help="Memory category")
+    p.add_argument("--keywords", required=True, help="Comma-separated keywords")
+    p.add_argument("--content", required=True, help="Memory content")
+    p.add_argument("--source", help="Source of the memory")
+    p.add_argument("--goal-context", help="Goal context for the memory")
+    p.set_defaults(func=cmd_memory_add)
 
     p = subparsers.add_parser(
         "update-status", help="Batch update role statuses (reads JSON from stdin)"
     )
     p.add_argument("plan_path", nargs="?", default=".design/plan.json")
     p.set_defaults(func=cmd_update_status)
+
+    # Memory commands
+    p = subparsers.add_parser(
+        "memory-search", help="Search memory.jsonl for relevant entries"
+    )
+    p.add_argument("memory_path", nargs="?", default=".design/memory.jsonl")
+    p.add_argument("--query", required=True, help="Search query")
+    p.add_argument("--limit", type=int, default=5, help="Max results (default: 5)")
+    p.set_defaults(func=cmd_memory_search)
+
+    p = subparsers.add_parser(
+        "memory-add", help="Add a new memory entry to memory.jsonl"
+    )
+    p.add_argument("memory_path", nargs="?", default=".design/memory.jsonl")
+    p.add_argument("--category", required=True, help="Entry category")
+    p.add_argument("--keywords", required=True, help="Comma-separated keywords")
+    p.add_argument("--content", required=True, help="Memory content")
+    p.add_argument("--source", help="Source of the memory")
+    p.add_argument("--goal-context", help="Goal context when memory was created")
+    p.set_defaults(func=cmd_memory_add)
 
     # Build commands
     p = subparsers.add_parser(
