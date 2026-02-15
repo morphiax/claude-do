@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-`claude-do` is a Claude Code plugin providing two skills: `/do:design` (team-based goal decomposition into `.design/plan.json`) and `/do:execute` (dependency-graph execution with worker teammates). It leverages Claude Code's native Agent Teams and Tasks features for multi-agent collaboration. Both skills use the main conversation as team lead with teammates for analytical/execution work. Skills are implemented as SKILL.md prompts augmented with python3 helper scripts for deterministic operations.
+`claude-do` is a Claude Code plugin providing three skills: `/do:design` (team-based goal decomposition into `.design/plan.json`), `/do:execute` (dependency-graph execution with worker teammates), and `/do:improve` (scientific analysis and improvement of Claude Code skills). It leverages Claude Code's native Agent Teams and Tasks features for multi-agent collaboration. All skills use the main conversation as team lead with teammates for analytical/execution work. Skills are implemented as SKILL.md prompts augmented with python3 helper scripts for deterministic operations.
 
 ## Testing
 
@@ -19,7 +19,7 @@ claude --plugin-dir /path/to/claude-do
 /do:execute
 ```
 
-Both skills must be tested end-to-end. A change to one skill may affect the other since they share the `.design/plan.json` contract.
+All three skills must be tested end-to-end. Changes to design, execute, or improve may affect the others since they share the `.design/plan.json` contract.
 
 ## Architecture
 
@@ -32,6 +32,8 @@ Both skills must be tested end-to-end. A change to one skill may affect the othe
 - `skills/design/scripts/plan.py` — Symlink → `../../../scripts/plan.py`
 - `skills/execute/SKILL.md` — `/do:execute` skill definition
 - `skills/execute/scripts/plan.py` — Symlink → `../../../scripts/plan.py`
+- `skills/improve/SKILL.md` — `/do:improve` skill definition
+- `skills/improve/scripts/plan.py` — Symlink → `../../../scripts/plan.py`
 
 ### Skill Files Are the Implementation
 
@@ -47,7 +49,7 @@ A single `scripts/plan.py` at the repo root provides all deterministic operation
 - **Mutation** (3 commands): update-status (atomically modify plan.json via temp file + rename), memory-add (append JSONL entry with UUID and importance rating 1-10), resume-reset (resets in_progress roles to pending, increments attempts)
 - **Build** (1 command): finalize — validates role briefs and computes directory overlaps in one atomic operation
 
-Design uses query + finalize. Execute uses all commands. `worker-pool` reads roles directly — one worker per role, named by role (e.g., `api-developer`, `test-writer`). Workers read `plan.json` directly — no per-worker task files needed.
+Design uses query + finalize. Execute uses all commands. Improve uses query + finalize (same as design). `worker-pool` reads roles directly — one worker per role, named by role (e.g., `api-developer`, `test-writer`). Workers read `plan.json` directly — no per-worker task files needed.
 
 Scripts use python3 stdlib only (no dependencies), support Python 3.8+, and follow a consistent CLI pattern: `python3 plan.py <command> [plan_path] [options]`. All output is JSON to stdout with exit code 0 for success, 1 for errors.
 
@@ -91,7 +93,7 @@ The two skills communicate through `.design/plan.json` (schemaVersion 4) written
 
 ### Execution Model
 
-Both skills use the **main conversation as team lead** with Agent Teams. Runtime behavior is defined in each SKILL.md file — this section covers structural facts only.
+All three skills use the **main conversation as team lead** with Agent Teams. Runtime behavior is defined in each SKILL.md file — this section covers structural facts only.
 
 - **Lead** (main conversation): orchestration only via `TeamCreate`, `SendMessage`, `TaskCreate`/`TaskUpdate`/`TaskList`, `Bash` (scripts, git, verification), `AskUserQuestion`. Never reads project source files.
 - **Teammates**: specialist agents spawned into the team. Discover lead name via `~/.claude/teams/{team-name}/config.json`.
@@ -101,7 +103,7 @@ Both skills use the **main conversation as team lead** with Agent Teams. Runtime
 - Memory injection: lead searches .design/memory.jsonl for relevant past learnings (using importance-weighted scoring) and injects top 3-5 into expert prompts
 - Lead spawns expert teammates (architect, researcher, domain-specialists) based on goal type awareness (implementation/meta/research)
 - Cross-review: interface negotiation and perspective reconciliation via actual expert messaging (lead must not perform cross-review solo). Audit trail saved to `.design/cross-review.json`. Lead resolves unresolved conflicts in designDecisions[]
-- Auxiliary selection is independent of complexity tier: challenger and integration-verifier always run. Scout runs when the goal touches code (implementation, refactoring, bug fixes — not pure docs/research/config)
+- Auxiliary selection is independent of complexity tier: challenger and integration-verifier always run. Scout runs when the goal touches code (implementation, refactoring, bug fixes)
 - Lead synthesizes expert findings into role briefs in plan.json directly (no plan-writer delegate)
 - `finalize` validates role briefs (including that not all acceptance criteria are grep-only) and computes directory overlaps (no prompt assembly)
 
@@ -119,6 +121,18 @@ Both skills use the **main conversation as team lead** with Agent Teams. Runtime
 - Memory curator: distills handoff.md and role results into .design/memory.jsonl entries, applying five quality gates before storing: transferability (useful in a new session?), category fit (convention/pattern/mistake/approach/failure), surprise (unexpected findings score higher), deduplication (no redundant entries), and specificity (must contain concrete references). Importance scored 1-10 based on surprise value, not uniform. Session-specific data (test counts, metrics, file lists) is explicitly rejected
 - Goal review evaluates whether completed work achieves the original goal
 - Session handoff: `.design/handoff.md` written on completion for context recovery
+
+**`/do:improve`** — team name: `do-improve`
+- Protocol guardrail: lead must follow the flow step-by-step, starting with pre-flight (skill snapshot, archive check, circular improvement detection)
+- Complexity-aware team usage: team-based analysis with 2-3 experts (protocol analyst, prompt engineer, coordination analyst) for general analysis; single Task agent for targeted improvements
+- Memory injection: lead searches .design/memory.jsonl for relevant past learnings about skill improvement patterns
+- Quality evaluation: experts score 7 dimensions (Protocol Clarity, Constraint Enforcement, Error Handling, Agent Coordination, Information Flow, Prompt Economy, Verifiability) on 1-5 scale with evidence
+- Evidence types: historical execution artifacts from `.design/history/` (high confidence) or behavioral simulation (lower confidence fallback)
+- Cross-review: perspective reconciliation when >=2 experts analyze the same skill, maximum 2 rounds
+- Lead synthesizes findings into improvement roles with testable hypotheses (predicted behavioral impact + verification method)
+- Anti-pattern guards: token budget tracking, circular improvement detection, regression safety (no dimension may degrade)
+- Auxiliary roles: challenger (pre-execution), regression-checker (post-execution structural verification), integration-verifier (post-execution), memory-curator (post-execution)
+- Output: always produces `.design/plan.json` (schemaVersion 4) for `/do:execute` — improve never writes source files directly
 
 ## Requirements
 
