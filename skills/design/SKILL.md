@@ -108,7 +108,8 @@ Create the team and spawn experts in parallel.
 1. `TeamDelete(team_name: "do-design")` (ignore errors), `TeamCreate(team_name: "do-design")`. If TeamCreate fails, tell user Agent Teams is required and stop.
 2. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "{goal}" --stack "{stack}"`. If `ok: true` and memories exist, inject top 3-5 into expert prompts as a "Past Learnings" section (format: `- {category}: {summary} (from {created})`).
 3. `TaskCreate` for each expert.
-4. Spawn experts as teammates using the Task tool with `team_name: "do-design"` and `name: "{expert-name}"`. Write prompts appropriate to the goal and each expert's focus area. Experts report findings via `SendMessage` to the lead. Experts MUST save detailed artifacts to `.design/expert-{name}.json` — these flow directly to execution workers. Expert artifacts are structured JSON with sections that can be referenced selectively.
+4. Spawn experts as teammates using the Task tool with `team_name: "do-design"` and `name: "{expert-name}"`. Write prompts appropriate to the goal and each expert's focus area. Every expert prompt MUST end with: "Save your complete findings to `.design/expert-{name}.json` as structured JSON. Then SendMessage to the lead with a summary." Expert artifacts flow directly to execution workers — they are structured JSON with sections that can be referenced selectively.
+5. After all experts report back, verify artifacts exist: `ls .design/expert-*.json`. If any expert failed to save its artifact, send it a message: "Save your findings to `.design/expert-{name}.json` now."
 
 ### 3.5. Interface Negotiation & Cross-Review
 
