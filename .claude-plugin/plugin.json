@@ -1,7 +1,7 @@
 {
   "name": "do",
-  "version": "2.5.0",
-  "description": "Structured planning and dependency-graph execution for Claude Code — /do:design and /do:execute",
+  "version": "2.6.0",
+  "description": "Structured planning, dependency-graph execution, and scientific skill improvement for Claude Code — /do:design, /do:execute, and /do:improve",
   "author": {
     "name": "morphiax",
     "url": "https://github.com/morphiax"
