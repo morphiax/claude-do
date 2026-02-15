@@ -694,21 +694,41 @@ def _validate_required_fields(role: dict[str, Any], idx: int, name: str) -> list
     return issues
 
 
+_GREP_ONLY_PATTERN = re.compile(r"^\s*(grep|egrep|fgrep|rg)\s", re.IGNORECASE)
+
+
+def _is_grep_only(check: str) -> bool:
+    """Return True if a check command is purely a grep/pattern-match."""
+    # Strip leading shell constructs like `! ` (negation)
+    stripped = re.sub(r"^[!\s]+", "", check.strip())
+    return bool(_GREP_ONLY_PATTERN.match(stripped))
+
+
 def _validate_criteria(role: dict[str, Any], idx: int, name: str) -> list[str]:
     """Validate acceptanceCriteria on a role brief."""
     issues: list[str] = []
     criteria = role.get("acceptanceCriteria", [])
     if not criteria:
         issues.append(f"Role {idx} ({name}): missing 'acceptanceCriteria'")
+    has_functional = False
     for j, ac in enumerate(criteria):
         if not ac.get("criterion"):
             issues.append(
                 f"Role {idx} ({name}): acceptanceCriteria[{j}] missing 'criterion'"
             )
-        if not ac.get("check"):
+        check = ac.get("check", "")
+        if not check:
             issues.append(
                 f"Role {idx} ({name}): acceptanceCriteria[{j}] missing 'check'"
             )
+        elif not _is_grep_only(check):
+            has_functional = True
+    if criteria and not has_functional:
+        issues.append(
+            f"Role {idx} ({name}): all acceptance criteria are grep-only — "
+            "at least one must verify functional correctness "
+            "(e.g., build, test, curl, or run command)"
+        )
     return issues
 
 

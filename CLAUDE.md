@@ -60,7 +60,7 @@ The two skills communicate through `.design/plan.json` (schemaVersion 4) written
 - Roles use name-based dependencies resolved to indices by `finalize`
 - `finalize` validates role briefs and computes `directoryOverlaps` from scope directories/patterns
 - No prompt assembly — workers read role briefs directly from plan.json and decide their own implementation approach
-- Expert artifacts (`expert-*.json`) are preserved in `.design/` for execute workers to reference via `expertContext` entries
+- Expert artifacts (`expert-*.json`) are preserved in `.design/` for execute workers to reference via `expertContext` entries. The lead must never write expert artifacts — only experts save their own findings
 - Memory storage: `.design/memory.jsonl` contains cross-session learnings (JSONL format with UUID, category, keywords, content, timestamp, importance 1-10). Entries must pass five quality gates: transferability, category fit, surprise-based importance, deduplication, and specificity. Session-specific observations (metrics, counts, file lists) are rejected
 - Memory retrieval uses keyword matching with recency decay (10%/30 days) and importance weighting (score = keyword_match * recency_factor * importance/10)
 - Plan history: completed runs are archived to `.design/history/{timestamp}/`; design pre-flight archives stale artifacts
@@ -100,10 +100,10 @@ Both skills use the **main conversation as team lead** with Agent Teams. Runtime
 - Protocol guardrail: lead must follow the flow step-by-step and never answer goals directly before pre-flight
 - Memory injection: lead searches .design/memory.jsonl for relevant past learnings (using importance-weighted scoring) and injects top 3-5 into expert prompts
 - Lead spawns expert teammates (architect, researcher, domain-specialists) based on goal type awareness (implementation/meta/research)
-- Diverse debate: for complex/high-stakes goals with >=3 experts, experts cross-review each other's artifacts, challenge assumptions with structured format, defend their positions; lead resolves conflicts in designDecisions[]
+- Cross-review: interface negotiation and perspective reconciliation via actual expert messaging (lead must not perform cross-review solo). Audit trail saved to `.design/cross-review.json`. Lead resolves unresolved conflicts in designDecisions[]
 - Auxiliary selection is independent of complexity tier: challenger and integration-verifier always run. Scout runs when the goal touches code (implementation, refactoring, bug fixes — not pure docs/research/config)
 - Lead synthesizes expert findings into role briefs in plan.json directly (no plan-writer delegate)
-- `finalize` validates role briefs and computes directory overlaps (no prompt assembly)
+- `finalize` validates role briefs (including that not all acceptance criteria are grep-only) and computes directory overlaps (no prompt assembly)
 
 **`/do:execute`** — team name: `do-execute`
 - Pre-execution auxiliaries (challenger, scout) run before workers spawn with structured output formats

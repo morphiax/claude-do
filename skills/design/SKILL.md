@@ -109,7 +109,7 @@ Create the team and spawn experts in parallel.
 2. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "{goal}" --stack "{stack}"`. If `ok: true` and memories exist, inject top 3-5 into expert prompts as a "Past Learnings" section (format: `- {category}: {summary} (from {created})`).
 3. `TaskCreate` for each expert.
 4. Spawn experts as teammates using the Task tool with `team_name: "do-design"` and `name: "{expert-name}"`. Write prompts appropriate to the goal and each expert's focus area. Every expert prompt MUST end with: "Save your complete findings to `.design/expert-{name}.json` as structured JSON. Then SendMessage to the lead with a summary." Expert artifacts flow directly to execution workers — they are structured JSON with sections that can be referenced selectively.
-5. After all experts report back, verify artifacts exist: `ls .design/expert-*.json`. If any expert failed to save its artifact, send it a message: "Save your findings to `.design/expert-{name}.json` now."
+5. After all experts report back, verify artifacts exist: `ls .design/expert-*.json`. If any expert failed to save its artifact, send it a message: "Save your findings to `.design/expert-{name}.json` now." If the expert is unreachable after retry, re-spawn it with the same prompt. **Never write an expert artifact yourself** — the lead's interpretation is not a substitute for specialist analysis.
 
 ### 3.5. Interface Negotiation & Cross-Review
 
@@ -123,6 +123,8 @@ Research on boundary objects (Star & Griesemer 1989), consumer-driven contracts 
 | **Perspective reconciliation** | Experts with *different lenses* analyze the *same domain* | Architect, researcher, and prompt-engineer all analyze a SKILL.md — architect wants more structure, researcher finds simpler protocols have better adherence |
 
 Both can apply in the same design session. Assess each independently.
+
+**Enforcement**: The lead MUST NOT perform cross-review analysis solo. Every phase requires actual `SendMessage` calls to experts and waiting for their responses. If a phase applies per the decision matrix, the lead must send messages and collect expert responses before proceeding. Skipping to plan synthesis without expert interaction when the decision matrix says a phase is mandatory is a protocol violation.
 
 #### Decision Matrix — When to Run Each
 
@@ -200,6 +202,20 @@ This catches cross-domain assumptions that neither interface negotiation nor per
 5. Lead resolves all conflicts. Update `.design/interfaces.json` if any interface contracts changed.
 
 Interfaces, reconciled perspectives, and challenge resolutions all inform conflict resolution in the next step.
+
+#### Cross-Review Checkpoint
+
+Before proceeding to plan synthesis, save `.design/cross-review.json`:
+```json
+{
+  "phasesRun": ["A", "B", "C"],
+  "interfaces": {"count": 0, "rounds": 0},
+  "reconciliations": {"count": 0, "rounds": 0},
+  "challenges": {"sent": 0, "resolved": 0},
+  "skippedPhases": [{"phase": "C", "reason": "<2 experts or trivial"}]
+}
+```
+This creates an audit trail. If no phases were applicable (all experts independent, <2 experts), save with `"phasesRun": []` and the skip reasons.
 
 ### 4. Synthesize into Role Briefs
 
