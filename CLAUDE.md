@@ -81,7 +81,7 @@ The two skills communicate through `.design/plan.json` (schemaVersion 4) written
 
 **Status fields** (initialized by finalize): status (`pending`), result (null), attempts (0), directoryOverlaps (computed)
 
-**Auxiliary roles** — meta-agents that improve quality without directly implementing features:
+**Auxiliary roles** — standalone Task tool agents (not team members) that improve quality without directly implementing features:
 - `challenger` (pre-execution) — reviews plan, challenges assumptions, finds gaps. Blocking issues are mandatory gates: lead must address each one before proceeding
 - `scout` (pre-execution) — reads actual codebase to verify expert assumptions match reality. Verifies that referenced dependencies resolve (classes→CSS, imports→modules, types→definitions)
 - `integration-verifier` (post-execution) — verifies cross-role integration, runs full test suite. Reports "skipped" for checks requiring unavailable capabilities (e.g., browser rendering) — never infers results

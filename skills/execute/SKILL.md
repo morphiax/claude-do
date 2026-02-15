@@ -42,11 +42,13 @@ All script calls: `python3 $PLAN_CLI <command> [args]` via Bash. Output: JSON wi
 
 ### 2. Pre-Execution Auxiliaries
 
-Check `auxiliaryRoles[]` in plan.json for `type: "pre-execution"` roles. Spawn them sequentially before execution workers. **Progress update** for each auxiliary: "Running {auxiliary.name}..."
+Check `auxiliaryRoles[]` in plan.json for `type: "pre-execution"` roles. Run them sequentially before execution workers. **Progress update** for each auxiliary: "Running {auxiliary.name}..."
 
-**Challenger**: Spawn as a teammate. Prompt includes: "Read `.design/plan.json` and all `.design/expert-*.json` artifacts. Challenge assumptions, find gaps, identify risks. Save findings to `.design/challenger-report.json` with this structure: `{\"issues\": [{\"category\": \"scope-gap|overlap|invalid-assumption|missing-dependency|criteria-gap|constraint-conflict\", \"severity\": \"blocking|high-risk|low-risk\", \"description\": \"...\", \"affectedRoles\": [...], \"recommendation\": \"...\"}], \"summary\": \"...\"}`. SendMessage with count of blocking/high-risk/low-risk issues found." Wait for report. **Blocking issues are mandatory gates**: for each blocking issue, the lead MUST either (a) modify plan.json to address it (update acceptance criteria, add constraints, adjust scope), or (b) ask the user whether to accept the risk. Do not proceed to worker spawning with unresolved blocking issues. High-risk issues should be noted as additional constraints on affected roles.
+Auxiliaries are standalone Task tool calls (no `team_name`) — they don't need team coordination. The Task tool returns their result directly. Do not use `SendMessage` or `TaskOutput` for auxiliaries.
 
-**Scout**: Spawn as a teammate. Prompt includes: "Read actual codebase in scope directories from plan.json roles. Map patterns, conventions, integration points. **Verify that referenced dependencies actually resolve**: check that HTML classes have corresponding CSS definitions, imports point to existing modules, type references exist, API endpoints match route definitions, etc. Flag any orphaned references (classes, imports, types used but never defined) as discrepancies — especially layout-critical ones (display, positioning, sizing, visibility). Flag discrepancies with expert assumptions. Save report to `.design/scout-report.json` with this structure: `{\"scopeAreas\": [{\"directory\": \"...\", \"affectedRoles\": [...], \"actualStructure\": {\"files\": [...], \"patterns\": [...], \"conventions\": [...]}, \"expertAssumptions\": [{\"expert\": \"...\", \"assumption\": \"...\", \"verified\": true|false, \"actualReality\": \"...\"}], \"integrationPoints\": [{\"type\": \"import|export|shared-type\", \"description\": \"...\"}]}], \"discrepancies\": [{\"area\": \"...\", \"expected\": \"...\", \"actual\": \"...\", \"impact\": \"high|medium|low\", \"recommendation\": \"...\"}], \"summary\": \"...\"}`. SendMessage with count of discrepancies found." Wait for report. If discrepancies found, update role briefs in plan.json or note for workers.
+**Challenger**: Spawn via `Task(subagent_type: "general-purpose")`. Prompt includes: "Read `.design/plan.json` and all `.design/expert-*.json` artifacts. Challenge assumptions, find gaps, identify risks. Save findings to `.design/challenger-report.json` with this structure: `{\"issues\": [{\"category\": \"scope-gap|overlap|invalid-assumption|missing-dependency|criteria-gap|constraint-conflict\", \"severity\": \"blocking|high-risk|low-risk\", \"description\": \"...\", \"affectedRoles\": [...], \"recommendation\": \"...\"}], \"summary\": \"...\"}`. Return a summary with count of blocking/high-risk/low-risk issues found." **Blocking issues are mandatory gates**: for each blocking issue, the lead MUST either (a) modify plan.json to address it (update acceptance criteria, add constraints, adjust scope), or (b) ask the user whether to accept the risk. Do not proceed to worker spawning with unresolved blocking issues. High-risk issues should be noted as additional constraints on affected roles.
+
+**Scout**: Spawn via `Task(subagent_type: "general-purpose")`. Prompt includes: "Read actual codebase in scope directories from plan.json roles. Map patterns, conventions, integration points. **Verify that referenced dependencies actually resolve**: check that HTML classes have corresponding CSS definitions, imports point to existing modules, type references exist, API endpoints match route definitions, etc. Flag any orphaned references (classes, imports, types used but never defined) as discrepancies — especially layout-critical ones (display, positioning, sizing, visibility). Flag discrepancies with expert assumptions. Save report to `.design/scout-report.json` with this structure: `{\"scopeAreas\": [{\"directory\": \"...\", \"affectedRoles\": [...], \"actualStructure\": {\"files\": [...], \"patterns\": [...], \"conventions\": [...]}, \"expertAssumptions\": [{\"expert\": \"...\", \"assumption\": \"...\", \"verified\": true|false, \"actualReality\": \"...\"}], \"integrationPoints\": [{\"type\": \"import|export|shared-type\", \"description\": \"...\"}]}], \"discrepancies\": [{\"area\": \"...\", \"expected\": \"...\", \"actual\": \"...\", \"impact\": \"high|medium|low\", \"recommendation\": \"...\"}], \"summary\": \"...\"}`. Return a summary with count of discrepancies found." If discrepancies found, update role briefs in plan.json or note for workers.
 
 ### 3. Report and Spawn Workers
 
@@ -121,14 +123,16 @@ Event-driven loop — process worker messages as they arrive.
 
 Check `auxiliaryRoles[]` for `type: "post-execution"` roles. **Progress update** for each auxiliary: "Running {auxiliary.name}..."
 
-**Integration Verifier**: Spawn as a teammate. Prompt includes:
+Post-execution auxiliaries are standalone Task tool calls (no `team_name`), same as pre-execution auxiliaries.
+
+**Integration Verifier**: Spawn via `Task(subagent_type: "general-purpose")`. Prompt includes:
 - "Verify all completed roles' work integrates correctly."
 - Completed roles: subjects, files changed (from worker reports)
 - Test command from `plan.json context.testCommand`
 - All `acceptanceCriteria` from all completed roles
 - "Run the full test suite. Check for import/dependency conflicts. Verify cross-role connections. Test the goal end-to-end."
 - "**Only report results for checks you actually performed.** If a check requires capabilities you don't have (e.g., visual rendering, browser access), report it as `\"result\": \"skipped\"` with `\"details\": \"requires browser rendering\"`. Never infer visual or behavioral results from grep/file-reading alone — a CSS rule existing in a file does not mean it takes effect on the page."
-- "Save findings to `.design/integration-verifier-report.json` with this structure: `{\"status\": \"PASS|FAIL\", \"acceptanceCriteria\": [{\"role\": \"...\", \"criterion\": \"...\", \"result\": \"pass|fail|skipped\", \"details\": \"...\"}], \"crossRoleIssues\": [{\"issue\": \"...\", \"affectedRoles\": [...], \"severity\": \"blocking|high|medium|low\", \"suggestedFix\": \"...\"}], \"testResults\": {\"command\": \"...\", \"exitCode\": 0, \"output\": \"...\"}, \"endToEndVerification\": {\"tested\": true|false, \"result\": \"pass|fail|skipped\", \"details\": \"...\"}, \"summary\": \"...\"}`. SendMessage with PASS or FAIL and summary."
+- "Save findings to `.design/integration-verifier-report.json` with this structure: `{\"status\": \"PASS|FAIL\", \"acceptanceCriteria\": [{\"role\": \"...\", \"criterion\": \"...\", \"result\": \"pass|fail|skipped\", \"details\": \"...\"}], \"crossRoleIssues\": [{\"issue\": \"...\", \"affectedRoles\": [...], \"severity\": \"blocking|high|medium|low\", \"suggestedFix\": \"...\"}], \"testResults\": {\"command\": \"...\", \"exitCode\": 0, \"output\": \"...\"}, \"endToEndVerification\": {\"tested\": true|false, \"result\": \"pass|fail|skipped\", \"details\": \"...\"}, \"summary\": \"...\"}`. Return PASS or FAIL with summary."
 
 On FAIL: spawn targeted fix workers for specific issues. Re-run verifier after fixes (max 2 fix rounds). **Progress update** after verifier runs: "Integration verification: {PASS|FAIL}"
 
@@ -175,7 +179,7 @@ Date: {ISO timestamp}
 {Concrete actions if work continues}
 ```
 
-3. **Memory curation** — Spawn memory-curator auxiliary agent:
+3. **Memory curation** — Spawn memory-curator via `Task(subagent_type: "general-purpose")`:
 
 Prompt includes:
 - "Read all artifacts: `.design/handoff.md`, `.design/plan.json` (all roles including completed, failed, skipped, in_progress, pending — read result field for each), `.design/challenger-report.json` (if exists), `.design/scout-report.json` (if exists), `.design/integration-verifier-report.json` (if exists)."
