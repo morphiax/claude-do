@@ -145,9 +145,11 @@ All three skills use the **main conversation as team lead** with Agent Teams. Ru
 - Memory injection: lead searches .design/memory.jsonl for relevant past learnings about skill improvement patterns
 - Quality evaluation: experts score 7 dimensions (Protocol Clarity, Constraint Enforcement, Error Handling, Agent Coordination, Information Flow, Prompt Economy, Verifiability) on 1-5 scale with evidence
 - Evidence types: historical execution artifacts from `.design/history/` (high confidence) or behavioral simulation (lower confidence fallback)
-- Cross-review: perspective reconciliation when >=2 experts analyze the same skill, maximum 2 rounds
+- Cross-review: perspective reconciliation when >=2 experts analyze the same skill, maximum 2 rounds. Lead must not perform cross-review solo — requires actual SendMessage calls to experts. Never writes expert artifacts directly
 - Lead synthesizes findings into improvement roles with testable hypotheses (predicted behavioral impact + verification method)
-- Anti-pattern guards: token budget tracking, circular improvement detection, regression safety (no dimension may degrade)
+- Anti-pattern guards: CRITICAL enforcement (mandatory user gates before proceeding), token budget tracking, circular improvement detection, regression safety (no dimension may degrade). Guards run after role creation to ensure executability
+- Expert coordination: explicit completion tracking for all spawned experts, TeamCreate health check with retry, artifact validation (existence + JSON schema) before cross-review
+- Finalize fallback: max 2 retries for validation failures, user escalation if retries exhausted
 - Auxiliary roles: challenger (pre-execution), regression-checker (post-execution structural verification), integration-verifier (post-execution), memory-curator (post-execution)
 - Output: always produces `.design/plan.json` (schemaVersion 4) for `/do:execute` — improve never writes source files directly
 
