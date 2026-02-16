@@ -117,6 +117,7 @@ All three skills use the **main conversation as team lead** with Agent Teams. Ru
 - Protocol guardrail: lead must follow the flow step-by-step and never answer goals directly before pre-flight
 - Memory injection: lead searches .design/memory.jsonl for relevant past learnings (using importance-weighted scoring) and injects top 3-5 into expert prompts. Expert prompts request verificationProperties (behavioral invariants, boundary conditions, integration contracts) to inform spec generation.
 - Lead spawns expert teammates (architect, researcher, domain-specialists) based on goal type awareness (implementation/meta/research)
+- Expert liveness pipeline: completion checklist tracking which experts have reported, turn-based timeout (2 turns then ping, 1 more then re-spawn), re-spawn ceiling (max 2 attempts then proceed with available artifacts)
 - Cross-review: interface negotiation and perspective reconciliation via actual expert messaging (lead must not perform cross-review solo). Audit trail saved to `.design/cross-review.json`. Lead resolves unresolved conflicts in designDecisions[]
 - Auxiliary selection is independent of complexity tier: challenger and integration-verifier always run. Scout runs when the goal touches code (implementation, refactoring, bug fixes)
 - Lead synthesizes expert findings into role briefs in plan.json directly (no plan-writer delegate)
