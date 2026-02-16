@@ -141,17 +141,14 @@ Proceed directly to Step 4 (Synthesize) after receiving the analyst's report.
 **Protocol Analyst** — evaluates clarity, completeness, flow gaps:
 - "Read `.design/skill-snapshot.md`. Score Protocol Clarity, Error Handling, and Verifiability (1-5 each with evidence)."
 - "Trace through 2 representative execution scenarios. Identify ambiguous steps, missing error paths, unverifiable outcomes."
-- "Save findings to `.design/expert-protocol-analyst.json`. Then SendMessage to lead with summary."
 
 **Prompt Engineer** — evaluates instruction density, constraint enforcement, economy:
 - "Read `.design/skill-snapshot.md`. Score Constraint Enforcement, Prompt Economy, and Information Flow (1-5 each with evidence)."
 - "Identify prompt bloat (sections that can be compressed without behavioral loss), dead rules (constraints that can never trigger), and missing constraints (behaviors that should be governed but aren't)."
-- "Save findings to `.design/expert-prompt-engineer.json`. Then SendMessage to lead with summary."
 
 **Coordination Analyst** (only for skills with multi-agent patterns) — evaluates agent coordination:
 - "Read `.design/skill-snapshot.md`. Score Agent Coordination (1-5 with evidence)."
 - "Analyze team lifecycle, message patterns, shared state management. Identify race conditions, deadlock risks, information silos."
-- "Save findings to `.design/expert-coordination-analyst.json`. Then SendMessage to lead with summary."
 
 Every expert prompt MUST end with: "Save your complete findings to `.design/expert-{name}.json` as structured JSON. Then SendMessage to the lead with a summary." Include past learnings and historical evidence paths if available.
 
@@ -212,57 +209,12 @@ The lead collects expert findings and builds improvement roles for plan.json.
 
 Add to `auxiliaryRoles[]` in plan.json. Challenger always runs. Regression-checker and integration-verifier always run post-execution.
 
-#### Challenger (pre-execution)
-Reviews the improvement plan. Questions whether proposed changes could cause behavioral regression.
-
-```json
-{
-  "name": "challenger",
-  "type": "pre-execution",
-  "goal": "Review improvement plan. Challenge: Could any proposed change cause behavioral regression? Are hypotheses testable? Are token budget claims accurate? Does any improvement reverse a previous one?",
-  "model": "sonnet",
-  "trigger": "before-execution"
-}
-```
-
-#### Regression Checker (post-execution)
-Verifies the improved skill is structurally sound and consistent with the rest of the plugin.
-
-```json
-{
-  "name": "regression-checker",
-  "type": "post-execution",
-  "goal": "Verify: YAML frontmatter parses correctly, SKILL.md internal references are valid, CLAUDE.md accurately describes the skill, script symlinks resolve, no broken cross-references. Compare improved skill against .design/skill-snapshot.md — verify no unintended removals of constraints or error handling.",
-  "model": "sonnet",
-  "trigger": "after-all-roles-complete"
-}
-```
-
-#### Integration Verifier (post-execution)
-Checks cross-file consistency after improvements are applied.
-
-```json
-{
-  "name": "integration-verifier",
-  "type": "post-execution",
-  "goal": "Verify SKILL.md references correct plan.py commands, CLAUDE.md matches SKILL.md, README.md matches CLAUDE.md. Run all acceptance criteria checks from plan.json.",
-  "model": "sonnet",
-  "trigger": "after-all-roles-complete"
-}
-```
-
-#### Memory Curator (post-execution)
-Distills improvement learnings into `.design/memory.jsonl`.
-
-```json
-{
-  "name": "memory-curator",
-  "type": "post-execution",
-  "goal": "Distill improvement learnings: what dimensions were weakest, which hypotheses were confirmed/rejected, what improvement patterns worked. Apply five quality gates before storing.",
-  "model": "haiku",
-  "trigger": "after-all-roles-complete"
-}
-```
+| Name | Type | Goal | Model | Trigger |
+|---|---|---|---|---|
+| challenger | pre-execution | Review improvement plan. Challenge: Could any proposed change cause behavioral regression? Are hypotheses testable? Are token budget claims accurate? Does any improvement reverse a previous one? | sonnet | before-execution |
+| regression-checker | post-execution | Verify: YAML frontmatter parses correctly, SKILL.md internal references are valid, CLAUDE.md accurately describes the skill, script symlinks resolve, no broken cross-references. Compare improved skill against .design/skill-snapshot.md — verify no unintended removals of constraints or error handling. | sonnet | after-all-roles-complete |
+| integration-verifier | post-execution | Verify SKILL.md references correct plan.py commands, CLAUDE.md matches SKILL.md, README.md matches CLAUDE.md. Run all acceptance criteria checks from plan.json. | sonnet | after-all-roles-complete |
+| memory-curator | post-execution | Distill improvement learnings: what dimensions were weakest, which hypotheses were confirmed/rejected, what improvement patterns worked. Apply five quality gates before storing. | haiku | after-all-roles-complete |
 
 ### 6. Complete
 
@@ -312,13 +264,7 @@ Run /do:execute to apply improvements.
 
 ### plan.json (schemaVersion 4)
 
-Improve produces plan.json in the same format as design — fully compatible with `/do:execute`.
-
-**Top-level fields**: schemaVersion (4), goal, context {stack, conventions, testCommand, buildCommand, lsp}, expertArtifacts [{name, path, summary}], designDecisions [], roles[], auxiliaryRoles[], progress {completedRoles: []}
-
-**Role fields**: name, goal, model, scope {directories, patterns, dependencies}, expertContext [{expert, artifact, relevance}], constraints [], acceptanceCriteria [{criterion, check}], assumptions [{text, severity}], rollbackTriggers [], fallback
-
-**Status fields** (initialized by finalize): status ("pending"), result (null), attempts (0), directoryOverlaps (computed)
+Improve produces plan.json in the same format as design — fully compatible with `/do:execute`. See CLAUDE.md for full schema documentation.
 
 ### Improve-Specific Artifacts
 
