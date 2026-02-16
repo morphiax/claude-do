@@ -8,6 +8,8 @@
 
 ## What's Novel
 
+**Verification spec layer** — Design produces immutable property-based test specs that execute workers must satisfy, codifying correctness without constraining implementation. Specs test behavioral invariants (e.g., "rate limit resets after window") via the project's native test framework or shell scripts. SHA256 integrity prevents tampering.
+
 **Structured debate with defense rounds** — For complex goals, experts cross-review each other's artifacts, challenge specific claims (claim/severity/evidence/alternative), then defend their positions before the lead resolves conflicts.
 
 **CoVe-style worker verification** — Workers independently re-verify each acceptance criterion as a fresh question before reporting completion (not from implementation memory).
