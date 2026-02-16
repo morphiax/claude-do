@@ -84,7 +84,7 @@ All script calls: `python3 $PLAN_CLI <command> [args]` via Bash. Output is JSON 
    if [ "$(find .design -mindepth 1 -maxdepth 1 ! -name history | head -1)" ]; then
      ARCHIVE_DIR=".design/history/$(date -u +%Y%m%dT%H%M%SZ)"
      mkdir -p "$ARCHIVE_DIR"
-     find .design -mindepth 1 -maxdepth 1 ! -name history ! -name memory.jsonl -exec mv {} "$ARCHIVE_DIR/" \;
+     find .design -mindepth 1 -maxdepth 1 ! -name history ! -name memory.jsonl ! -name reflection.jsonl ! -name handoff.md -exec mv {} "$ARCHIVE_DIR/" \;
    fi
    ```
 7. **Re-snapshot** (archive may have moved it): Copy target SKILL.md to `.design/skill-snapshot.md` again.
@@ -275,6 +275,19 @@ Auxiliary: {auxiliaryRoles}
 
 Run /do:execute to apply improvements.
 ```
+
+5. **Self-reflection** — Evaluate this improve run:
+
+   ```bash
+   echo '{"targetSkill":"<skill-path>","analysisMode":"<general|targeted>","expertCount":N,"qualityScores":{"dimension":N},"findingsCount":N,"rolesProduced":N,"whatWorked":["<item>"],"whatFailed":["<item>"],"doNextTime":["<item>"]}' | \
+     python3 $PLAN_CLI reflection-add .design/reflection.jsonl \
+       --skill improve \
+       --goal "<the improvement goal>" \
+       --outcome "<completed|partial|failed|aborted>" \
+       --goal-achieved <true|false>
+   ```
+
+   On failure: proceed (reflection is valuable but not blocking).
 
 **Fallback** (if finalize fails):
 1. Fix validation errors and re-run finalize.

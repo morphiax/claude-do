@@ -179,11 +179,27 @@ Date: {ISO timestamp}
 {Concrete actions if work continues}
 ```
 
-3. **Memory curation** — Spawn memory-curator via `Task(subagent_type: "general-purpose")`:
+3. **Self-reflection** — Evaluate this run against the goal. Write a structured reflection entry:
+
+   Assess: (a) Did completed roles deliver the goal end-to-end? (b) What worked well? (c) What failed or was suboptimal? (d) What should be done differently next time?
+
+   ```bash
+   echo '{"roleQuality":"<N of M roles completed first attempt>","whatWorked":["<item>"],"whatFailed":["<item>"],"doNextTime":["<item>"],"coordinationNotes":"<any team/worker observations>"}' | \
+     python3 $PLAN_CLI reflection-add .design/reflection.jsonl \
+       --skill execute \
+       --goal "<the goal from plan.json>" \
+       --outcome "<completed|partial|failed|aborted>" \
+       --goal-achieved <true|false>
+   ```
+
+   The evaluation JSON is piped via stdin. Be honest — this reflection feeds future runs via memory curation. On failure: proceed (reflection is valuable but not blocking).
+
+4. **Memory curation** — Spawn memory-curator via `Task(subagent_type: "general-purpose")`:
 
 Prompt includes:
-- "Read all artifacts: `.design/handoff.md`, `.design/plan.json` (all roles including completed, failed, skipped, in_progress, pending — read result field for each), `.design/challenger-report.json` (if exists), `.design/scout-report.json` (if exists), `.design/integration-verifier-report.json` (if exists)."
+- "Read all artifacts: `.design/handoff.md`, `.design/plan.json` (all roles including completed, failed, skipped, in_progress, pending — read result field for each), `.design/reflection.jsonl` (most recent entry — the self-evaluation for this run), `.design/challenger-report.json` (if exists), `.design/scout-report.json` (if exists), `.design/integration-verifier-report.json` (if exists)."
 - "Read existing memories: `.design/memory.jsonl` (if exists). Note what is already recorded to avoid duplicates."
+- "The reflection entry contains the lead's honest self-evaluation of what worked and what didn't. Use it as a primary signal for what to record — reflections that identify surprising failures or unexpected successes are high-value memory candidates."
 
 **Quality gates — apply BEFORE storing each candidate memory:**
 
@@ -206,13 +222,13 @@ Task(subagent_type: "general-purpose", team_name: "do-execute", name: "memory-cu
 
 Wait for curator completion. On failure: proceed (memory curation is optional).
 
-4. Archive: If all completed, move artifacts to history:
+5. Archive: If all completed, move artifacts to history:
    ```bash
    ARCHIVE_DIR=".design/history/$(date -u +%Y%m%dT%H%M%SZ)"
    mkdir -p "$ARCHIVE_DIR"
-   find .design -mindepth 1 -maxdepth 1 ! -name history ! -name memory.jsonl -exec mv {} "$ARCHIVE_DIR/" \;
+   find .design -mindepth 1 -maxdepth 1 ! -name history ! -name memory.jsonl ! -name reflection.jsonl ! -name handoff.md -exec mv {} "$ARCHIVE_DIR/" \;
    ```
    If partial (failures remain): leave artifacts in `.design/` for resume.
-5. Cleanup: `TeamDelete(team_name: "do-execute")`.
+6. Cleanup: `TeamDelete(team_name: "do-execute")`.
 
 **Arguments**: $ARGUMENTS

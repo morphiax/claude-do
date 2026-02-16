@@ -54,7 +54,7 @@ All script calls: `python3 $PLAN_CLI <command> [args]` via Bash. Output is JSON 
    if [ "$(find .design -mindepth 1 -maxdepth 1 ! -name history | head -1)" ]; then
      ARCHIVE_DIR=".design/history/$(date -u +%Y%m%dT%H%M%SZ)"
      mkdir -p "$ARCHIVE_DIR"
-     find .design -mindepth 1 -maxdepth 1 ! -name history ! -name memory.jsonl -exec mv {} "$ARCHIVE_DIR/" \;
+     find .design -mindepth 1 -maxdepth 1 ! -name history ! -name memory.jsonl ! -name reflection.jsonl ! -name handoff.md -exec mv {} "$ARCHIVE_DIR/" \;
    fi
    ```
 
@@ -346,6 +346,21 @@ Test: {testCommand}
 
 Run /do:execute to begin.
 ```
+
+5. **Self-reflection** — Evaluate this design run. Write a structured reflection entry:
+
+   Assess: (a) Did the plan capture the goal effectively? (b) Were experts well-chosen? (c) Did cross-review add value or was it redundant? (d) What should be done differently next time?
+
+   ```bash
+   echo '{"expertQuality":"<which experts contributed most/least>","crossReviewValue":"<useful|redundant|skipped>","planCompleteness":"<assessment>","whatWorked":["<item>"],"whatFailed":["<item>"],"doNextTime":["<item>"]}' | \
+     python3 $PLAN_CLI reflection-add .design/reflection.jsonl \
+       --skill design \
+       --goal "<the goal>" \
+       --outcome "<completed|partial|failed|aborted>" \
+       --goal-achieved <true|false>
+   ```
+
+   On failure: proceed (reflection is valuable but not blocking).
 
 **Fallback** (if finalize fails):
 1. Fix validation errors and re-run finalize.

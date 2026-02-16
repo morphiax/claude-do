@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-`claude-do` is a Claude Code plugin providing three skills: `/do:design` (team-based goal decomposition into `.design/plan.json`), `/do:execute` (dependency-graph execution with worker teammates), and `/do:improve` (scientific analysis and improvement of Claude Code skills). It leverages Claude Code's native Agent Teams and Tasks features for multi-agent collaboration. All skills use the main conversation as team lead with teammates for analytical/execution work. Skills are implemented as SKILL.md prompts augmented with python3 helper scripts for deterministic operations.
+`claude-do` is a Claude Code plugin providing four skills: `/do:design` (team-based goal decomposition into `.design/plan.json`), `/do:execute` (dependency-graph execution with worker teammates), `/do:improve` (static analysis of prompt quality across 7 dimensions), and `/do:reflect` (evidence-based improvement from execution reflections). It leverages Claude Code's native Agent Teams and Tasks features for multi-agent collaboration. All skills use the main conversation as team lead with teammates for analytical/execution work. Skills are implemented as SKILL.md prompts augmented with python3 helper scripts for deterministic operations.
 
 ## Testing
 
@@ -19,7 +19,7 @@ claude --plugin-dir /path/to/claude-do
 /do:execute
 ```
 
-All three skills must be tested end-to-end. Changes to design, execute, or improve may affect the others since they share the `.design/plan.json` contract.
+All four skills must be tested end-to-end. Changes to design, execute, improve, or reflect may affect the others since they share the `.design/plan.json` contract and persistent files (`memory.jsonl`, `reflection.jsonl`, `handoff.md`).
 
 ## Architecture
 
@@ -34,6 +34,8 @@ All three skills must be tested end-to-end. Changes to design, execute, or impro
 - `skills/execute/scripts/plan.py` — Symlink → `../../../scripts/plan.py`
 - `skills/improve/SKILL.md` — `/do:improve` skill definition
 - `skills/improve/scripts/plan.py` — Symlink → `../../../scripts/plan.py`
+- `skills/reflect/SKILL.md` — `/do:reflect` skill definition
+- `skills/reflect/scripts/plan.py` — Symlink → `../../../scripts/plan.py`
 
 ### Skill Files Are the Implementation
 
@@ -45,8 +47,8 @@ Each SKILL.md has YAML frontmatter (`name`, `description`, `argument-hint`) that
 
 A single `scripts/plan.py` at the repo root provides all deterministic operations. Each skill symlinks to it from `skills/{name}/scripts/plan.py` so SKILL.md can resolve a skill-local path.
 
-- **Query** (8 commands): status, summary, overlap-matrix, tasklist-data, worker-pool, retry-candidates, circuit-breaker, memory-search (keyword-based search in .design/memory.jsonl with recency weighting and importance scoring)
-- **Mutation** (3 commands): update-status (atomically modify plan.json via temp file + rename), memory-add (append JSONL entry with UUID and importance rating 1-10), resume-reset (resets in_progress roles to pending, increments attempts)
+- **Query** (9 commands): status, summary, overlap-matrix, tasklist-data, worker-pool, retry-candidates, circuit-breaker, memory-search (keyword-based search in .design/memory.jsonl with recency weighting and importance scoring), reflection-search (filter past reflections by skill, sorted by recency)
+- **Mutation** (4 commands): update-status (atomically modify plan.json via temp file + rename), memory-add (append JSONL entry with UUID and importance rating 1-10), reflection-add (append structured self-evaluation to reflection.jsonl, evaluation JSON via stdin), resume-reset (resets in_progress roles to pending, increments attempts)
 - **Build** (1 command): finalize — validates role briefs and computes directory overlaps in one atomic operation
 
 Design uses query + finalize. Execute uses all commands. Improve uses query + finalize (same as design). `worker-pool` reads roles directly — one worker per role, named by role (e.g., `api-developer`, `test-writer`). Workers read `plan.json` directly — no per-worker task files needed.
@@ -63,8 +65,11 @@ The two skills communicate through `.design/plan.json` (schemaVersion 4) written
 - `finalize` validates role briefs and computes `directoryOverlaps` from scope directories/patterns
 - No prompt assembly — workers read role briefs directly from plan.json and decide their own implementation approach
 - Expert artifacts (`expert-*.json`) are preserved in `.design/` for execute workers to reference via `expertContext` entries. The lead must never write expert artifacts — only experts save their own findings
-- Memory storage: `.design/memory.jsonl` contains cross-session learnings (JSONL format with UUID, category, keywords, content, timestamp, importance 1-10). Entries must pass five quality gates: transferability, category fit, surprise-based importance, deduplication, and specificity. Session-specific observations (metrics, counts, file lists) are rejected
+- Memory storage: `.design/memory.jsonl` contains cross-session semantic learnings (JSONL format with UUID, category, keywords, content, timestamp, importance 1-10). Entries must pass five quality gates: transferability, category fit, surprise-based importance, deduplication, and specificity. Session-specific observations (metrics, counts, file lists) are rejected
 - Memory retrieval uses keyword matching with recency decay (10%/30 days) and importance weighting (score = keyword_match * recency_factor * importance/10)
+- Reflection storage: `.design/reflection.jsonl` contains per-run episodic self-evaluations (JSONL format with UUID, skill, goal, outcome, goalAchieved, evaluation object, timestamp). Both design and execute append entries at end of each run. Memory-curator reads reflections as primary signal for what to record
+- Session handoff: `.design/handoff.md` persists across archives for cross-session context recovery. Written by execute at completion
+- **Persistent `.design/` files** (survive archiving): `memory.jsonl`, `reflection.jsonl`, `handoff.md`. Everything else is archived to `.design/history/{timestamp}/`
 - Plan history: completed runs are archived to `.design/history/{timestamp}/`; design pre-flight archives stale artifacts
 
 **Top-level fields**: schemaVersion (4), goal, context {stack, conventions, testCommand, buildCommand, lsp}, expertArtifacts [{name, path, summary}], designDecisions [{conflict, experts, decision, reasoning}], roles[], auxiliaryRoles[], progress {completedRoles: []}
@@ -87,7 +92,7 @@ The two skills communicate through `.design/plan.json` (schemaVersion 4) written
 - `challenger` (pre-execution) — reviews plan, challenges assumptions, finds gaps. Blocking issues are mandatory gates: lead must address each one before proceeding
 - `scout` (pre-execution) — reads actual codebase to verify expert assumptions match reality. Verifies that referenced dependencies resolve (classes→CSS, imports→modules, types→definitions)
 - `integration-verifier` (post-execution) — verifies cross-role integration, runs full test suite. Reports "skipped" for checks requiring unavailable capabilities (e.g., browser rendering) — never infers results
-- `memory-curator` (post-execution) — distills handoff.md and role results into actionable memory entries in .design/memory.jsonl
+- `memory-curator` (post-execution) — distills reflection.jsonl, handoff.md, and role results into actionable memory entries in .design/memory.jsonl. Reflections are the primary signal for what to record
 
 **Auxiliary role fields**: name, type (pre-execution|post-execution), goal, model, trigger
 
@@ -120,7 +125,8 @@ All three skills use the **main conversation as team lead** with Agent Teams. Ru
 - Post-execution auxiliaries (integration verifier with structured report format, memory curator) after all roles complete
 - Memory curator: distills handoff.md and role results into .design/memory.jsonl entries, applying five quality gates before storing: transferability (useful in a new session?), category fit (convention/pattern/mistake/approach/failure), surprise (unexpected findings score higher), deduplication (no redundant entries), and specificity (must contain concrete references). Importance scored 1-10 based on surprise value, not uniform. Session-specific data (test counts, metrics, file lists) is explicitly rejected
 - Goal review evaluates whether completed work achieves the original goal
-- Session handoff: `.design/handoff.md` written on completion for context recovery
+- Self-reflection: both design and execute write structured self-evaluations to `.design/reflection.jsonl` at end of each run (episodic memory). Memory-curator reads reflections as primary signal
+- Session handoff: `.design/handoff.md` persists in `.design/` (not archived) for cross-session context recovery
 
 **`/do:improve`** — team name: `do-improve`
 - Protocol guardrail: lead must follow the flow step-by-step, starting with pre-flight (skill snapshot, archive check, circular improvement detection)
@@ -133,6 +139,15 @@ All three skills use the **main conversation as team lead** with Agent Teams. Ru
 - Anti-pattern guards: token budget tracking, circular improvement detection, regression safety (no dimension may degrade)
 - Auxiliary roles: challenger (pre-execution), regression-checker (post-execution structural verification), integration-verifier (post-execution), memory-curator (post-execution)
 - Output: always produces `.design/plan.json` (schemaVersion 4) for `/do:execute` — improve never writes source files directly
+
+**`/do:reflect`** — no team (single Task analyst)
+- Evidence-based improvement using execution reflections (`.design/reflection.jsonl`) as optimization signal — contrasts with improve's static prompt quality analysis
+- Requires minimum 2 reflection entries to identify patterns (configurable via `--min-runs`)
+- Single analyst agent reads reflections, memory, and skill files to identify: recurring failures, unaddressed feedback, goal achievement rates, trends
+- Hypotheses have confidence levels: high (>=3 reflections), medium (2), low (1 strong signal)
+- User selects which improvements to include in plan
+- Self-reflection at end of run (writes to reflection.jsonl like other skills)
+- Output: always produces `.design/plan.json` (schemaVersion 4) for `/do:execute` — reflect never writes source files directly
 
 ## Requirements
 

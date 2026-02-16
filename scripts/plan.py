@@ -5,10 +5,10 @@ Schema version 4: Role-based briefs with goal-directed execution.
 
 Query commands (read-only):
   status, summary, overlap-matrix, tasklist-data, worker-pool,
-  retry-candidates, circuit-breaker, memory-search
+  retry-candidates, circuit-breaker, memory-search, reflection-search
 
 Mutation commands (modify plan.json):
-  resume-reset, update-status, memory-add
+  resume-reset, update-status, memory-add, reflection-add
 
 Build commands (validation & enrichment):
   finalize
@@ -1133,6 +1133,100 @@ def cmd_memory_add(args: argparse.Namespace) -> NoReturn:
 
 
 # ============================================================================
+# Reflection Commands
+# ============================================================================
+
+
+def cmd_reflection_add(args: argparse.Namespace) -> NoReturn:
+    """Add a structured self-reflection entry to reflection.jsonl."""
+    reflection_path = args.reflection_path
+    skill = args.skill
+    goal = args.goal
+    outcome = args.outcome
+    goal_achieved = args.goal_achieved
+
+    if skill not in ("design", "execute", "improve", "reflect"):
+        error_exit(f"Invalid skill '{skill}'. Must be one of: design, execute, improve")
+
+    if outcome not in ("completed", "partial", "failed", "aborted"):
+        error_exit(
+            f"Invalid outcome '{outcome}'. "
+            "Must be one of: completed, partial, failed, aborted"
+        )
+
+    if not goal:
+        error_exit("Goal is required")
+
+    # Read evaluation from stdin (JSON object)
+    try:
+        evaluation = json.load(sys.stdin)
+    except json.JSONDecodeError:
+        error_exit("Invalid JSON in stdin (expected evaluation object)")
+
+    entry = {
+        "id": str(uuid.uuid4()),
+        "timestamp": time.time(),
+        "skill": skill,
+        "goal": goal,
+        "outcome": outcome,
+        "goalAchieved": goal_achieved,
+        "evaluation": evaluation,
+    }
+
+    # Append to JSONL file
+    try:
+        reflection_dir = os.path.dirname(reflection_path)
+        if reflection_dir and not os.path.exists(reflection_dir):
+            os.makedirs(reflection_dir)
+        with open(reflection_path, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+    except OSError as e:
+        error_exit(f"Error writing reflection file: {e}")
+
+    output_json(
+        {
+            "ok": True,
+            "id": entry["id"],
+            "skill": skill,
+            "outcome": outcome,
+            "goalAchieved": goal_achieved,
+        }
+    )
+
+
+def cmd_reflection_search(args: argparse.Namespace) -> NoReturn:
+    """Search reflection.jsonl for relevant past reflections."""
+    reflection_path = args.reflection_path
+    skill_filter = args.skill
+    limit = args.limit
+
+    if not os.path.exists(reflection_path):
+        output_json({"ok": True, "reflections": []})
+
+    try:
+        entries: list[dict[str, Any]] = []
+        with open(reflection_path) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                    if skill_filter and entry.get("skill") != skill_filter:
+                        continue
+                    entries.append(entry)
+                except json.JSONDecodeError:
+                    pass
+    except OSError as e:
+        error_exit(f"Error reading reflection file: {e}")
+
+    # Sort by timestamp descending (most recent first)
+    entries.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
+
+    output_json({"ok": True, "reflections": entries[:limit]})
+
+
+# ============================================================================
 # Main
 # ============================================================================
 
@@ -1212,6 +1306,30 @@ def main() -> None:
     )
     p.add_argument("plan_path", nargs="?", default=".design/plan.json")
     p.set_defaults(func=cmd_update_status)
+
+    # Reflection commands
+    p = subparsers.add_parser("reflection-add", help="Add a self-reflection entry")
+    p.add_argument("reflection_path", nargs="?", default=".design/reflection.jsonl")
+    p.add_argument("--skill", required=True, help="Skill name (design|execute|improve)")
+    p.add_argument("--goal", required=True, help="The goal that was pursued")
+    p.add_argument(
+        "--outcome",
+        required=True,
+        help="Outcome (completed|partial|failed|aborted)",
+    )
+    p.add_argument(
+        "--goal-achieved",
+        type=lambda x: x.lower() in ("true", "1", "yes"),
+        default=False,
+        help="Whether the goal was achieved (true/false)",
+    )
+    p.set_defaults(func=cmd_reflection_add)
+
+    p = subparsers.add_parser("reflection-search", help="Search past reflections")
+    p.add_argument("reflection_path", nargs="?", default=".design/reflection.jsonl")
+    p.add_argument("--skill", type=str, help="Filter by skill name")
+    p.add_argument("--limit", type=int, default=5, help="Max results to return")
+    p.set_defaults(func=cmd_reflection_search)
 
     # Build commands
     p = subparsers.add_parser(
