@@ -128,7 +128,8 @@ Prompt includes:
 - If historical evidence exists: "Read past execution artifacts at {paths} for evidence of actual behavior."
 - If no historical evidence: "Perform behavioral simulation: trace through 2 representative scenarios step-by-step. Flag where agent behavior might diverge from intent. **Note: this is lower-confidence than execution evidence.**"
 - "For each finding, form a **testable hypothesis**: what to change, predicted behavioral impact, and how to verify."
-- "Save findings to `.design/expert-analyst.json` with structure: `{\"skillPath\": \"...\", \"focusArea\": \"...\", \"qualityScores\": {\"dimension\": {\"score\": N, \"evidence\": \"...\"}}, \"findings\": [{\"location\": \"section/line\", \"issue\": \"...\", \"severity\": \"high|medium|low\", \"hypothesis\": {\"change\": \"...\", \"predictedEffect\": \"...\", \"verification\": \"...\"}}], \"tokenAnalysis\": {\"totalLines\": N, \"heaviestSections\": [...]}, \"summary\": \"...\"}`. Return a summary."
+- "In your findings JSON, include a `verificationProperties` section: an array of properties that should hold regardless of implementation (behavioral invariants, boundary conditions). Format: `[{\"property\": \"...\", \"category\": \"invariant|boundary|integration\", \"testableVia\": \"how to test this\"}]`."
+- "Save findings to `.design/expert-analyst.json` with structure: `{\"skillPath\": \"...\", \"focusArea\": \"...\", \"qualityScores\": {\"dimension\": {\"score\": N, \"evidence\": \"...\"}}, \"findings\": [{\"location\": \"section/line\", \"issue\": \"...\", \"severity\": \"high|medium|low\", \"hypothesis\": {\"change\": \"...\", \"predictedEffect\": \"...\", \"verification\": \"...\"}}], \"verificationProperties\": [...], \"tokenAnalysis\": {\"totalLines\": N, \"heaviestSections\": [...]}, \"summary\": \"...\"}`. Return a summary."
 
 Proceed directly to Step 4 (Synthesize) after receiving the analyst's report.
 
@@ -150,7 +151,7 @@ Proceed directly to Step 4 (Synthesize) after receiving the analyst's report.
 - "Read `.design/skill-snapshot.md`. Score Agent Coordination (1-5 with evidence)."
 - "Analyze team lifecycle, message patterns, shared state management. Identify race conditions, deadlock risks, information silos."
 
-Every expert prompt MUST end with: "Save your complete findings to `.design/expert-{name}.json` as structured JSON. Then SendMessage to the lead with a summary." Include past learnings and historical evidence paths if available.
+Every expert prompt MUST end with: "In your findings JSON, include a `verificationProperties` section: an array of properties that should hold regardless of implementation (behavioral invariants, boundary conditions, cross-role contracts). Format: `[{\"property\": \"...\", \"category\": \"invariant|boundary|integration\", \"testableVia\": \"how to test this with concrete commands/endpoints\"}]`. Provide concrete, externally observable properties that can be tested without reading source code. Save your complete findings to `.design/expert-{name}.json` as structured JSON. Then SendMessage to the lead with a summary." Include past learnings and historical evidence paths if available.
 
 4. **Wait for all N experts to report**: Track completion count. When all spawned experts (protocol-analyst, prompt-engineer, coordination-analyst if applicable) have sent messages, proceed to artifact verification. The system batches all expert messages in a single turn.
 5. **Validate expert artifacts** before cross-review:
@@ -205,7 +206,45 @@ The lead collects expert findings and builds improvement roles for plan.json.
    - `designDecisions[]`: Resolved conflicts from cross-review
    - `roles[]`: Improvement roles
    - `auxiliaryRoles[]`: challenger (pre-execution), integration-verifier (post-execution), regression-checker (post-execution), memory-curator (post-execution)
-8. Run `python3 $PLAN_CLI finalize .design/plan.json` to validate structure and compute overlaps.
+   - Do NOT run finalize yet — that happens after optional verification specs.
+
+#### 4.5. Generate Verification Specs (OPTIONAL)
+
+Verification specs are broad, property-based tests that workers must satisfy. They codify expert-provided properties as executable tests without constraining implementation creativity. **Specs are optional** — skip this step for trivial goals (1-2 roles) or when expert verificationProperties are sparse.
+
+**When to generate specs:**
+- Goal has 2+ roles with testable behavioral properties
+- Expert artifacts contain concrete verificationProperties sections
+- Stack supports test execution (context.testCommand or context.buildCommand exists)
+
+**Authorship:**
+- **Simple goals** (1-3 roles, clear external interfaces): Lead writes specs from expert verificationProperties
+- **Complex goals** (4+ roles): Spawn a spec-writer Task agent with `Task(subagent_type: "general-purpose")` that CAN read source code. Prompt: "Read expert verificationProperties from `.design/expert-*.json` and the actual codebase in scope directories from plan.json roles. Write verification spec files in `.design/specs/{role-name}.{ext}` using the project's test framework or shell scripts as fallback. Specs test behavioral properties, not implementation details. Return paths of created spec files."
+
+**Spec generation steps:**
+1. Read expert verificationProperties sections from all expert artifacts
+2. For each role, extract relevant properties (filter by role scope/goal alignment)
+3. Create `mkdir -p .design/specs`
+4. Write spec files in project's native test framework or shell scripts:
+   - **Native tests** (preferred): `.design/specs/spec-{role-name}.test.{ext}`
+   - **Shell fallback**: `.design/specs/spec-{role-name}.sh` with exit 0 = pass
+5. For each spec file created, add an entry to plan.json's `verificationSpecs[]` array:
+   ```json
+   {
+     "role": "{role-name}",
+     "path": ".design/specs/spec-{role-name}.{ext}",
+     "runCommand": "{command to execute spec}",
+     "properties": ["brief description of each property tested"]
+   }
+   ```
+
+**Spec content guidelines:**
+- Test WHAT the system does (external behavior), not HOW (implementation structure)
+- Include positive cases AND negative cases
+- Test cross-role contracts for integration boundaries
+- Specs must be independently runnable via their runCommand
+
+8. Run `python3 $PLAN_CLI finalize .design/plan.json` to validate structure, compute overlaps, and compute SHA256 checksums for spec files (tamper detection).
 
 ### 5. Auxiliary Roles
 

@@ -151,6 +151,7 @@ All three skills use the **main conversation as team lead** with Agent Teams. Ru
 - Expert coordination: explicit completion tracking for all spawned experts, TeamCreate health check with retry, artifact validation (existence + JSON schema) before cross-review
 - Finalize fallback: max 2 retries for validation failures, user escalation if retries exhausted
 - Auxiliary roles: challenger (pre-execution), regression-checker (post-execution structural verification), integration-verifier (post-execution), memory-curator (post-execution)
+- Optional verification specs generation (Step 4.5): experts provide verificationProperties, lead or spec-writer generates property-based test specs in `.design/specs/`, finalize computes SHA256 checksums for tamper detection
 - Output: always produces `.design/plan.json` (schemaVersion 4) for `/do:execute` — improve never writes source files directly
 
 **`/do:reflect`** — no team (single Task analyst)
