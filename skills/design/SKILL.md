@@ -113,7 +113,7 @@ Create the team and spawn experts in parallel.
 1. `TeamDelete(team_name: $TEAM_NAME)` (ignore errors), `TeamCreate(team_name: $TEAM_NAME)`. If TeamCreate fails, tell user Agent Teams is required and stop.
 2. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "{goal}" --stack "{stack}"`. If `ok: true` and memories exist, inject top 3-5 into expert prompts as a "Past Learnings" section (format: `- {category}: {summary} (from {created})`).
 3. `TaskCreate` for each expert.
-4. Spawn experts as teammates using the Task tool with `team_name: $TEAM_NAME` and `name: "{expert-name}"`. Write prompts appropriate to the goal and each expert's focus area. Every expert prompt MUST end with: "In your findings JSON, include a `verificationProperties` section: an array of properties that should hold regardless of implementation (behavioral invariants, boundary conditions, cross-role contracts). Format: `[{\"property\": \"...\", \"category\": \"invariant|boundary|integration\", \"testableVia\": \"how to test this\"}]`. Save your complete findings to `.design/expert-{name}.json` as structured JSON. Then SendMessage to the lead with a summary." Expert artifacts flow directly to execution workers — they are structured JSON with sections that can be referenced selectively.
+4. Spawn experts as teammates using the Task tool with `team_name: $TEAM_NAME` and `name: "{expert-name}"`. Write prompts appropriate to the goal and each expert's focus area. Every expert prompt MUST end with: "In your findings JSON, include a `verificationProperties` section: an array of properties that should hold regardless of implementation (behavioral invariants, boundary conditions, cross-role contracts). Format: `[{\"property\": \"...\", \"category\": \"invariant|boundary|integration\", \"testableVia\": \"how to test this with concrete commands/endpoints\"}]`. Provide concrete, externally observable properties that can be tested without reading source code. Save your complete findings to `.design/expert-{name}.json` as structured JSON. Then SendMessage to the lead with a summary." Expert artifacts flow directly to execution workers — they are structured JSON with sections that can be referenced selectively.
 5. After all experts report back, verify artifacts exist: `ls .design/expert-*.json`. If any expert failed to save its artifact, send it a message: "Save your findings to `.design/expert-{name}.json` now." If the expert is unreachable after retry, re-spawn it with the same prompt. **Never write an expert artifact yourself** — the lead's interpretation is not a substitute for specialist analysis.
 
 ### 3.5. Interface Negotiation & Cross-Review
@@ -237,6 +237,7 @@ The lead collects expert findings and writes the plan.
 5. For each role, include `expertContext[]` referencing specific expert artifacts and the sections relevant to that role. **Do not lossy-compress expert findings into terse fields** — reference the full artifacts.
 6. Write criteria-based `acceptanceCriteria` — define WHAT should work, not WHICH files should exist. Workers verify against criteria, not file lists. **Every criterion MUST have a `check` that is a concrete, independently runnable shell command** (e.g., `"bun run build 2>&1 | tail -5"`, `"bun test --run 2>&1 | tail -10"`). Never leave checks as prose descriptions — workers execute these literally. If a role touches compiled code, include BOTH a build check AND a test check as separate criteria. **Checks must verify functional correctness, not just pattern existence.** A grep confirming a CSS rule exists is insufficient — the check must verify the rule actually takes effect (e.g., start a dev server and curl the page, or verify that referenced classes/imports resolve to definitions). At least one criterion per role should test end-to-end behavior, not just file contents.
 7. Add `auxiliaryRoles[]` (see Auxiliary Roles section).
+8. Write to `.design/plan.json` (do NOT run finalize yet — that happens in Step 4.5).
 
 ### 4.5. Generate Verification Specs (OPTIONAL)
 
@@ -322,6 +323,45 @@ Verification specs are broad, property-based tests that workers must satisfy. Th
   "fallback": "If token-bucket too complex for stdlib, use simple sliding window counter"
 }
 ```
+
+### 4.5. Generate Verification Specs (OPTIONAL)
+
+Verification specs are broad, property-based tests that workers must satisfy. They codify expert-provided properties as executable tests without constraining implementation creativity. **Specs are optional** — skip this step for trivial goals (1-2 roles) or when expert verificationProperties are sparse.
+
+**When to generate specs:**
+- Goal has 2+ roles with testable behavioral properties
+- Expert artifacts contain concrete verificationProperties sections
+- Stack supports test execution (context.testCommand or context.buildCommand exists)
+
+**Authorship:**
+- **Simple goals** (1-3 roles, clear external interfaces): Lead writes specs from expert verificationProperties
+- **Complex goals** (4+ roles): Spawn a spec-writer Task agent with `Task(subagent_type: "general-purpose")` that CAN read source code. Prompt: "Read expert verificationProperties from `.design/expert-*.json` and the actual codebase in scope directories from plan.json roles. Write verification spec files in `.design/specs/{role-name}.{ext}` using the project's test framework (bun test, pytest, cargo test) or shell scripts as fallback. Specs test behavioral properties, not implementation details. Return paths of created spec files."
+
+**Spec generation steps:**
+1. Read expert verificationProperties sections from all expert artifacts
+2. For each role, extract relevant properties (filter by role scope/goal alignment)
+3. Create `mkdir -p .design/specs`
+4. Write spec files in project's native test framework or shell scripts:
+   - **Native tests** (preferred): `.design/specs/spec-{role-name}.test.{ext}` using bun test, pytest, jest, cargo test, etc. Use property-based testing frameworks where available (fast-check, hypothesis, proptest)
+   - **Shell fallback**: `.design/specs/spec-{role-name}.sh` with exit 0 = pass
+5. For each spec file created, add an entry to plan.json's `verificationSpecs[]` array:
+   ```json
+   {
+     "role": "{role-name}",
+     "path": ".design/specs/spec-{role-name}.{ext}",
+     "runCommand": "{command to execute spec, e.g., 'bun test .design/specs/spec-api.test.ts'}",
+     "properties": ["brief description of each property tested"]
+   }
+   ```
+
+**Spec content guidelines:**
+- Test WHAT the system does (external behavior), not HOW (implementation structure)
+- Include positive cases (valid inputs succeed) AND negative cases (invalid inputs fail correctly)
+- Use property-based testing where possible (for all X, property P(X) holds)
+- Test cross-role contracts for integration boundaries
+- Specs must be independently runnable via their runCommand (no global setup dependencies)
+
+6. Run `python3 $PLAN_CLI finalize .design/plan.json` to validate structure, compute overlaps, and compute SHA256 checksums for spec files (tamper detection).
 
 ### 5. Auxiliary Roles
 
