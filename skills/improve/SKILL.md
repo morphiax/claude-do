@@ -157,11 +157,13 @@ Every expert prompt MUST end with: "Save your complete findings to `.design/expe
    - Verify existence: `ls .design/expert-*.json`
    - Validate JSON structure: For each artifact, parse and confirm it contains required fields: `skillPath`, `dimensions` (or `qualityScores`), `findings`, `summary`
    - If any artifact is missing or malformed, message the expert: "Your artifact at {path} is missing or contains invalid JSON. Please fix and re-save."
-   - **Never write an expert artifact yourself** — expert artifacts must come from the expert's own analysis
+   - If the expert is unreachable after retry, re-spawn it with the same prompt. **Never write an expert artifact yourself** — the lead's interpretation is not a substitute for specialist analysis
 
 #### Cross-Review (General/Cross-skill mode only, >=2 experts)
 
 When >=2 experts analyzed the same skill from different angles, perspective reconciliation is mandatory.
+
+**Enforcement**: The lead MUST NOT perform cross-review analysis solo. When >=2 experts analyzed the same skill, perspective reconciliation requires actual `SendMessage` calls to experts and waiting for their responses. Skipping to plan synthesis without expert interaction when reconciliation applies is a protocol violation.
 
 1. Lead identifies overlapping analysis — topics where experts scored the same dimension differently or made conflicting recommendations.
 2. Lead messages the relevant experts: "Experts {A} and {B}: you scored {dimension} differently ({A}: {score}, {B}: {score}). Read each other's artifact. Send me: (a) where you agree, (b) where you disagree and why, (c) any synthesis."
