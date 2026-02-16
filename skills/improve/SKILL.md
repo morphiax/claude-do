@@ -135,7 +135,8 @@ Proceed directly to Step 4 (Synthesize) after receiving the analyst's report.
 #### General/Cross-skill Mode (team-based)
 
 1. `TeamDelete(team_name: $TEAM_NAME)` (ignore errors), `TeamCreate(team_name: $TEAM_NAME)`. If TeamCreate fails, tell user Agent Teams is required and stop.
-2. Spawn experts in parallel as teammates using the Task tool with `team_name: $TEAM_NAME`:
+2. **Team health check**: After spawning experts, verify team state by checking that all experts are reachable. If any expert is unreachable, delete the team and retry TeamCreate once. If retry fails, abort and tell user Agent Teams is unavailable.
+3. Spawn experts in parallel as teammates using the Task tool with `team_name: $TEAM_NAME`:
 
 **Protocol Analyst** — evaluates clarity, completeness, flow gaps:
 - "Read `.design/skill-snapshot.md`. Score Protocol Clarity, Error Handling, and Verifiability (1-5 each with evidence)."
@@ -154,7 +155,12 @@ Proceed directly to Step 4 (Synthesize) after receiving the analyst's report.
 
 Every expert prompt MUST end with: "Save your complete findings to `.design/expert-{name}.json` as structured JSON. Then SendMessage to the lead with a summary." Include past learnings and historical evidence paths if available.
 
-3. After all experts report back, verify artifacts exist: `ls .design/expert-*.json`. If any expert failed to save its artifact, send it a message to save. **Never write an expert artifact yourself.**
+4. **Wait for all N experts to report**: Track completion count. When all spawned experts (protocol-analyst, prompt-engineer, coordination-analyst if applicable) have sent messages, proceed to artifact verification. The system batches all expert messages in a single turn.
+5. **Validate expert artifacts** before cross-review:
+   - Verify existence: `ls .design/expert-*.json`
+   - Validate JSON structure: For each artifact, parse and confirm it contains required fields: `skillPath`, `dimensions` (or `qualityScores`), `findings`, `summary`
+   - If any artifact is missing or malformed, message the expert: "Your artifact at {path} is missing or contains invalid JSON. Please fix and re-save."
+   - **Never write an expert artifact yourself** — expert artifacts must come from the expert's own analysis
 
 #### Cross-Review (General/Cross-skill mode only, >=2 experts)
 
@@ -180,17 +186,17 @@ The lead collects expert findings and builds improvement roles for plan.json.
 1. Collect all findings (messages and `.design/expert-*.json` files).
 2. **Resolve conflicts** (if cross-review occurred): Document in `designDecisions[]`.
 3. **Rank improvements** by: impact (high/medium/low) * (1 / regression risk) * (1 / token cost). Present top findings to user.
-4. **Anti-pattern guards** before building roles:
-   - **Token budget**: Calculate net token delta for each proposed change. Flag if total would increase skill beyond 500 lines.
-   - **Circular improvement**: If `.design/history/` contains a previous improve run, check whether any proposed change reverses a previous improvement. If so, flag for user review.
-   - **Regression safety**: No quality dimension may degrade. If a change improves one dimension but risks another, note the trade-off explicitly.
-5. **Build roles**: For each approved improvement (or group of related improvements), create a role:
+4. **Build roles**: For each approved improvement (or group of related improvements), create a role:
    - `goal`: The testable hypothesis — what to change and predicted behavioral effect
    - `scope.directories/patterns`: The skill file(s) to modify
    - `constraints`: Must preserve YAML frontmatter, must not break plan.json contract, must not exceed token budget, must not regress other dimensions
    - `acceptanceCriteria`: Concrete checks that verify the improvement (e.g., line count checks, structural pattern checks, dimension-specific verification)
    - `expertContext`: References to the analyst artifacts with relevance notes
    - `assumptions`, `rollbackTriggers`, `fallback` as appropriate
+5. **CRITICAL: Anti-pattern guards** after building roles (DO NOT proceed to Step 6 if any guard triggers without user approval):
+   - **Token budget**: Calculate net token delta for each proposed change. If total would increase skill beyond 500 lines, ask user to approve flagged changes explicitly.
+   - **Circular improvement**: If `.design/history/` contains a previous improve run, check whether any proposed change reverses a previous improvement. If found, ask user to review before proceeding.
+   - **Regression safety**: No quality dimension may degrade. If a change improves one dimension but risks another, note the trade-off explicitly and ask user to approve.
 6. If improvements require updating CLAUDE.md or README.md to stay in sync (per pre-commit checklist), add a `docs-updater` role.
 7. Write `.design/plan.json` with:
    - `schemaVersion: 4`
@@ -295,8 +301,10 @@ Run /do:execute to apply improvements.
    On failure: proceed (reflection is valuable but not blocking).
 
 **Fallback** (if finalize fails):
-1. Fix validation errors and re-run finalize.
-2. If structure is fundamentally broken: rebuild plan from expert findings, one role at a time.
+1. Read the error message from plan.py output (contains field name and issue)
+2. If error is in `roles[]`: edit the failing role brief in plan.json directly, re-run finalize (max 2 retries)
+3. If error is in top-level fields (`expertArtifacts`, `designDecisions`): fix the field structure, re-run finalize (max 2 retries)
+4. If finalize fails after 2 retries: report to user with error details and ask whether to rebuild from expert findings or abort
 
 ---
 
