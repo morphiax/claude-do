@@ -12,7 +12,7 @@ Decompose a goal into `.design/plan.json` with role briefs — goal-directed sco
 
 **Do NOT use `EnterPlanMode`** — this skill IS the plan.
 
-**CRITICAL: Always use agent teams.** When spawning any expert via Task tool, you MUST include `team_name: "do-design"` and `name: "{role}"` parameters. Without these, agents are standalone and cannot coordinate.
+**CRITICAL: Always use agent teams.** When spawning any expert via Task tool, you MUST include `team_name: $TEAM_NAME` and `name: "{role}"` parameters. Without these, agents are standalone and cannot coordinate.
 
 **Lead boundaries**: Use only `TeamCreate`, `TeamDelete`, `TaskCreate`, `TaskUpdate`, `TaskList`, `SendMessage`, `Task`, `AskUserQuestion`, and `Bash` (cleanup, verification, `python3 $PLAN_CLI` only). Project metadata (CLAUDE.md, package.json, README) allowed. Application source code prohibited. The lead orchestrates — agents think.
 
@@ -38,6 +38,11 @@ PLAN_CLI = {plugin_root}/skills/design/scripts/plan.py
 ```
 
 All script calls: `python3 $PLAN_CLI <command> [args]` via Bash. Output is JSON with `{"ok": true/false, ...}`.
+
+**Team name** (project-unique, avoids cross-contamination between terminals):
+```
+TEAM_NAME = $(python3 $PLAN_CLI team-name design).teamName
+```
 
 ---
 
@@ -105,10 +110,10 @@ Analyze the goal type and spawn appropriate experts:
 
 Create the team and spawn experts in parallel.
 
-1. `TeamDelete(team_name: "do-design")` (ignore errors), `TeamCreate(team_name: "do-design")`. If TeamCreate fails, tell user Agent Teams is required and stop.
+1. `TeamDelete(team_name: $TEAM_NAME)` (ignore errors), `TeamCreate(team_name: $TEAM_NAME)`. If TeamCreate fails, tell user Agent Teams is required and stop.
 2. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "{goal}" --stack "{stack}"`. If `ok: true` and memories exist, inject top 3-5 into expert prompts as a "Past Learnings" section (format: `- {category}: {summary} (from {created})`).
 3. `TaskCreate` for each expert.
-4. Spawn experts as teammates using the Task tool with `team_name: "do-design"` and `name: "{expert-name}"`. Write prompts appropriate to the goal and each expert's focus area. Every expert prompt MUST end with: "Save your complete findings to `.design/expert-{name}.json` as structured JSON. Then SendMessage to the lead with a summary." Expert artifacts flow directly to execution workers — they are structured JSON with sections that can be referenced selectively.
+4. Spawn experts as teammates using the Task tool with `team_name: $TEAM_NAME` and `name: "{expert-name}"`. Write prompts appropriate to the goal and each expert's focus area. Every expert prompt MUST end with: "Save your complete findings to `.design/expert-{name}.json` as structured JSON. Then SendMessage to the lead with a summary." Expert artifacts flow directly to execution workers — they are structured JSON with sections that can be referenced selectively.
 5. After all experts report back, verify artifacts exist: `ls .design/expert-*.json`. If any expert failed to save its artifact, send it a message: "Save your findings to `.design/expert-{name}.json` now." If the expert is unreachable after retry, re-spawn it with the same prompt. **Never write an expert artifact yourself** — the lead's interpretation is not a substitute for specialist analysis.
 
 ### 3.5. Interface Negotiation & Cross-Review

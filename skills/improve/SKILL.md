@@ -61,6 +61,11 @@ PLAN_CLI = {plugin_root}/skills/improve/scripts/plan.py
 
 All script calls: `python3 $PLAN_CLI <command> [args]` via Bash. Output is JSON with `{"ok": true/false, ...}`.
 
+**Team name** (project-unique, avoids cross-contamination between terminals):
+```
+TEAM_NAME = $(python3 $PLAN_CLI team-name improve).teamName
+```
+
 ---
 
 ## Flow
@@ -99,8 +104,8 @@ The lead assesses the target skill and determines the analysis approach.
 | Mode | Trigger | Team | Experts |
 |---|---|---|---|
 | **Targeted** | Focus area provided (e.g., "reduce cross-review verbosity") | No team — single Task agent | 1 specialist |
-| **General** | No focus area — full quality analysis | Team `do-improve` | 2-3 experts |
-| **Cross-skill** | Path is `--all` or multiple paths | Team `do-improve` | 2-3 experts + cross-review |
+| **General** | No focus area — full quality analysis | Team `$TEAM_NAME` | 2-3 experts |
+| **Cross-skill** | Path is `--all` or multiple paths | Team `$TEAM_NAME` | 2-3 experts + cross-review |
 
 3. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "improve {skill-name}" --stack "SKILL.md prompt engineering"`. If memories exist, inject top 3-5 into expert prompts.
 4. **Historical evidence**: Check for past execution artifacts:
@@ -129,8 +134,8 @@ Proceed directly to Step 4 (Synthesize) after receiving the analyst's report.
 
 #### General/Cross-skill Mode (team-based)
 
-1. `TeamDelete(team_name: "do-improve")` (ignore errors), `TeamCreate(team_name: "do-improve")`. If TeamCreate fails, tell user Agent Teams is required and stop.
-2. Spawn experts in parallel as teammates using the Task tool with `team_name: "do-improve"`:
+1. `TeamDelete(team_name: $TEAM_NAME)` (ignore errors), `TeamCreate(team_name: $TEAM_NAME)`. If TeamCreate fails, tell user Agent Teams is required and stop.
+2. Spawn experts in parallel as teammates using the Task tool with `team_name: $TEAM_NAME`:
 
 **Protocol Analyst** — evaluates clarity, completeness, flow gaps:
 - "Read `.design/skill-snapshot.md`. Score Protocol Clarity, Error Handling, and Verifiability (1-5 each with evidence)."
@@ -256,7 +261,7 @@ Distills improvement learnings into `.design/memory.jsonl`.
 ### 6. Complete
 
 1. Validate: `python3 $PLAN_CLI status .design/plan.json`. Stop if `ok: false`.
-2. If team was created: shut down teammates, `TeamDelete(team_name: "do-improve")`.
+2. If team was created: shut down teammates, `TeamDelete(team_name: $TEAM_NAME)`.
 3. Clean up TaskList (delete all analysis tasks so `/do:execute` starts clean).
 4. Summary: `python3 $PLAN_CLI summary .design/plan.json`. Display:
 

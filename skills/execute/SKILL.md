@@ -10,7 +10,7 @@ Execute `.design/plan.json` with persistent, self-organizing workers. Design pro
 
 **Do NOT use `EnterPlanMode`** — this skill IS the plan.
 
-**CRITICAL: Always use agent teams.** When spawning any worker via Task tool, you MUST include `team_name: "do-execute"` and `name: "{role}"` parameters. Without these, workers are standalone and cannot coordinate.
+**CRITICAL: Always use agent teams.** When spawning any worker via Task tool, you MUST include `team_name: $TEAM_NAME` and `name: "{role}"` parameters. Without these, workers are standalone and cannot coordinate.
 
 **Lead boundaries**: Use only `TeamCreate`, `TeamDelete`, `TaskCreate`, `TaskUpdate`, `TaskList`, `SendMessage`, `Task`, `AskUserQuestion`, and `Bash` (only for `python3 $PLAN_CLI`, `git`, verification scripts, and cleanup). Never read source files, use MCP tools, `Grep`, `Glob`, or `LSP`. Never execute tasks directly — spawn a worker.
 
@@ -26,6 +26,11 @@ PLAN_CLI = {plugin_root}/skills/execute/scripts/plan.py
 
 All script calls: `python3 $PLAN_CLI <command> [args]` via Bash. Output: JSON with `{"ok": true/false, ...}`.
 
+**Team name** (project-unique, avoids cross-contamination between terminals):
+```
+TEAM_NAME = $(python3 $PLAN_CLI team-name execute).teamName
+```
+
 ---
 
 ## Flow
@@ -34,7 +39,7 @@ All script calls: `python3 $PLAN_CLI <command> [args]` via Bash. Output: JSON wi
 
 1. Validate: `python3 $PLAN_CLI status .design/plan.json`. On failure: `not_found` = "No plan found. Run `/do:design <goal>` first." and stop; `bad_schema` = unsupported schema, stop; `empty_roles` = no roles, stop.
 2. Resume detection: If `isResume`: run `python3 $PLAN_CLI resume-reset .design/plan.json`. If `noWorkRemaining`: "All roles already resolved." and stop.
-3. Create team: `TeamDelete(team_name: "do-execute")` (ignore errors), then `TeamCreate(team_name: "do-execute")`. If TeamCreate fails, tell user Agent Teams is required and stop.
+3. Create team: `TeamDelete(team_name: $TEAM_NAME)` (ignore errors), then `TeamCreate(team_name: $TEAM_NAME)`. If TeamCreate fails, tell user Agent Teams is required and stop.
 4. Create TaskList: `python3 $PLAN_CLI tasklist-data .design/plan.json`. For each role: `TaskCreate` with subject `"Role {roleIndex}: {name} — {goal}"`, record returned ID in `roleIdMapping`. Wire `blockedBy` via `TaskUpdate(addBlockedBy)`. If resuming, mark completed roles. Add overlap constraints: `python3 $PLAN_CLI overlap-matrix .design/plan.json` — for each pair `(i, j)` where `j > i` and directories overlap: `TaskUpdate(taskId: roleIdMapping[j], addBlockedBy: [roleIdMapping[i]])`.
 5. **Worker pool**: Run `python3 $PLAN_CLI worker-pool .design/plan.json` to get workers (one per role).
 6. Summary: `python3 $PLAN_CLI summary .design/plan.json`. Store `goal`, `roleCount`, `maxDepth`.
@@ -85,7 +90,7 @@ Spawn workers as teammates using the Task tool. Each worker prompt MUST include:
 14. **Scope boundaries**: "Stay within your scope directories. Do not modify files outside your scope unless absolutely necessary for integration."
 
 ```
-Task(subagent_type: "general-purpose", team_name: "do-execute", name: "{worker-name}", model: "{model}", prompt: <role-specific prompt with all above>)
+Task(subagent_type: "general-purpose", team_name: $TEAM_NAME, name: "{worker-name}", model: "{model}", prompt: <role-specific prompt with all above>)
 ```
 
 ### 4. Monitor
@@ -217,7 +222,7 @@ Prompt includes:
 - "SendMessage to lead when complete: 'Memory curation complete. Added {count} memories ({breakdown by category}). Rejected {rejected_count} candidates (not transferable or duplicates).'."
 
 ```
-Task(subagent_type: "general-purpose", team_name: "do-execute", name: "memory-curator", model: "haiku", prompt: <above>)
+Task(subagent_type: "general-purpose", team_name: $TEAM_NAME, name: "memory-curator", model: "haiku", prompt: <above>)
 ```
 
 Wait for curator completion. On failure: proceed (memory curation is optional).
@@ -229,6 +234,6 @@ Wait for curator completion. On failure: proceed (memory curation is optional).
    find .design -mindepth 1 -maxdepth 1 ! -name history ! -name memory.jsonl ! -name reflection.jsonl ! -name handoff.md -exec mv {} "$ARCHIVE_DIR/" \;
    ```
    If partial (failures remain): leave artifacts in `.design/` for resume.
-6. Cleanup: `TeamDelete(team_name: "do-execute")`.
+6. Cleanup: `TeamDelete(team_name: $TEAM_NAME)`.
 
 **Arguments**: $ARGUMENTS

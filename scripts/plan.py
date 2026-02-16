@@ -4,7 +4,7 @@
 Schema version 4: Role-based briefs with goal-directed execution.
 
 Query commands (read-only):
-  status, summary, overlap-matrix, tasklist-data, worker-pool,
+  team-name, status, summary, overlap-matrix, tasklist-data, worker-pool,
   retry-candidates, circuit-breaker, memory-search, reflection-search
 
 Mutation commands (modify plan.json):
@@ -152,6 +152,25 @@ def atomic_write(path: str, data: Any) -> None:
 # ============================================================================
 # Query Commands
 # ============================================================================
+
+
+def cmd_team_name(args: argparse.Namespace) -> NoReturn:
+    """Generate a deterministic, project-unique team name.
+
+    Combines a skill prefix with a sanitized directory basename and a short
+    hash of the full path to avoid collisions between projects with the
+    same directory name.
+    """
+    import hashlib
+
+    skill = args.skill
+    cwd = os.getcwd()
+    basename = os.path.basename(cwd).lower()
+    # Sanitize: keep only alphanumeric and hyphens, collapse runs
+    sanitized = re.sub(r"[^a-z0-9]+", "-", basename).strip("-")[:20]
+    short_hash = hashlib.md5(cwd.encode(), usedforsecurity=False).hexdigest()[:6]
+    team_name = f"do-{skill}-{sanitized}-{short_hash}"
+    output_json({"ok": True, "teamName": team_name})
 
 
 def cmd_status(args: argparse.Namespace) -> NoReturn:
@@ -1239,6 +1258,12 @@ def main() -> None:
     subparsers = parser.add_subparsers(dest="command", help="Command to execute")
 
     # Query commands
+    p = subparsers.add_parser(
+        "team-name", help="Generate project-unique team name for a skill"
+    )
+    p.add_argument("skill", help="Skill name (design|execute|improve)")
+    p.set_defaults(func=cmd_team_name)
+
     p = subparsers.add_parser("status", help="Validate plan and return status counts")
     p.add_argument("plan_path", nargs="?", default=".design/plan.json")
     p.set_defaults(func=cmd_status)
