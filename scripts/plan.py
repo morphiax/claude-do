@@ -20,6 +20,7 @@ Exit code: 0 for success, 1 for errors.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -837,6 +838,33 @@ def _validate_auxiliary_role(aux: dict[str, Any], idx: int) -> list[str]:
     return issues
 
 
+def _validate_verification_specs(
+    specs: list[dict[str, Any]], role_names: set[str]
+) -> list[str]:
+    """Validate verificationSpecs schema when present."""
+    issues: list[str] = []
+    for i, spec in enumerate(specs):
+        # Required fields: role, path, runCommand
+        role = spec.get("role", "")
+        if not role:
+            issues.append(f"verificationSpecs[{i}]: missing 'role' field")
+        elif role not in role_names:
+            issues.append(f"verificationSpecs[{i}]: role '{role}' not found in roles")
+
+        if not spec.get("path"):
+            issues.append(f"verificationSpecs[{i}]: missing 'path' field")
+
+        if not spec.get("runCommand"):
+            issues.append(f"verificationSpecs[{i}]: missing 'runCommand' field")
+
+        # Optional fields: properties (must be array if present), sha256 (computed later)
+        properties = spec.get("properties")
+        if properties is not None and not isinstance(properties, list):
+            issues.append(f"verificationSpecs[{i}]: 'properties' must be an array")
+
+    return issues
+
+
 def _validate_role_count_and_names(roles: list[dict[str, Any]]) -> list[str]:
     """Check role count bounds and name uniqueness."""
     issues: list[str] = []
@@ -886,6 +914,16 @@ def _validate_structure(plan: dict[str, Any]) -> list[str]:
     issues.extend(_validate_dependency_graph(roles))
     for i, aux in enumerate(plan.get("auxiliaryRoles", [])):
         issues.extend(_validate_auxiliary_role(aux, i))
+
+    # Validate verificationSpecs if present (optional, backward compatible)
+    verification_specs = plan.get("verificationSpecs")
+    if verification_specs is not None:
+        if not isinstance(verification_specs, list):
+            issues.append("'verificationSpecs' must be an array")
+        else:
+            role_names = {r.get("name", "") for r in roles}
+            issues.extend(_validate_verification_specs(verification_specs, role_names))
+
     return issues
 
 
@@ -920,6 +958,32 @@ def _compute_directory_overlaps(plan: dict[str, Any]) -> int:
     return len(roles)
 
 
+def _compute_spec_checksums(plan: dict[str, Any]) -> None:
+    """Compute SHA256 checksums for verification spec files.
+
+    Modifies verificationSpecs entries in-place to add sha256 field.
+    If a spec file doesn't exist, skips with no error (design may not have written it yet).
+    """
+    verification_specs = plan.get("verificationSpecs", [])
+    if not verification_specs:
+        return
+
+    for spec in verification_specs:
+        path = spec.get("path", "")
+        if not path:
+            continue
+
+        # Compute SHA256 if file exists
+        if os.path.isfile(path):
+            try:
+                with open(path, "rb") as f:
+                    file_hash = hashlib.sha256(f.read()).hexdigest()
+                spec["sha256"] = file_hash
+            except OSError:
+                # Skip files that can't be read (permissions, etc.)
+                continue
+
+
 def cmd_finalize(args: argparse.Namespace) -> NoReturn:
     """Validate role brief structure and compute directory overlaps."""
     plan_path = args.plan_path
@@ -936,6 +1000,9 @@ def cmd_finalize(args: argparse.Namespace) -> NoReturn:
 
     # Step 2: Compute directory overlaps
     computed = _compute_directory_overlaps(plan)
+
+    # Step 2.5: Compute SHA256 checksums for verification specs (if present)
+    _compute_spec_checksums(plan)
 
     # Step 3: Initialize role statuses
     for role in plan.get("roles", []):
