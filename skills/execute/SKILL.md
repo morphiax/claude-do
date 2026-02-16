@@ -100,13 +100,13 @@ Event-driven loop — process worker messages as they arrive.
 
 **On role completion**: Worker reports what they achieved and acceptance criteria results.
 1. Update plan.json: `echo '[{"roleIndex": N, "status": "completed", "result": "..."}]' | python3 $PLAN_CLI update-status .design/plan.json`
-2. Handle any `cascaded` entries by marking them in TaskList.
+2. Handle cascaded dependencies: For each roleIndex in the `cascaded[]` array returned by update-status: `TaskUpdate(taskId: roleIdMapping[roleIndex], status: pending)` and output progress update "⊘ Skipped: {role.name} (dependency failed)".
 3. Wake idle workers — tell them to check for new tasks.
 4. **Progress update**: Output "✓ Completed: {role.name} — {one-line summary}"
 
 **On role failure**: Worker reports what failed and why.
 1. Update plan.json: `echo '[{"roleIndex": N, "status": "failed", "result": "..."}]' | python3 $PLAN_CLI update-status .design/plan.json`
-2. Handle cascaded entries in TaskList. For each skipped role: **Progress update** "⊘ Skipped: {role.name} (dependency failed)"
+2. Handle cascaded dependencies: For each roleIndex in the `cascaded[]` array returned by update-status: `TaskUpdate(taskId: roleIdMapping[roleIndex], status: pending)` and output progress update "⊘ Skipped: {role.name} (dependency failed)".
 3. **Progress update**: Output "✗ Failed: {role.name} — {failure reason}"
 4. Circuit breaker: `python3 $PLAN_CLI circuit-breaker .design/plan.json`. If `shouldAbort`: shut down all workers, go to Post-Execution.
 5. Retries: `python3 $PLAN_CLI retry-candidates .design/plan.json`. If retryable (attempts < 3):
@@ -117,6 +117,11 @@ Event-driven loop — process worker messages as they arrive.
    e. **Progress update**: Output "↻ Retry {attempt+1}/3: {role.name}"
 
 **On idle**: Worker reports no tasks available. Track idle workers. Check completion.
+
+**Worker liveness check** (turn-based timeout for silent workers):
+Track silence per worker (count lead turns where an in_progress worker sends no message).
+- After 5 turns of silence: SendMessage to worker asking "You've been working on {role.name} for 5 turns with no updates. Are you stuck? Report progress or blockers."
+- After 7 total turns of silence (2 more after ping): Mark role as failed with `echo '[{"roleIndex": N, "status": "failed", "result": "worker_timeout: no response after 7 turns"}]' | python3 $PLAN_CLI update-status .design/plan.json`. Trigger retry if attempts < 3 (see retry logic below). Output progress update "✗ Timeout: {role.name} — worker silent for 7 turns".
 
 **Completion check** (after each idle/completion):
 1. `python3 $PLAN_CLI status .design/plan.json`
