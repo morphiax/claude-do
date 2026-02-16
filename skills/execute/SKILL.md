@@ -70,7 +70,7 @@ Warn if git is dirty. If resuming: "Resuming execution."
 ```bash
 python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "{role.goal}" --stack "{context.stack}" --keywords "{role.scope.directories + role.name}"
 ```
-Parse JSON output. Take top 2-3 `memories[]` per role.
+Parse JSON output. Take top 2-3 `memories[]` per role. Log injected memories: output "Memory: {role.name} ← {count} memories ({keywords})".
 
 Spawn workers as teammates using the Task tool. Each worker prompt MUST include:
 
@@ -165,32 +165,7 @@ If gaps are found: spawn a targeted worker to address them.
 ### 7. Complete
 
 1. Summary: `python3 $PLAN_CLI status .design/plan.json`. Display completed/failed/blocked/skipped counts with names. Recommend follow-ups for failures.
-2. **Session handoff** — Write `.design/handoff.md`:
-
-```markdown
-# Session Handoff — {goal}
-Date: {ISO timestamp}
-
-## Completed
-{For each: "Role: {name} — {one-line result}"}
-
-## Failed
-{For each: "Role: {name} — {failure reason}"}
-
-## Integration: {PASS/FAIL/SKIPPED}
-
-## Decisions
-{Deviations from plan, retries, workarounds}
-
-## Files Changed
-{Deduplicated list of all files created/modified}
-
-## Known Gaps
-{Missing coverage, TODOs, skipped roles and why}
-
-## Next Steps
-{Concrete actions if work continues}
-```
+2. **Session handoff** — Write `.design/handoff.md` with sections: goal + date, completed roles (name + one-line result), failed roles (name + reason), integration status (PASS/FAIL/SKIPPED), decisions (deviations/retries/workarounds), files changed (deduplicated list), known gaps (missing coverage/TODOs/skipped roles), next steps (concrete actions).
 
 3. **Self-reflection** — Evaluate this run against the goal. Write a structured reflection entry:
 
@@ -214,13 +189,13 @@ Prompt includes:
 - "Read existing memories: `.design/memory.jsonl` (if exists). Note what is already recorded to avoid duplicates."
 - "The reflection entry contains the lead's honest self-evaluation of what worked and what didn't. Use it as a primary signal for what to record — reflections that identify surprising failures or unexpected successes are high-value memory candidates."
 
-**Quality gates — apply BEFORE storing each candidate memory:**
+**Quality gates** (all must pass before storing):
 
-- "TRANSFERABILITY TEST: Ask 'Would this be useful in a NEW session on a SIMILAR goal?' If no, discard. Session-specific data — test counts, bundle sizes, line counts, exit codes, specific file lists, timing — is never transferable."
-- "CATEGORY TEST: Each memory must be exactly one of: `convention` (codebase/domain facts: 'this repo uses Bun not Node'), `pattern` (reusable procedures: 'to deploy, run A then B'), `mistake` (failed approaches with root cause: 'approach X fails because Y, use Z'), `approach` (how a class of problem was solved: 'for rate limiting in Express, middleware pattern works because...'), `failure` (why a role/task failed — always record these). If it doesn't fit a category, it's not a memory."
-- "SURPRISE TEST: Routine successes on well-understood tasks are LOW value (importance 1-3). Record high importance (7-10) only for: unexpected failures, contradictions with prior assumptions, novel patterns not previously documented, or discovered conventions that differ from defaults."
-- "DEDUPLICATION: If an existing memory already covers this learning, skip it. If new evidence refines an existing memory, note the refinement rather than creating a duplicate."
-- "SPECIFICITY TEST: Each memory must contain at least one concrete reference — a file path, command, error message, code pattern, or tool name. 'Tests pass after changes' is not a memory. 'Bun test requires --run flag for CI (no watch mode)' is."
+- TRANSFERABILITY TEST: Useful in new session? (reject: test counts, metrics, file lists, timings, exit codes)
+- CATEGORY TEST: Fits convention|pattern|mistake|approach|failure? (reject: uncategorizable)
+- SURPRISE TEST: Unexpected/contradicts assumptions? Score 7-10. Routine success? Score 1-3.
+- DEDUPLICATION TEST: Not already in memory.jsonl? (reject: duplicates)
+- SPECIFICITY TEST: Contains concrete reference (path|command|error|pattern|tool)? (reject: vague)
 
 **Format:**
 - "For each memory that passes all gates: call `python3 $PLAN_CLI memory-add .design/memory.jsonl --category <cat> --keywords <csv> --content <text> --importance <1-10>`"
