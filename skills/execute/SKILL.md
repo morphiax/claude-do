@@ -85,10 +85,11 @@ Spawn workers as teammates using the Task tool. Each worker prompt MUST include:
 9. **Pre-completion verification (MANDATORY)**: "Before reporting done, you MUST run every acceptance criterion's `check` command as a separate shell invocation. This is non-negotiable — do not skip any check, do not assume one passing check implies another passes. For EACH criterion: (a) run the exact shell command from the `check` field, (b) capture its exit code and output, (c) record pass/fail with the actual output as evidence. If ANY check fails, you are NOT done — fix the issue and re-run ALL checks. Do not report completion until every check command exits 0. Common mistake: assuming 'tests pass' means 'build succeeds' — these are independent checks."
 10. **Verification specs** (if applicable): "Check plan.json verificationSpecs[] for an entry with your role name. If found, run the spec via its runCommand AFTER all acceptance criteria pass: `{runCommand from verificationSpecs entry}`. Spec files in `.design/specs/` are IMMUTABLE — if the spec fails, fix your implementation code, never modify the spec file. Specs test broad behavioral properties. Spec failures are blocking — do not report completion until the spec passes."
 11. **Committing**: "git add specific files + git commit with conventional commit message (feat:/fix:/refactor: etc). Never git add -A."
-12. **Completion reporting**: "When done, SendMessage to lead with: role name, what you achieved, files changed, acceptance criteria results (pass/fail each with evidence)."
-13. **Failure handling**: "If you cannot complete your goal, SendMessage to lead with: role name, what failed, why, what you tried, suggested alternative. If rollback triggers fire ({rollbackTriggers}), stop immediately and report."
-14. **Fallback**: If role has a fallback: "If your primary approach fails: {fallback}"
-15. **Scope boundaries**: "Stay within your scope directories. Do not modify files outside your scope unless absolutely necessary for integration."
+12. **Completion reporting**: "When done, SendMessage to lead with this JSON structure: `{\"role\": \"{name}\", \"achieved\": true, \"filesChanged\": [\"path1\", \"path2\"], \"acceptanceCriteria\": [{\"criterion\": \"...\", \"passed\": true|false, \"evidence\": \"exit code and output\"}]}`."
+13. **Tool boundaries**: "You may use Read, Grep, Glob, Edit, Write, Bash (for tests/build/git), LSP. Do NOT use WebFetch, WebSearch, MCP tools, or Task (no sub-spawning)."
+14. **Failure handling**: "If you cannot complete your goal, SendMessage to lead with: role name, what failed, why, what you tried, suggested alternative. If rollback triggers fire ({rollbackTriggers}), stop immediately and report."
+15. **Fallback**: If role has a fallback: "If your primary approach fails: {fallback}"
+16. **Scope boundaries**: "Stay within your scope directories. Do not modify files outside your scope unless absolutely necessary for integration."
 
 ```
 Task(subagent_type: "general-purpose", team_name: $TEAM_NAME, name: "{worker-name}", model: "{model}", prompt: <role-specific prompt with all above>)
@@ -110,7 +111,7 @@ Event-driven loop — process worker messages as they arrive.
 3. **Progress update**: Output "✗ Failed: {role.name} — {failure reason}"
 4. Circuit breaker: `python3 $PLAN_CLI circuit-breaker .design/plan.json`. If `shouldAbort`: shut down all workers, go to Post-Execution.
 5. Retries: `python3 $PLAN_CLI retry-candidates .design/plan.json`. If retryable (attempts < 3):
-   a. **Reflexion step**: Before retry, generate a 2-3 sentence reflection analyzing what went wrong. Ask: What was the root cause? What assumptions were incorrect? What should be done differently? Store reflection in role.result field as "Reflection for retry {attempt+1}: {reflection text}".
+   a. **Reflexion step**: Before retry, generate a 2-3 sentence reflection analyzing what went wrong. Ask: What was the root cause? What assumptions were incorrect? What should be done differently? Update plan.json to append reflection to role.result: `echo '[{"roleIndex": N, "status": "failed", "result": "{existing_result}\n\n--- Retry {attempt+1} Reflexion ---\n{reflection_text}\n--- End Reflexion ---"}]' | python3 $PLAN_CLI update-status .design/plan.json`.
    b. Clean up partial work: `git checkout` + `rm` any artifacts from failed attempt.
    c. Reset in TaskList: `TaskUpdate(taskId, status: pending)`.
    d. Tell the worker to retry via SendMessage with structured context: "Retry {attempt+1}/3 for {role.name}. Previous attempt failed: {result}. Reflection: {generated reflection}. What to try differently: {suggested alternative or fallback}. Re-read acceptance criteria and verify each independently before reporting."
