@@ -3,7 +3,7 @@
 > Multi-agent planning with structured debate, self-verifying execution, and cross-session memory
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Version](https://img.shields.io/badge/version-2.8.4-green.svg)
+![Version](https://img.shields.io/badge/version-2.9.0-green.svg)
 ![Claude Code](https://img.shields.io/badge/Claude%20Code-2.1.32%2B-orange.svg)
 
 ## What's Novel
@@ -43,13 +43,13 @@
 
 ## How It Works
 
-**`/do:design`** spawns experts (architects, researchers, domain specialists) based on goal type. For complex goals, experts debate via structured challenges/defenses. The lead synthesizes findings into role briefs with acceptance criteria. Scout auxiliaries verify expert assumptions against the real codebase.
+**`/do:design`** spawns experts (architects, researchers, domain specialists) based on goal type. For complex goals, experts debate via structured challenges/defenses. The lead synthesizes findings into role briefs with acceptance criteria. Scout auxiliaries verify expert assumptions against the real codebase. Phase announcements show progress. Draft plan review checkpoint for complex goals. Memory injection with transparency. Behavioral trait instructions for experts and auxiliaries. 3-turn liveness timeout (simplified from 5+7). End-of-run summary with metrics.
 
-**`/do:execute`** spawns persistent worker agents per role. Workers use CoVe-style verification, apply reflexion on failures, and report structured completion reports (role, achieved, filesChanged, acceptanceCriteria results). Liveness pipeline detects worker silence with turn-based timeout and re-spawn. Safety rails: retry budgets, cascading failures, circuit breaker, overlap serialization. Memory curator distills outcomes (including failures) into importance-rated learnings.
+**`/do:execute`** spawns persistent worker agents per role. Workers use CoVe-style verification, apply reflexion on failures, and report structured completion reports (role, achieved, filesChanged, acceptanceCriteria results). Adaptive model escalation on retry (haiku→sonnet→opus). Worker-to-worker handoff injects completed role context into dependent workers. Liveness pipeline detects worker silence with 3-turn timeout and re-spawn (simplified from 5+7). Safety rails: retry budgets, cascading failures, circuit breaker, overlap serialization. Memory curator distills outcomes (including failures) into importance-rated learnings with 6 categories (convention/pattern/mistake/approach/failure/procedure). Dynamic importance tracking via boost/decay. Progress reporting for significant events. Curation transparency. End-of-run summary with detailed metrics.
 
-**`/do:improve`** analyzes Claude Code skills using 7 quality dimensions (Protocol Clarity, Constraint Enforcement, Error Handling, Agent Coordination, Information Flow, Prompt Economy, Verifiability). For general analysis, spawns 2-3 experts; for targeted improvements, uses a single analyst. Produces testable hypotheses with predicted behavioral impacts. Always outputs `.design/plan.json` for `/do:execute` — never writes source files directly. Anti-pattern guards prevent token bloat, circular improvements, and regressions.
+**`/do:improve`** analyzes Claude Code skills using 7 quality dimensions (Protocol Clarity, Constraint Enforcement, Error Handling, Agent Coordination, Information Flow, Prompt Economy, Verifiability). For general analysis, spawns 2-3 experts; for targeted improvements, uses a single analyst. Produces testable hypotheses with predicted behavioral impacts. Always outputs `.design/plan.json` for `/do:execute` — never writes source files directly. Anti-pattern guards prevent token bloat, circular improvements, and regressions. Expert artifact schema validation. 3-turn liveness timeout. Compressed quality rubric (1/3/5 anchors). Behavioral trait instructions. Phase announcements and end-of-run summary.
 
-**`/do:reflect`** uses execution outcomes (from `.design/reflection.jsonl`) to identify what's actually working and what isn't. Analyzes recurring failures, unaddressed feedback, goal achievement rates, and trends across runs. Hypotheses are grounded in real evidence with confidence levels. Requires >=2 reflections to identify patterns. Complements `/do:improve` (static prompt quality) with dynamic functional optimization.
+**`/do:reflect`** uses execution outcomes (from `.design/reflection.jsonl`) to identify what's actually working and what isn't. Analyzes recurring failures, unaddressed feedback, goal achievement rates, and trends across runs. Hypotheses are grounded in real evidence with confidence levels. Requires >=2 reflections to identify patterns. Complements `/do:improve` (static prompt quality) with dynamic functional optimization. Uses plan.py archive command for consistency. Reflection validation. Phase announcements and end-of-run summary.
 
 ## Requirements
 
