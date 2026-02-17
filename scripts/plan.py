@@ -2018,6 +2018,270 @@ def cmd_reflection_validate(args: argparse.Namespace) -> NoReturn:
     output_json({"ok": True, "valid": True})
 
 
+def _validate_json_schema(
+    data: dict[str, Any], required_fields: list[str], field_types: dict[str, type]
+) -> list[str]:
+    """Shared JSON schema validation helper.
+
+    Args:
+        data: JSON object to validate
+        required_fields: List of required field names
+        field_types: Dict of field_name -> expected_type
+
+    Returns:
+        List of error messages (empty if valid)
+    """
+    errors = []
+
+    # Check required fields
+    missing = [f for f in required_fields if f not in data]
+    if missing:
+        errors.append(f"Missing required fields: {', '.join(missing)}")
+
+    # Check types
+    for field, expected_type in field_types.items():
+        if field in data and not isinstance(data[field], expected_type):
+            errors.append(
+                f"Field '{field}' must be {expected_type.__name__}, got {type(data[field]).__name__}"
+            )
+
+    return errors
+
+
+def _validate_single_challenger_issue(issue: dict[str, Any], index: int) -> list[str]:
+    """Validate a single challenger issue object."""
+    errors: list[str] = []
+
+    required = [
+        "category",
+        "severity",
+        "description",
+        "affectedRoles",
+        "recommendation",
+    ]
+    missing = [f for f in required if f not in issue]
+    if missing:
+        errors.append(f"issues[{index}]: missing {', '.join(missing)}")
+
+    valid_categories = {
+        "scope-gap",
+        "overlap",
+        "invalid-assumption",
+        "missing-dependency",
+        "criteria-gap",
+        "constraint-conflict",
+    }
+    if "category" in issue and issue["category"] not in valid_categories:
+        errors.append(f"issues[{index}]: invalid category '{issue['category']}'")
+
+    valid_severities = {"blocking", "high-risk", "low-risk"}
+    if "severity" in issue and issue["severity"] not in valid_severities:
+        errors.append(f"issues[{index}]: invalid severity '{issue['severity']}'")
+
+    return errors
+
+
+def _validate_challenger_issues(data: dict[str, Any]) -> list[str]:
+    """Validate challenger report issues array."""
+    errors: list[str] = []
+    if "issues" not in data:
+        return errors
+
+    for i, issue in enumerate(data["issues"]):
+        if not isinstance(issue, dict):
+            errors.append(f"issues[{i}] must be an object")
+            continue
+        errors.extend(_validate_single_challenger_issue(issue, i))
+
+    return errors
+
+
+def _validate_auxiliary_by_type(aux_type: str, data: dict[str, Any]) -> list[str]:
+    """Dispatch validation based on auxiliary type."""
+    if aux_type == "challenger":
+        errors = _validate_json_schema(
+            data, ["issues", "summary"], {"issues": list, "summary": str}
+        )
+        if not errors:
+            errors.extend(_validate_challenger_issues(data))
+        return errors
+
+    if aux_type == "scout":
+        return _validate_json_schema(
+            data,
+            ["scopeAreas", "discrepancies", "summary"],
+            {"scopeAreas": list, "discrepancies": list, "summary": str},
+        )
+
+    if aux_type == "integration-verifier":
+        errors = _validate_json_schema(
+            data,
+            [
+                "status",
+                "acceptanceCriteria",
+                "crossRoleIssues",
+                "testResults",
+                "endToEndVerification",
+                "summary",
+            ],
+            {
+                "status": str,
+                "acceptanceCriteria": list,
+                "crossRoleIssues": list,
+                "testResults": dict,
+                "endToEndVerification": dict,
+                "summary": str,
+            },
+        )
+        if not errors and "status" in data and data["status"] not in {"PASS", "FAIL"}:
+            errors.append(f"status must be 'PASS' or 'FAIL', got '{data['status']}'")
+        return errors
+
+    if aux_type == "regression-checker":
+        return _validate_json_schema(
+            data,
+            ["passed", "changes", "regressions", "summary"],
+            {"passed": bool, "changes": list, "regressions": list, "summary": str},
+        )
+
+    if aux_type == "memory-curator":
+        return _validate_json_schema(
+            data, ["memories", "summary"], {"memories": list, "summary": str}
+        )
+
+    return [
+        f"Unknown auxiliary type: {aux_type}. Valid types: challenger, scout, integration-verifier, regression-checker, memory-curator"
+    ]
+
+
+def _build_artifact_summary(aux_type: str, data: dict[str, Any]) -> dict[str, Any]:
+    """Build artifact summary for display."""
+    summary = {"type": aux_type, "summary": data.get("summary", "")}
+
+    if aux_type == "challenger":
+        summary["issueCount"] = len(data.get("issues", []))
+        blocking = sum(
+            1 for i in data.get("issues", []) if i.get("severity") == "blocking"
+        )
+        summary["blockingCount"] = blocking
+    elif aux_type == "scout":
+        summary["discrepancyCount"] = len(data.get("discrepancies", []))
+    elif aux_type == "integration-verifier":
+        summary["status"] = data.get("status", "UNKNOWN")
+    elif aux_type == "regression-checker":
+        summary["passed"] = data.get("passed", False)
+        summary["regressionCount"] = len(data.get("regressions", []))
+    elif aux_type == "memory-curator":
+        summary["memoryCount"] = len(data.get("memories", []))
+
+    return summary
+
+
+def cmd_validate_auxiliary_report(args: argparse.Namespace) -> NoReturn:
+    """Validate auxiliary report JSON against type-specific schema.
+
+    Schemas match execute/SKILL.md:
+    - challenger: {issues: [{category, severity, description, affectedRoles, recommendation}], summary}
+    - scout: {scopeAreas: [...], discrepancies: [...], summary}
+    - integration-verifier: {status, verificationSpecs, acceptanceCriteria, crossRoleIssues, testResults, endToEndVerification, summary}
+    - regression-checker: {passed: bool, changes: [...], regressions: [...], summary}
+    - memory-curator: {memories: [...], summary}
+    """
+    artifact_path = args.artifact_path
+    aux_type = args.type
+
+    if not os.path.exists(artifact_path):
+        error_exit(f"Artifact file not found: {artifact_path}")
+
+    try:
+        with open(artifact_path) as f:
+            data = json.load(f)
+    except json.JSONDecodeError as e:
+        error_exit(f"Invalid JSON in artifact: {e}")
+    except OSError as e:
+        error_exit(f"Error reading artifact: {e}")
+
+    errors = _validate_auxiliary_by_type(aux_type, data)
+    if errors:
+        error_exit(f"Schema validation failed: {'; '.join(errors)}")
+
+    artifact_summary = _build_artifact_summary(aux_type, data)
+    output_json({"ok": True, "valid": True, "artifactSummary": artifact_summary})
+
+
+def _validate_acceptance_criteria(data: dict[str, Any]) -> list[str]:
+    """Validate acceptanceCriteria array structure."""
+    errors: list[str] = []
+    if "acceptanceCriteria" not in data:
+        return errors
+
+    for i, criterion in enumerate(data["acceptanceCriteria"]):
+        if not isinstance(criterion, dict):
+            errors.append(f"acceptanceCriteria[{i}] must be an object")
+            continue
+        required = ["criterion", "passed", "evidence"]
+        missing = [f for f in required if f not in criterion]
+        if missing:
+            errors.append(f"acceptanceCriteria[{i}]: missing {', '.join(missing)}")
+
+    return errors
+
+
+def _validate_worker_optional_fields(data: dict[str, Any]) -> list[str]:
+    """Validate optional worker completion fields."""
+    errors: list[str] = []
+    if "keyDecisions" in data and not isinstance(data["keyDecisions"], list):
+        errors.append("keyDecisions must be an array")
+    if "contextForDependents" in data and not isinstance(
+        data["contextForDependents"], str
+    ):
+        errors.append("contextForDependents must be a string")
+    return errors
+
+
+def cmd_worker_completion_validate(args: argparse.Namespace) -> NoReturn:
+    """Validate worker completion report JSON against schema.
+
+    Schema (from execute/SKILL.md worker protocol):
+    {
+        role: string,
+        achieved: bool,
+        filesChanged: [string],
+        acceptanceCriteria: [{criterion: string, passed: bool, evidence: string}],
+        keyDecisions: [string],
+        contextForDependents: string
+    }
+
+    Reads JSON from stdin.
+    """
+    _ = args  # Unused but required for dispatch compatibility
+
+    try:
+        data = json.load(sys.stdin)
+    except json.JSONDecodeError as e:
+        error_exit(f"Invalid JSON in worker completion: {e}")
+
+    errors = _validate_json_schema(
+        data,
+        ["role", "achieved", "filesChanged", "acceptanceCriteria"],
+        {
+            "role": str,
+            "achieved": bool,
+            "filesChanged": list,
+            "acceptanceCriteria": list,
+        },
+    )
+
+    if not errors:
+        errors.extend(_validate_acceptance_criteria(data))
+        errors.extend(_validate_worker_optional_fields(data))
+
+    if errors:
+        error_exit(f"Schema validation failed: {'; '.join(errors)}")
+
+    output_json({"ok": True, "valid": True})
+
+
 def _compute_intervention_score(
     level: int,
     confidence: str,
@@ -2033,14 +2297,8 @@ def _compute_intervention_score(
     return tier_weight * confidence_mult / effort_mult
 
 
-def _validate_recon_intervention(
-    intervention: dict[str, Any],
-    index: int,
-    tier_weights: dict[int, int],
-    confidence_multipliers: dict[str, float],
-    effort_multipliers: dict[str, float],
-) -> None:
-    """Validate a single intervention and compute its compositeScore."""
+def _check_recon_required_fields(intervention: dict[str, Any], index: int) -> None:
+    """Check required fields in intervention."""
     required = [
         "title",
         "leverageLevel",
@@ -2053,6 +2311,11 @@ def _validate_recon_intervention(
     if missing:
         error_exit(f"Intervention {index}: missing fields {', '.join(missing)}")
 
+
+def _check_recon_leverage_fields(
+    intervention: dict[str, Any], index: int
+) -> tuple[int, str, str]:
+    """Validate and return leverage level, confidence, and effort."""
     level = intervention.get("leverageLevel")
     if not isinstance(level, int) or not 1 <= level <= 7:
         error_exit(
@@ -2068,11 +2331,23 @@ def _validate_recon_intervention(
             f"Intervention {index}: wrongDirection required for leverageLevel {level}"
         )
 
-    confidence = intervention.get("confidence")
+    return level, str(intervention.get("confidence")), str(intervention.get("effort"))
+
+
+def _validate_recon_intervention(
+    intervention: dict[str, Any],
+    index: int,
+    tier_weights: dict[int, int],
+    confidence_multipliers: dict[str, float],
+    effort_multipliers: dict[str, float],
+) -> None:
+    """Validate a single intervention and compute its compositeScore."""
+    _check_recon_required_fields(intervention, index)
+    level, confidence, effort = _check_recon_leverage_fields(intervention, index)
+
     if confidence not in confidence_multipliers:
         error_exit(f"Intervention {index}: invalid confidence '{confidence}'")
 
-    effort = intervention.get("effort")
     if effort not in effort_multipliers:
         error_exit(f"Intervention {index}: invalid effort '{effort}'")
 
@@ -2642,6 +2917,14 @@ def cmd_self_test(args: argparse.Namespace) -> NoReturn:
                 ),
             ),
             ("reflection-validate", lambda: _test_reflection_validate(script_path)),
+            (
+                "validate-auxiliary-report",
+                lambda: _test_validate_auxiliary_report(script_path, tmp_dir),
+            ),
+            (
+                "worker-completion-validate",
+                lambda: _test_worker_completion_validate(script_path),
+            ),
             (
                 "recon-validate",
                 lambda: _test_recon_validate(script_path, fixtures["recon_file"]),
@@ -3338,6 +3621,89 @@ def _test_validate_checks_invalid(script_path: str, plan_path: str) -> None:
     assert len(invalid_checks) > 0, "Should detect at least one invalid check"
 
 
+def _test_validate_auxiliary_report(script_path: str, tmp_dir: str) -> None:
+    """Test validate-auxiliary-report command."""
+    # Test challenger schema
+    challenger_report = {
+        "issues": [
+            {
+                "category": "scope-gap",
+                "severity": "blocking",
+                "description": "Test issue",
+                "affectedRoles": ["role1"],
+                "recommendation": "Fix it",
+            }
+        ],
+        "summary": "Test summary",
+    }
+    challenger_path = os.path.join(tmp_dir, "challenger-report.json")
+    with open(challenger_path, "w") as f:
+        json.dump(challenger_report, f)
+
+    output = _run_command(
+        script_path,
+        ["validate-auxiliary-report", challenger_path, "--type", "challenger"],
+    )
+    assert output.get("ok") is True, f"validate-auxiliary-report failed: {output}"
+    assert output.get("valid") is True, (
+        "validate-auxiliary-report should report valid=True"
+    )
+    assert "artifactSummary" in output, "Missing artifactSummary in output"
+    assert output["artifactSummary"]["issueCount"] == 1, "Issue count mismatch"
+
+    # Test invalid schema
+    bad_report = {"bad": "data"}
+    bad_path = os.path.join(tmp_dir, "bad-report.json")
+    with open(bad_path, "w") as f:
+        json.dump(bad_report, f)
+
+    output = _run_command(
+        script_path, ["validate-auxiliary-report", bad_path, "--type", "challenger"]
+    )
+    assert output.get("ok") is False, (
+        "validate-auxiliary-report should reject invalid schema"
+    )
+
+
+def _test_worker_completion_validate(script_path: str) -> None:
+    """Test worker-completion-validate command."""
+    # Test valid completion report
+    valid_report = {
+        "role": "test-role",
+        "achieved": True,
+        "filesChanged": ["file1.py", "file2.py"],
+        "acceptanceCriteria": [
+            {"criterion": "Test passes", "passed": True, "evidence": "exit code 0"}
+        ],
+        "keyDecisions": ["Decision 1"],
+        "contextForDependents": "Context text",
+    }
+
+    output = _run_command(
+        script_path,
+        ["worker-completion-validate"],
+        stdin_data=json.dumps(valid_report),
+    )
+    assert output.get("ok") is True, (
+        f"worker-completion-validate failed with valid input: {output}"
+    )
+    assert output.get("valid") is True, (
+        "worker-completion-validate should report valid=True"
+    )
+
+    # Test invalid report (missing required fields)
+    invalid_report = {"role": "test"}
+
+    output = _run_command(
+        script_path,
+        ["worker-completion-validate"],
+        stdin_data=json.dumps(invalid_report),
+    )
+    assert output.get("ok") is False, (
+        "worker-completion-validate should reject incomplete report"
+    )
+
+
 def _test_expert_validate(script_path: str, artifact_path: str) -> None:
     """Test expert-validate command."""
     output = _run_command(script_path, ["expert-validate", artifact_path])
@@ -3584,6 +3950,31 @@ def main() -> None:
         help="Validate reflection evaluation schema (reads JSON from stdin)",
     )
     p.set_defaults(func=cmd_reflection_validate)
+
+    p = subparsers.add_parser(
+        "validate-auxiliary-report",
+        help="Validate auxiliary report JSON against type-specific schema",
+    )
+    p.add_argument("artifact_path", help="Path to auxiliary report JSON file")
+    p.add_argument(
+        "--type",
+        required=True,
+        choices=[
+            "challenger",
+            "scout",
+            "integration-verifier",
+            "regression-checker",
+            "memory-curator",
+        ],
+        help="Auxiliary type",
+    )
+    p.set_defaults(func=cmd_validate_auxiliary_report)
+
+    p = subparsers.add_parser(
+        "worker-completion-validate",
+        help="Validate worker completion report schema (reads JSON from stdin)",
+    )
+    p.set_defaults(func=cmd_worker_completion_validate)
 
     p = subparsers.add_parser(
         "memory-summary", help="Format memory injection summary for user display"
