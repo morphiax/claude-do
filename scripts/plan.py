@@ -638,6 +638,30 @@ def _compute_cascading_failures(
     return cascaded
 
 
+def _validate_status_transition(
+    current_status: str, new_status: str
+) -> tuple[bool, str]:
+    """Validate state machine transition. Returns (is_valid, error_message)."""
+    valid_transitions = {
+        "pending": {"in_progress"},
+        "in_progress": {"completed", "failed"},
+        "failed": {"pending"},  # retry resets to pending
+        "completed": set(),  # terminal state
+        "skipped": set(),  # terminal state
+        "blocked": set(),  # terminal state
+    }
+
+    allowed = valid_transitions.get(current_status, set())
+    if new_status in allowed:
+        return (True, "")
+
+    return (
+        False,
+        f"Invalid transition: {current_status} -> {new_status}. "
+        f"Allowed: {', '.join(allowed) if allowed else 'none (terminal state)'}",
+    )
+
+
 def cmd_update_status(args: argparse.Namespace) -> NoReturn:
     """Batch update role statuses with progressive trimming and cascading failures."""
     plan_path = args.plan_path
@@ -662,6 +686,16 @@ def cmd_update_status(args: argparse.Namespace) -> NoReturn:
         idx = update.get("roleIndex")
         if idx is None or idx >= len(roles):
             continue
+
+        # Validate state transition if status is being changed
+        new_status = update.get("status")
+        if new_status:
+            current_status = roles[idx].get("status", "pending")
+            is_valid, error_msg = _validate_status_transition(
+                current_status, new_status
+            )
+            if not is_valid:
+                error_exit(f"Role {idx} ({roles[idx].get('name', '')}): {error_msg}")
 
         _apply_status_update(
             roles[idx], update, idx, updated, newly_failed, trimmed, plan
@@ -1033,6 +1067,280 @@ def cmd_finalize(args: argparse.Namespace) -> NoReturn:
             "auxiliaryCount": len(plan.get("auxiliaryRoles", [])),
         }
     )
+
+
+# ============================================================================
+# Health Check Command
+# ============================================================================
+
+
+def _check_plan_json(design_dir: str) -> list[str]:
+    """Check plan.json validity. Returns list of issues."""
+    issues = []
+    plan_path = os.path.join(design_dir, "plan.json")
+    if not os.path.exists(plan_path):
+        issues.append("plan.json not found")
+        return issues
+
+    try:
+        with open(plan_path) as f:
+            plan = json.load(f)
+        if plan.get("schemaVersion") != 4:
+            issues.append(
+                f"Invalid schema version: {plan.get('schemaVersion')} (expected 4)"
+            )
+    except json.JSONDecodeError as e:
+        issues.append(f"plan.json is not valid JSON: {e}")
+    except OSError as e:
+        issues.append(f"Cannot read plan.json: {e}")
+
+    return issues
+
+
+def _check_jsonl_file(
+    file_path: str, required_fields: set[str], file_label: str
+) -> tuple[list[str], list[str]]:
+    """Check JSONL file validity. Returns (issues, warnings)."""
+    issues = []
+    warnings = []
+
+    if not os.path.exists(file_path):
+        return (issues, warnings)
+
+    try:
+        with open(file_path) as f:
+            line_num = 0
+            for line in f:
+                line_num += 1
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                    missing = required_fields - set(entry.keys())
+                    if missing:
+                        warnings.append(
+                            f"{file_label} line {line_num}: missing fields {missing}"
+                        )
+                except json.JSONDecodeError:
+                    warnings.append(f"{file_label} line {line_num}: invalid JSON")
+    except OSError as e:
+        issues.append(f"Cannot read {file_label}: {e}")
+
+    return (issues, warnings)
+
+
+def _check_symlinks(design_dir: str) -> tuple[list[str], list[str]]:
+    """Check symlinks in design directory. Returns (issues, warnings)."""
+    issues = []
+    warnings = []
+
+    try:
+        for item in os.listdir(design_dir):
+            item_path = os.path.join(design_dir, item)
+            if os.path.islink(item_path):
+                target = os.readlink(item_path)
+                if not os.path.exists(item_path):
+                    issues.append(f"Broken symlink: {item} -> {target}")
+    except OSError as e:
+        warnings.append(f"Cannot scan directory for symlinks: {e}")
+
+    return (issues, warnings)
+
+
+def cmd_health_check(args: argparse.Namespace) -> NoReturn:
+    """Validate .design/ directory integrity.
+
+    Checks:
+    - plan.json exists and is valid JSON
+    - memory.jsonl entries are valid (if file exists)
+    - reflection.jsonl entries are valid (if file exists)
+    - symlinks resolve (if any exist)
+    """
+    design_dir = args.design_dir.rstrip("/")
+    all_issues = []
+    all_warnings = []
+
+    # Check if design directory exists
+    if not os.path.exists(design_dir):
+        error_exit(f"Design directory not found: {design_dir}")
+
+    if not os.path.isdir(design_dir):
+        error_exit(f"{design_dir} is not a directory")
+
+    # Check plan.json
+    all_issues.extend(_check_plan_json(design_dir))
+
+    # Check memory.jsonl
+    memory_path = os.path.join(design_dir, "memory.jsonl")
+    mem_issues, mem_warnings = _check_jsonl_file(
+        memory_path, {"id", "category", "content", "timestamp"}, "memory.jsonl"
+    )
+    all_issues.extend(mem_issues)
+    all_warnings.extend(mem_warnings)
+
+    # Check reflection.jsonl
+    reflection_path = os.path.join(design_dir, "reflection.jsonl")
+    ref_issues, ref_warnings = _check_jsonl_file(
+        reflection_path,
+        {"id", "skill", "goal", "outcome", "timestamp"},
+        "reflection.jsonl",
+    )
+    all_issues.extend(ref_issues)
+    all_warnings.extend(ref_warnings)
+
+    # Check symlinks
+    sym_issues, sym_warnings = _check_symlinks(design_dir)
+    all_issues.extend(sym_issues)
+    all_warnings.extend(sym_warnings)
+
+    # Return results
+    healthy = len(all_issues) == 0
+    output_json(
+        {"ok": True, "healthy": healthy, "issues": all_issues, "warnings": all_warnings}
+    )
+
+
+def _count_criteria_changes(
+    criteria_a: dict[str, Any], criteria_b: dict[str, Any]
+) -> tuple[int, int, int]:
+    """Count criteria changes. Returns (added, removed, modified)."""
+    added = len([c for c in criteria_b if c not in criteria_a])
+    removed = len([c for c in criteria_a if c not in criteria_b])
+    modified = sum(
+        1
+        for c in criteria_a
+        if c in criteria_b and criteria_a[c].get("check") != criteria_b[c].get("check")
+    )
+    return (added, removed, modified)
+
+
+def _compare_acceptance_criteria(
+    role_a: dict[str, Any], role_b: dict[str, Any]
+) -> list[str]:
+    """Compare acceptance criteria between two roles. Returns change descriptions."""
+    changes = []
+    criteria_a = {c.get("criterion"): c for c in role_a.get("acceptanceCriteria", [])}
+    criteria_b = {c.get("criterion"): c for c in role_b.get("acceptanceCriteria", [])}
+
+    added, removed, modified = _count_criteria_changes(criteria_a, criteria_b)
+
+    if added > 0:
+        changes.append(f"+{added} acceptance criteria")
+    if removed > 0:
+        changes.append(f"-{removed} acceptance criteria")
+    if modified > 0:
+        changes.append(f"~{modified} acceptance criteria modified")
+
+    return changes
+
+
+def _compare_dependencies(role_a: dict[str, Any], role_b: dict[str, Any]) -> list[str]:
+    """Compare dependencies between two roles. Returns change descriptions."""
+    changes = []
+    deps_a = set(role_a.get("scope", {}).get("dependencies", []))
+    deps_b = set(role_b.get("scope", {}).get("dependencies", []))
+
+    if deps_a != deps_b:
+        added_deps = deps_b - deps_a
+        removed_deps = deps_a - deps_b
+        if added_deps:
+            changes.append(f"+deps: {', '.join(added_deps)}")
+        if removed_deps:
+            changes.append(f"-deps: {', '.join(removed_deps)}")
+
+    return changes
+
+
+def _compare_role(role_a: dict[str, Any], role_b: dict[str, Any]) -> list[str]:
+    """Compare two roles. Returns list of change descriptions."""
+    changes = []
+
+    if role_a.get("goal") != role_b.get("goal"):
+        changes.append("goal modified")
+
+    if role_a.get("status") != role_b.get("status"):
+        changes.append(f"status: {role_a.get('status')} -> {role_b.get('status')}")
+
+    changes.extend(_compare_acceptance_criteria(role_a, role_b))
+    changes.extend(_compare_dependencies(role_a, role_b))
+
+    return changes
+
+
+def _find_modified_roles(
+    roles_a: dict[str, dict[str, Any]], roles_b: dict[str, dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Find modified roles between two plans. Returns list of {role, changes}."""
+    modified_roles = []
+    for name in roles_a:
+        if name not in roles_b:
+            continue
+
+        changes = _compare_role(roles_a[name], roles_b[name])
+        if changes:
+            modified_roles.append({"role": name, "changes": changes})
+
+    return modified_roles
+
+
+def _build_summary(
+    added_count: int, removed_count: int, modified_count: int, goal_changed: bool
+) -> str:
+    """Build summary text from change counts."""
+    parts = []
+    if added_count > 0:
+        parts.append(f"{added_count} roles added")
+    if removed_count > 0:
+        parts.append(f"{removed_count} roles removed")
+    if modified_count > 0:
+        parts.append(f"{modified_count} roles modified")
+    if goal_changed:
+        parts.append("goal changed")
+
+    return ", ".join(parts) if parts else "no changes detected"
+
+
+def _compute_plan_diff(
+    plan_a: dict[str, Any], plan_b: dict[str, Any]
+) -> dict[str, Any]:
+    """Compute differences between two plans. Returns diff result dict."""
+    roles_a = {r.get("name", ""): r for r in plan_a.get("roles", [])}
+    roles_b = {r.get("name", ""): r for r in plan_b.get("roles", [])}
+
+    added_roles = [name for name in roles_b if name not in roles_a]
+    removed_roles = [name for name in roles_a if name not in roles_b]
+    modified_roles = _find_modified_roles(roles_a, roles_b)
+    goal_changed = plan_a.get("goal") != plan_b.get("goal")
+
+    summary = _build_summary(
+        len(added_roles), len(removed_roles), len(modified_roles), goal_changed
+    )
+
+    return {
+        "ok": True,
+        "summary": summary,
+        "addedRoles": added_roles,
+        "removedRoles": removed_roles,
+        "modifiedRoles": modified_roles,
+        "goalChanged": goal_changed,
+    }
+
+
+def cmd_plan_diff(args: argparse.Namespace) -> NoReturn:
+    """Compare two plan.json files and output human-readable summary of changes.
+
+    Compares:
+    - Added/removed/modified roles
+    - Changed acceptance criteria
+    - Dependency changes
+    - Status changes
+    """
+    plan_a = load_plan(args.plan_a)
+    plan_b = load_plan(args.plan_b)
+
+    result = _compute_plan_diff(plan_a, plan_b)
+    output_json(result)
 
 
 # ============================================================================
@@ -1699,6 +2007,18 @@ def main() -> None:
         help="Only validate structure, skip overlap computation",
     )
     p.set_defaults(func=cmd_finalize)
+
+    # Health and diff commands
+    p = subparsers.add_parser(
+        "health-check", help="Validate .design/ directory integrity"
+    )
+    p.add_argument("design_dir", nargs="?", default=".design")
+    p.set_defaults(func=cmd_health_check)
+
+    p = subparsers.add_parser("plan-diff", help="Compare two plan.json files")
+    p.add_argument("plan_a", help="First plan file")
+    p.add_argument("plan_b", help="Second plan file")
+    p.set_defaults(func=cmd_plan_diff)
 
     args = parser.parse_args()
 
