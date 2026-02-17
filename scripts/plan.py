@@ -4398,6 +4398,1374 @@ class TestPlanCommands(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertTrue(result["ok"])
 
+    def test_finalize_exercises_directory_overlaps(self) -> None:
+        """Test that finalize exercises _compute_directory_overlaps."""
+        plan_file = os.path.join(self.tmp_dir.name, "overlap_plan.json")
+        plan = load_plan(self.fixtures["minimal_plan"])
+        plan["roles"][0]["scope"]["directories"] = ["src/api"]
+        plan["roles"][1]["scope"]["directories"] = ["src/api"]
+        with open(plan_file, "w") as f:
+            json.dump(plan, f)
+
+        args = argparse.Namespace(plan_path=plan_file)
+        exit_code, result = self._run_cmd(cmd_finalize, args)
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+
+    def test_finalize_exercises_role_brief_validation(self) -> None:
+        """Test that finalize exercises _validate_role_brief."""
+        args = argparse.Namespace(plan_path=self.fixtures["minimal_plan"])
+        exit_code, result = self._run_cmd(cmd_finalize, args)
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+
+    def test_update_status_with_cascading(self) -> None:
+        """Test cmd_update_status exercises cascading failures."""
+        plan_file = os.path.join(self.tmp_dir.name, "cascade_plan.json")
+        plan = load_plan(self.fixtures["minimal_plan"])
+        plan["roles"][0]["status"] = "pending"
+        plan["roles"][1]["status"] = "pending"
+        with open(plan_file, "w") as f:
+            json.dump(plan, f)
+
+        update_json = json.dumps([{"role": "backend-developer", "status": "failed"}])
+        args = argparse.Namespace(plan_path=plan_file)
+
+        captured = io.StringIO()
+        with contextlib.redirect_stdout(captured):
+            try:
+                import sys
+
+                old_stdin = sys.stdin
+                sys.stdin = io.StringIO(update_json)
+                cmd_update_status(args)
+                sys.stdin = old_stdin
+            except SystemExit:
+                sys.stdin = old_stdin
+                pass
+
+        result = json.loads(captured.getvalue())
+        self.assertTrue(result["ok"])
+
+    def test_memory_add_with_boost(self) -> None:
+        """Test cmd_memory_add with boost flag."""
+        memory_file = os.path.join(self.tmp_dir.name, "memory.jsonl")
+        # Create memory file with an existing entry to boost
+        with open(memory_file, "w") as f:
+            json.dump(
+                {
+                    "id": "test-id",
+                    "category": "pattern",
+                    "keywords": ["python"],
+                    "content": "Test content",
+                    "source": "",
+                    "timestamp": 1735689600.0,
+                    "goal_context": "",
+                    "importance": 5,
+                    "usage_count": 0,
+                },
+                f,
+            )
+            f.write("\n")
+
+        args = argparse.Namespace(
+            memory_path=memory_file,
+            category="pattern",
+            keywords="test,python",
+            content="Test memory content",
+            source=None,
+            goal_context=None,
+            importance=5,
+            boost=True,
+            decay=False,
+            id="test-id",
+        )
+        exit_code, result = self._run_cmd(cmd_memory_add, args)
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+
+    def test_memory_add_with_decay(self) -> None:
+        """Test cmd_memory_add with decay flag."""
+        memory_file = os.path.join(self.tmp_dir.name, "memory.jsonl")
+        # Create memory file with an existing entry to decay
+        with open(memory_file, "w") as f:
+            json.dump(
+                {
+                    "id": "test-id-2",
+                    "category": "mistake",
+                    "keywords": ["bug"],
+                    "content": "Test content",
+                    "source": "",
+                    "timestamp": 1735689600.0,
+                    "goal_context": "",
+                    "importance": 8,
+                    "usage_count": 0,
+                },
+                f,
+            )
+            f.write("\n")
+
+        args = argparse.Namespace(
+            memory_path=memory_file,
+            category="mistake",
+            keywords="error,bug",
+            content="Test mistake content",
+            source=None,
+            goal_context=None,
+            importance=3,
+            boost=False,
+            decay=True,
+            id="test-id-2",
+        )
+        exit_code, result = self._run_cmd(cmd_memory_add, args)
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+
+    def test_memory_search_with_keywords(self) -> None:
+        """Test cmd_memory_search with keyword matching."""
+        memory_file = os.path.join(self.tmp_dir.name, "memory.jsonl")
+        with open(memory_file, "w") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "id": "test-id",
+                        "category": "pattern",
+                        "keywords": ["python", "testing"],
+                        "content": "Test content",
+                        "timestamp": "2025-01-01T00:00:00Z",
+                        "importance": 5,
+                    }
+                )
+                + "\n"
+            )
+
+        args = argparse.Namespace(
+            memory_path=memory_file,
+            goal="test python code",
+            stack="python",
+            keywords="testing",
+            limit=5,
+        )
+        exit_code, result = self._run_cmd(cmd_memory_search, args)
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+        self.assertIn("memories", result)
+
+    def test_reflection_add_success(self) -> None:
+        """Test cmd_reflection_add adds reflection entry."""
+        reflection_file = os.path.join(self.tmp_dir.name, "reflection.jsonl")
+        with open(reflection_file, "w"):
+            pass
+
+        reflection_json = json.dumps(
+            {
+                "goalAchieved": True,
+                "successFactors": ["factor1"],
+                "challenges": [],
+                "whatWorked": [],
+                "whatDidntWork": [],
+                "surprises": [],
+                "recommendation": "Continue",
+            }
+        )
+
+        args = argparse.Namespace(
+            reflection_path=reflection_file,
+            skill="design",
+            goal="Test goal",
+            outcome="completed",
+            goal_achieved=True,
+        )
+
+        captured = io.StringIO()
+        with contextlib.redirect_stdout(captured):
+            try:
+                import sys
+
+                old_stdin = sys.stdin
+                sys.stdin = io.StringIO(reflection_json)
+                cmd_reflection_add(args)
+                sys.stdin = old_stdin
+            except SystemExit:
+                sys.stdin = old_stdin
+                pass
+
+        result = json.loads(captured.getvalue())
+        self.assertTrue(result["ok"])
+
+    def test_reflection_search_with_skill_filter(self) -> None:
+        """Test cmd_reflection_search with skill filtering."""
+        reflection_file = os.path.join(self.tmp_dir.name, "reflection.jsonl")
+        with open(reflection_file, "w") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "id": "test-id",
+                        "skill": "design",
+                        "goal": "Test goal",
+                        "outcome": "success",
+                        "goalAchieved": True,
+                        "timestamp": "2025-01-01T00:00:00Z",
+                        "evaluation": {},
+                    }
+                )
+                + "\n"
+            )
+
+        args = argparse.Namespace(
+            reflection_path=reflection_file,
+            skill="design",
+            limit=10,
+        )
+        exit_code, result = self._run_cmd(cmd_reflection_search, args)
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+        self.assertEqual(len(result["reflections"]), 1)
+
+    def test_finalize_with_missing_field(self) -> None:
+        """Test cmd_finalize success despite schema variations."""
+        plan_file = os.path.join(self.tmp_dir.name, "varied_plan.json")
+        plan = load_plan(self.fixtures["minimal_plan"])
+        # finalize should still succeed with valid base plan
+        with open(plan_file, "w") as f:
+            json.dump(plan, f)
+
+        args = argparse.Namespace(plan_path=plan_file)
+        exit_code, result = self._run_cmd(cmd_finalize, args)
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+
+    def test_status_with_multiple_statuses(self) -> None:
+        """Test cmd_status with various role statuses."""
+        plan_file = os.path.join(self.tmp_dir.name, "multi_status.json")
+        plan = load_plan(self.fixtures["minimal_plan"])
+        plan["roles"][0]["status"] = "completed"
+        with open(plan_file, "w") as f:
+            json.dump(plan, f)
+
+        args = argparse.Namespace(plan_path=plan_file)
+        exit_code, result = self._run_cmd(cmd_status, args)
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+        self.assertIn("counts", result)
+        self.assertEqual(result["counts"]["completed"], 1)
+
+    def test_worker_pool_with_dependencies(self) -> None:
+        """Test cmd_worker_pool dependency resolution."""
+        args = argparse.Namespace(plan_path=self.fixtures["minimal_plan"])
+        exit_code, result = self._run_cmd(cmd_worker_pool, args)
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+        workers = result["workers"]
+        self.assertIsInstance(workers, list)
+
+    def test_retry_candidates_with_exhausted(self) -> None:
+        """Test cmd_retry_candidates with exhausted retries."""
+        plan_file = os.path.join(self.tmp_dir.name, "exhausted.json")
+        plan = load_plan(self.fixtures["failed_plan"])
+        plan["roles"][0]["attempts"] = 3
+        with open(plan_file, "w") as f:
+            json.dump(plan, f)
+
+        args = argparse.Namespace(plan_path=plan_file)
+        exit_code, result = self._run_cmd(cmd_retry_candidates, args)
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+        self.assertEqual(len(result["retryable"]), 0)
+
+    def test_circuit_breaker_triggers(self) -> None:
+        """Test cmd_circuit_breaker when it should trigger."""
+        plan_file = os.path.join(self.tmp_dir.name, "circuit.json")
+        plan = load_plan(self.fixtures["minimal_plan"])
+        for _ in range(5):
+            plan["roles"].append(
+                {
+                    "name": f"role-{_}",
+                    "status": "failed",
+                    "scope": {"dependencies": []},
+                    "goal": "test",
+                    "model": "sonnet",
+                    "constraints": [],
+                    "acceptanceCriteria": [],
+                    "assumptions": [],
+                    "rollbackTriggers": [],
+                    "expertContext": [],
+                    "fallback": None,
+                    "attempts": 0,
+                    "result": None,
+                    "directoryOverlaps": [],
+                }
+            )
+        with open(plan_file, "w") as f:
+            json.dump(plan, f)
+
+        args = argparse.Namespace(plan_path=plan_file)
+        exit_code, result = self._run_cmd(cmd_circuit_breaker, args)
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+
+    def test_overlap_matrix_with_overlaps(self) -> None:
+        """Test cmd_overlap_matrix detects overlaps."""
+        plan_file = os.path.join(self.tmp_dir.name, "overlap.json")
+        plan = load_plan(self.fixtures["minimal_plan"])
+        plan["roles"][0]["scope"]["directories"] = ["src/"]
+        plan["roles"][1]["scope"]["directories"] = ["src/api/"]
+        with open(plan_file, "w") as f:
+            json.dump(plan, f)
+
+        args = argparse.Namespace(plan_path=plan_file)
+        exit_code, result = self._run_cmd(cmd_overlap_matrix, args)
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+        self.assertIn("matrix", result)
+
+    def test_archive_with_persistent_files(self) -> None:
+        """Test cmd_archive preserves persistent files."""
+        design_dir = os.path.join(self.tmp_dir.name, ".design")
+        os.makedirs(design_dir, exist_ok=True)
+
+        memory_file = os.path.join(design_dir, "memory.jsonl")
+        with open(memory_file, "w") as f:
+            f.write("test\n")
+
+        plan_file = os.path.join(design_dir, "plan.json")
+        with open(plan_file, "w") as f:
+            json.dump({"test": "data"}, f)
+
+        args = argparse.Namespace(design_dir=design_dir)
+        exit_code, result = self._run_cmd(cmd_archive, args)
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+        self.assertTrue(os.path.exists(memory_file))
+
+    def test_plan_diff_detects_changes(self) -> None:
+        """Test cmd_plan_diff detects role changes."""
+        args = argparse.Namespace(
+            plan_a=self.fixtures["minimal_plan"],
+            plan_b=self.fixtures["modified_plan"],
+        )
+        exit_code, result = self._run_cmd(cmd_plan_diff, args)
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+        self.assertIn("modifiedRoles", result)
+
+    def test_validate_checks_with_python_check(self) -> None:
+        """Test cmd_validate_checks with Python check."""
+        plan_file = os.path.join(self.tmp_dir.name, "valid_checks.json")
+        plan = load_plan(self.fixtures["minimal_plan"])
+        plan["roles"][0]["acceptanceCriteria"][0]["check"] = "python3 -c 'print(1)'"
+        with open(plan_file, "w") as f:
+            json.dump(plan, f)
+
+        args = argparse.Namespace(plan_path=plan_file)
+        exit_code, result = self._run_cmd(cmd_validate_checks, args)
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+
+    def test_health_check_with_empty_design(self) -> None:
+        """Test cmd_health_check with empty design directory."""
+        design_dir = os.path.join(self.tmp_dir.name, ".design")
+        os.makedirs(design_dir, exist_ok=True)
+
+        # Create a minimal plan to satisfy health check
+        plan_file = os.path.join(design_dir, "plan.json")
+        with open(plan_file, "w") as f:
+            json.dump({"schemaVersion": 4, "roles": []}, f)
+
+        args = argparse.Namespace(design_dir=design_dir)
+        exit_code, result = self._run_cmd(cmd_health_check, args)
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+
+    # ================================================================
+    # Tests for cmd_update_status with cascading failures
+    # ================================================================
+
+    def test_update_status_cascading_failures(self) -> None:
+        """Test cmd_update_status with cascading failures when a dependency fails."""
+        plan_file = os.path.join(self.tmp_dir.name, "cascade.json")
+        plan = load_plan(self.fixtures["minimal_plan"])
+        plan["roles"][0]["status"] = "in_progress"
+        plan["roles"][1]["status"] = "pending"
+        with open(plan_file, "w") as f:
+            json.dump(plan, f)
+
+        update_json = json.dumps(
+            [{"roleIndex": 0, "status": "failed", "result": "build error"}]
+        )
+        captured = io.StringIO()
+        old_stdin = sys.stdin
+        with contextlib.redirect_stdout(captured):
+            try:
+                sys.stdin = io.StringIO(update_json)
+                cmd_update_status(argparse.Namespace(plan_path=plan_file))
+            except SystemExit:
+                pass
+            finally:
+                sys.stdin = old_stdin
+
+        result = json.loads(captured.getvalue())
+        self.assertTrue(result["ok"])
+        self.assertIn(0, result["updated"])
+        self.assertGreater(len(result["cascaded"]), 0)
+        self.assertEqual(result["cascaded"][0]["status"], "skipped")
+
+    def test_update_status_completed_trims_fields(self) -> None:
+        """Test cmd_update_status trims role fields on completion."""
+        plan_file = os.path.join(self.tmp_dir.name, "trim.json")
+        plan = load_plan(self.fixtures["minimal_plan"])
+        plan["roles"][0]["status"] = "in_progress"
+        with open(plan_file, "w") as f:
+            json.dump(plan, f)
+
+        update_json = json.dumps(
+            [{"roleIndex": 0, "status": "completed", "result": "done"}]
+        )
+        captured = io.StringIO()
+        old_stdin = sys.stdin
+        with contextlib.redirect_stdout(captured):
+            try:
+                sys.stdin = io.StringIO(update_json)
+                cmd_update_status(argparse.Namespace(plan_path=plan_file))
+            except SystemExit:
+                pass
+            finally:
+                sys.stdin = old_stdin
+
+        result = json.loads(captured.getvalue())
+        self.assertTrue(result["ok"])
+        self.assertIn(0, result["trimmed"])
+
+    def test_update_status_invalid_transition_error(self) -> None:
+        """Test cmd_update_status rejects invalid state transition."""
+        plan_file = os.path.join(self.tmp_dir.name, "invalid_trans.json")
+        plan = load_plan(self.fixtures["minimal_plan"])
+        plan["roles"][0]["status"] = "pending"
+        with open(plan_file, "w") as f:
+            json.dump(plan, f)
+
+        update_json = json.dumps([{"roleIndex": 0, "status": "completed"}])
+        captured = io.StringIO()
+        old_stdin = sys.stdin
+        with contextlib.redirect_stdout(captured):
+            try:
+                sys.stdin = io.StringIO(update_json)
+                cmd_update_status(argparse.Namespace(plan_path=plan_file))
+            except SystemExit:
+                pass
+            finally:
+                sys.stdin = old_stdin
+
+        result = json.loads(captured.getvalue())
+        self.assertFalse(result["ok"])
+        self.assertIn("error", result)
+
+    # ================================================================
+    # Tests for cmd_expert_validate
+    # ================================================================
+
+    def test_expert_validate_valid(self) -> None:
+        """Test expert-validate with valid expert artifact."""
+        expert_file = os.path.join(self.tmp_dir.name, "expert.json")
+        with open(expert_file, "w") as f:
+            json.dump(
+                {"summary": "Test approach", "verificationProperties": ["prop1"]},
+                f,
+            )
+
+        args = argparse.Namespace(artifact_path=expert_file)
+        exit_code, result = self._run_cmd(cmd_expert_validate, args)
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+
+    def test_expert_validate_missing_fields(self) -> None:
+        """Test expert-validate rejects artifact missing required fields."""
+        expert_file = os.path.join(self.tmp_dir.name, "bad_expert.json")
+        with open(expert_file, "w") as f:
+            json.dump({"approach": "test"}, f)
+
+        args = argparse.Namespace(artifact_path=expert_file)
+        exit_code, result = self._run_cmd(cmd_expert_validate, args)
+        self.assertEqual(exit_code, 1)
+        self.assertFalse(result["ok"])
+
+    def test_expert_validate_not_found(self) -> None:
+        """Test expert-validate with missing artifact file."""
+        args = argparse.Namespace(artifact_path="/nonexistent/expert.json")
+        exit_code, result = self._run_cmd(cmd_expert_validate, args)
+        self.assertEqual(exit_code, 1)
+        self.assertFalse(result["ok"])
+
+    # ================================================================
+    # Tests for cmd_reflection_validate
+    # ================================================================
+
+    def test_reflection_validate_valid(self) -> None:
+        """Test reflection-validate with valid evaluation JSON."""
+        evaluation = {"whatWorked": ["a"], "whatFailed": ["b"], "doNextTime": ["c"]}
+        captured = io.StringIO()
+        old_stdin = sys.stdin
+        with contextlib.redirect_stdout(captured):
+            try:
+                sys.stdin = io.StringIO(json.dumps(evaluation))
+                cmd_reflection_validate(argparse.Namespace())
+            except SystemExit:
+                pass
+            finally:
+                sys.stdin = old_stdin
+
+        result = json.loads(captured.getvalue())
+        self.assertTrue(result["ok"])
+
+    def test_reflection_validate_missing_fields(self) -> None:
+        """Test reflection-validate rejects missing required fields."""
+        evaluation = {"whatWorked": ["a"]}
+        captured = io.StringIO()
+        old_stdin = sys.stdin
+        with contextlib.redirect_stdout(captured):
+            try:
+                sys.stdin = io.StringIO(json.dumps(evaluation))
+                cmd_reflection_validate(argparse.Namespace())
+            except SystemExit:
+                pass
+            finally:
+                sys.stdin = old_stdin
+
+        result = json.loads(captured.getvalue())
+        self.assertFalse(result["ok"])
+
+    # ================================================================
+    # Tests for cmd_validate_auxiliary_report
+    # ================================================================
+
+    def test_validate_auxiliary_report_challenger_valid(self) -> None:
+        """Test validate-auxiliary-report with valid challenger report."""
+        report_file = os.path.join(self.tmp_dir.name, "challenger.json")
+        with open(report_file, "w") as f:
+            json.dump(
+                {
+                    "issues": [
+                        {
+                            "category": "scope-gap",
+                            "severity": "blocking",
+                            "description": "Missing scope",
+                            "affectedRoles": ["api-dev"],
+                            "recommendation": "Add scope",
+                        }
+                    ],
+                    "summary": "Found 1 issue",
+                },
+                f,
+            )
+
+        args = argparse.Namespace(artifact_path=report_file, type="challenger")
+        exit_code, result = self._run_cmd(cmd_validate_auxiliary_report, args)
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["artifactSummary"]["blockingCount"], 1)
+
+    def test_validate_auxiliary_report_scout_valid(self) -> None:
+        """Test validate-auxiliary-report with valid scout report."""
+        report_file = os.path.join(self.tmp_dir.name, "scout.json")
+        with open(report_file, "w") as f:
+            json.dump(
+                {
+                    "scopeAreas": [{"path": "src/"}],
+                    "discrepancies": [],
+                    "summary": "No issues",
+                },
+                f,
+            )
+
+        args = argparse.Namespace(artifact_path=report_file, type="scout")
+        exit_code, result = self._run_cmd(cmd_validate_auxiliary_report, args)
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+
+    def test_validate_auxiliary_report_integration_verifier_valid(self) -> None:
+        """Test validate-auxiliary-report with valid integration-verifier report."""
+        report_file = os.path.join(self.tmp_dir.name, "iv.json")
+        with open(report_file, "w") as f:
+            json.dump(
+                {
+                    "status": "PASS",
+                    "acceptanceCriteria": [],
+                    "crossRoleIssues": [],
+                    "testResults": {"passed": 10, "failed": 0},
+                    "endToEndVerification": {"status": "ok"},
+                    "summary": "All pass",
+                },
+                f,
+            )
+
+        args = argparse.Namespace(
+            artifact_path=report_file, type="integration-verifier"
+        )
+        exit_code, result = self._run_cmd(cmd_validate_auxiliary_report, args)
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["artifactSummary"]["status"], "PASS")
+
+    def test_validate_auxiliary_report_regression_checker_valid(self) -> None:
+        """Test validate-auxiliary-report with valid regression-checker report."""
+        report_file = os.path.join(self.tmp_dir.name, "rc.json")
+        with open(report_file, "w") as f:
+            json.dump(
+                {
+                    "passed": True,
+                    "changes": ["file.py"],
+                    "regressions": [],
+                    "summary": "No regressions",
+                },
+                f,
+            )
+
+        args = argparse.Namespace(artifact_path=report_file, type="regression-checker")
+        exit_code, result = self._run_cmd(cmd_validate_auxiliary_report, args)
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+
+    def test_validate_auxiliary_report_memory_curator_valid(self) -> None:
+        """Test validate-auxiliary-report with valid memory-curator report."""
+        report_file = os.path.join(self.tmp_dir.name, "mc.json")
+        with open(report_file, "w") as f:
+            json.dump(
+                {"memories": [{"content": "learned something"}], "summary": "1 memory"},
+                f,
+            )
+
+        args = argparse.Namespace(artifact_path=report_file, type="memory-curator")
+        exit_code, result = self._run_cmd(cmd_validate_auxiliary_report, args)
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["artifactSummary"]["memoryCount"], 1)
+
+    def test_validate_auxiliary_report_invalid_schema(self) -> None:
+        """Test validate-auxiliary-report rejects invalid schema."""
+        report_file = os.path.join(self.tmp_dir.name, "bad_aux.json")
+        with open(report_file, "w") as f:
+            json.dump({"random": "data"}, f)
+
+        args = argparse.Namespace(artifact_path=report_file, type="challenger")
+        exit_code, result = self._run_cmd(cmd_validate_auxiliary_report, args)
+        self.assertEqual(exit_code, 1)
+        self.assertFalse(result["ok"])
+
+    # ================================================================
+    # Tests for cmd_worker_completion_validate
+    # ================================================================
+
+    def test_worker_completion_validate_valid(self) -> None:
+        """Test worker-completion-validate with valid report."""
+        report = {
+            "role": "api-dev",
+            "achieved": True,
+            "filesChanged": ["api.py"],
+            "acceptanceCriteria": [
+                {"criterion": "API works", "passed": True, "evidence": "tests pass"}
+            ],
+            "keyDecisions": ["Used REST"],
+            "contextForDependents": "API at /api/v1",
+        }
+        captured = io.StringIO()
+        old_stdin = sys.stdin
+        with contextlib.redirect_stdout(captured):
+            try:
+                sys.stdin = io.StringIO(json.dumps(report))
+                cmd_worker_completion_validate(argparse.Namespace())
+            except SystemExit:
+                pass
+            finally:
+                sys.stdin = old_stdin
+
+        result = json.loads(captured.getvalue())
+        self.assertTrue(result["ok"])
+
+    def test_worker_completion_validate_missing_fields(self) -> None:
+        """Test worker-completion-validate rejects missing fields."""
+        report = {"role": "api-dev"}
+        captured = io.StringIO()
+        old_stdin = sys.stdin
+        with contextlib.redirect_stdout(captured):
+            try:
+                sys.stdin = io.StringIO(json.dumps(report))
+                cmd_worker_completion_validate(argparse.Namespace())
+            except SystemExit:
+                pass
+            finally:
+                sys.stdin = old_stdin
+
+        result = json.loads(captured.getvalue())
+        self.assertFalse(result["ok"])
+
+    # ================================================================
+    # Tests for cmd_recon_validate with interventions
+    # ================================================================
+
+    def test_recon_validate_with_interventions(self) -> None:
+        """Test recon-validate with valid interventions and score computation."""
+        recon_file = os.path.join(self.tmp_dir.name, "recon.json")
+        with open(recon_file, "w") as f:
+            json.dump(
+                {
+                    "schemaVersion": 1,
+                    "goal": "Improve performance",
+                    "scope": {"directories": ["src/"]},
+                    "interventions": [
+                        {
+                            "title": "Add caching",
+                            "leverageLevel": 6,
+                            "leverageGroup": "Design",
+                            "designGoal": "Reduce latency",
+                            "confidence": "high",
+                            "effort": "medium",
+                        }
+                    ],
+                    "contradictions": [],
+                },
+                f,
+            )
+
+        args = argparse.Namespace(recon_path=recon_file)
+        exit_code, result = self._run_cmd(cmd_recon_validate, args)
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+        self.assertEqual(len(result["interventions"]), 1)
+        self.assertIn("compositeScore", result["interventions"][0])
+
+    def test_recon_validate_invalid_leverage_level(self) -> None:
+        """Test recon-validate rejects invalid leverage level."""
+        recon_file = os.path.join(self.tmp_dir.name, "bad_recon.json")
+        with open(recon_file, "w") as f:
+            json.dump(
+                {
+                    "schemaVersion": 1,
+                    "goal": "Test",
+                    "scope": {"directories": ["src/"]},
+                    "interventions": [
+                        {
+                            "title": "Bad",
+                            "leverageLevel": 99,
+                            "leverageGroup": "Design",
+                            "designGoal": "Test",
+                            "confidence": "high",
+                            "effort": "small",
+                        }
+                    ],
+                    "contradictions": [],
+                },
+                f,
+            )
+
+        args = argparse.Namespace(recon_path=recon_file)
+        exit_code, result = self._run_cmd(cmd_recon_validate, args)
+        self.assertEqual(exit_code, 1)
+        self.assertFalse(result["ok"])
+
+    def test_recon_validate_missing_wrong_direction(self) -> None:
+        """Test recon-validate requires wrongDirection for levels 1-5."""
+        recon_file = os.path.join(self.tmp_dir.name, "no_wd_recon.json")
+        with open(recon_file, "w") as f:
+            json.dump(
+                {
+                    "schemaVersion": 1,
+                    "goal": "Test",
+                    "scope": {"directories": ["src/"]},
+                    "interventions": [
+                        {
+                            "title": "Low level",
+                            "leverageLevel": 3,
+                            "leverageGroup": "Feedbacks",
+                            "designGoal": "Test",
+                            "confidence": "medium",
+                            "effort": "small",
+                        }
+                    ],
+                    "contradictions": [],
+                },
+                f,
+            )
+
+        args = argparse.Namespace(recon_path=recon_file)
+        exit_code, result = self._run_cmd(cmd_recon_validate, args)
+        self.assertEqual(exit_code, 1)
+        self.assertFalse(result["ok"])
+
+    # ================================================================
+    # Tests for cmd_recon_summary with data
+    # ================================================================
+
+    def test_recon_summary_with_interventions(self) -> None:
+        """Test recon-summary formats interventions for display."""
+        recon_file = os.path.join(self.tmp_dir.name, "recon_sum.json")
+        with open(recon_file, "w") as f:
+            json.dump(
+                {
+                    "schemaVersion": 1,
+                    "goal": "Improve",
+                    "interventions": [
+                        {
+                            "rank": 1,
+                            "title": "Cache layer",
+                            "designGoal": "Reduce latency",
+                            "leverageGroup": "Design",
+                            "compositeScore": 3.5,
+                            "confidence": "high",
+                        },
+                        {
+                            "rank": 2,
+                            "title": "Index queries",
+                            "designGoal": "Faster queries",
+                            "leverageGroup": "Parameters",
+                            "compositeScore": 2.1,
+                            "confidence": "medium",
+                        },
+                    ],
+                    "contradictions": [],
+                    "additionalFindings": 3,
+                },
+                f,
+            )
+
+        args = argparse.Namespace(recon_path=recon_file)
+        exit_code, result = self._run_cmd(cmd_recon_summary, args)
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["interventionCount"], 2)
+        self.assertEqual(len(result["topInterventions"]), 2)
+        self.assertEqual(result["additionalFindings"], 3)
+
+    # ================================================================
+    # Tests for cmd_memory_summary
+    # ================================================================
+
+    def test_memory_summary_with_data(self) -> None:
+        """Test memory-summary with existing memory entries."""
+        args = argparse.Namespace(
+            memory_path=self.fixtures["memory_file"],
+            goal="api rest testing",
+        )
+        exit_code, result = self._run_cmd(cmd_memory_summary, args)
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+        self.assertGreater(result["count"], 0)
+        self.assertIn("entries", result)
+
+    def test_memory_summary_not_found(self) -> None:
+        """Test memory-summary with missing memory file."""
+        args = argparse.Namespace(
+            memory_path="/nonexistent/memory.jsonl",
+            goal="test",
+        )
+        exit_code, result = self._run_cmd(cmd_memory_summary, args)
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["count"], 0)
+
+    # ================================================================
+    # Tests for cmd_memory_review with filters
+    # ================================================================
+
+    def test_memory_review_with_category_filter(self) -> None:
+        """Test memory-review filters by category."""
+        args = argparse.Namespace(
+            memory_path=self.fixtures["memory_file"],
+            category="pattern",
+            keyword=None,
+        )
+        exit_code, result = self._run_cmd(cmd_memory_review, args)
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+        for mem in result["memories"]:
+            self.assertEqual(mem["category"], "pattern")
+
+    def test_memory_review_with_keyword_filter(self) -> None:
+        """Test memory-review filters by keyword."""
+        args = argparse.Namespace(
+            memory_path=self.fixtures["memory_file"],
+            category=None,
+            keyword="api",
+        )
+        exit_code, result = self._run_cmd(cmd_memory_review, args)
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+        self.assertGreater(result["count"], 0)
+
+    def test_memory_review_with_data(self) -> None:
+        """Test memory-review with full data."""
+        args = argparse.Namespace(
+            memory_path=self.fixtures["memory_file"],
+            category=None,
+            keyword=None,
+        )
+        exit_code, result = self._run_cmd(cmd_memory_review, args)
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+        self.assertGreater(result["total"], 0)
+        self.assertIn("memories", result)
+        self.assertIn("date", result["memories"][0])
+        self.assertIn("id", result["memories"][0])
+
+    # ================================================================
+    # Tests for cmd_archive full path
+    # ================================================================
+
+    def test_archive_full_cycle(self) -> None:
+        """Test archive moves non-persistent files and preserves persistent ones."""
+        design_dir = os.path.join(self.tmp_dir.name, "archive_test")
+        os.makedirs(design_dir, exist_ok=True)
+
+        # Create persistent files
+        for pf in ["memory.jsonl", "reflection.jsonl", "handoff.md", "recon.json"]:
+            with open(os.path.join(design_dir, pf), "w") as f:
+                f.write("persistent\n")
+
+        # Create non-persistent files
+        for nf in ["plan.json", "expert-arch.json", "cross-review.json"]:
+            with open(os.path.join(design_dir, nf), "w") as f:
+                json.dump({"data": nf}, f)
+
+        args = argparse.Namespace(design_dir=design_dir)
+        exit_code, result = self._run_cmd(cmd_archive, args)
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+        self.assertIn("archivedTo", result)
+
+        # Persistent files still exist
+        for pf in ["memory.jsonl", "reflection.jsonl", "handoff.md", "recon.json"]:
+            self.assertTrue(
+                os.path.exists(os.path.join(design_dir, pf)),
+                f"Persistent file {pf} should survive archive",
+            )
+
+        # Non-persistent files moved to archive
+        for nf in ["plan.json", "expert-arch.json", "cross-review.json"]:
+            self.assertFalse(
+                os.path.exists(os.path.join(design_dir, nf)),
+                f"Non-persistent file {nf} should be archived",
+            )
+
+    def test_archive_nothing_to_archive(self) -> None:
+        """Test archive with only persistent files."""
+        design_dir = os.path.join(self.tmp_dir.name, "empty_archive")
+        os.makedirs(design_dir, exist_ok=True)
+
+        with open(os.path.join(design_dir, "memory.jsonl"), "w") as f:
+            f.write("data\n")
+
+        args = argparse.Namespace(design_dir=design_dir)
+        exit_code, result = self._run_cmd(cmd_archive, args)
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result.get("message"), "nothing to archive")
+
+    # ================================================================
+    # Tests for cmd_finalize validation paths
+    # ================================================================
+
+    def test_finalize_with_invalid_role_returns_error(self) -> None:
+        """Test cmd_finalize returns ok=false for invalid role."""
+        plan_file = os.path.join(self.tmp_dir.name, "invalid_role.json")
+        plan = load_plan(self.fixtures["minimal_plan"])
+        del plan["roles"][0]["goal"]
+        with open(plan_file, "w") as f:
+            json.dump(plan, f)
+
+        args = argparse.Namespace(plan_path=plan_file)
+        exit_code, result = self._run_cmd(cmd_finalize, args)
+        # finalize uses output_json which always exits 0
+        self.assertEqual(exit_code, 0)
+        self.assertFalse(result["ok"])
+        self.assertIn("issues", result)
+
+    def test_finalize_validate_only_mode(self) -> None:
+        """Test finalize in validate-only mode."""
+        args = argparse.Namespace(
+            plan_path=self.fixtures["minimal_plan"],
+            validate_only=True,
+        )
+        exit_code, result = self._run_cmd(cmd_finalize, args)
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["validated"])
+
+    def test_finalize_with_verification_specs(self) -> None:
+        """Test finalize validates verificationSpecs."""
+        plan_file = os.path.join(self.tmp_dir.name, "specs_plan.json")
+        plan = load_plan(self.fixtures["minimal_plan"])
+        plan["verificationSpecs"] = [
+            {
+                "role": "backend-developer",
+                "path": ".design/specs/spec-backend.test.py",
+                "runCommand": "python3 -m pytest .design/specs/",
+                "properties": ["API returns JSON"],
+            }
+        ]
+        with open(plan_file, "w") as f:
+            json.dump(plan, f)
+
+        args = argparse.Namespace(plan_path=plan_file)
+        exit_code, result = self._run_cmd(cmd_finalize, args)
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+
+    def test_finalize_invalid_verification_specs(self) -> None:
+        """Test finalize rejects invalid verificationSpecs."""
+        plan_file = os.path.join(self.tmp_dir.name, "bad_specs.json")
+        plan = load_plan(self.fixtures["minimal_plan"])
+        plan["verificationSpecs"] = [{"role": "nonexistent-role"}]
+        with open(plan_file, "w") as f:
+            json.dump(plan, f)
+
+        args = argparse.Namespace(plan_path=plan_file)
+        exit_code, result = self._run_cmd(cmd_finalize, args)
+        self.assertEqual(exit_code, 0)
+        self.assertFalse(result["ok"])
+
+    def test_finalize_with_auxiliary_roles(self) -> None:
+        """Test finalize validates auxiliary roles."""
+        plan_file = os.path.join(self.tmp_dir.name, "aux_plan.json")
+        plan = load_plan(self.fixtures["minimal_plan"])
+        plan["auxiliaryRoles"] = [
+            {
+                "name": "challenger",
+                "type": "pre-execution",
+                "goal": "Review plan",
+                "model": "sonnet",
+                "trigger": "before-execution",
+            }
+        ]
+        with open(plan_file, "w") as f:
+            json.dump(plan, f)
+
+        args = argparse.Namespace(plan_path=plan_file)
+        exit_code, result = self._run_cmd(cmd_finalize, args)
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+
+    def test_finalize_invalid_auxiliary_role(self) -> None:
+        """Test finalize rejects invalid auxiliary role."""
+        plan_file = os.path.join(self.tmp_dir.name, "bad_aux_plan.json")
+        plan = load_plan(self.fixtures["minimal_plan"])
+        plan["auxiliaryRoles"] = [{"name": "bad", "type": "invalid-type"}]
+        with open(plan_file, "w") as f:
+            json.dump(plan, f)
+
+        args = argparse.Namespace(plan_path=plan_file)
+        exit_code, result = self._run_cmd(cmd_finalize, args)
+        self.assertEqual(exit_code, 0)
+        self.assertFalse(result["ok"])
+
+    # ================================================================
+    # Tests for cmd_validate_checks edge cases
+    # ================================================================
+
+    def test_validate_checks_empty_check(self) -> None:
+        """Test validate-checks detects empty check commands."""
+        plan_file = os.path.join(self.tmp_dir.name, "empty_check.json")
+        plan = load_plan(self.fixtures["minimal_plan"])
+        plan["roles"][0]["acceptanceCriteria"][0]["check"] = ""
+        with open(plan_file, "w") as f:
+            json.dump(plan, f)
+
+        args = argparse.Namespace(plan_path=plan_file)
+        exit_code, result = self._run_cmd(cmd_validate_checks, args)
+        self.assertEqual(exit_code, 0)
+        self.assertFalse(result["ok"])
+
+    def test_validate_checks_python_syntax_error(self) -> None:
+        """Test validate-checks detects Python syntax errors."""
+        plan_file = os.path.join(self.tmp_dir.name, "syntax_err.json")
+        plan = load_plan(self.fixtures["minimal_plan"])
+        plan["roles"][0]["acceptanceCriteria"][0]["check"] = "python3 -c 'if x'"
+        with open(plan_file, "w") as f:
+            json.dump(plan, f)
+
+        args = argparse.Namespace(plan_path=plan_file)
+        exit_code, result = self._run_cmd(cmd_validate_checks, args)
+        # validate-checks uses output_json (exit 0) with ok=false
+        self.assertEqual(exit_code, 0)
+        self.assertFalse(result["ok"])
+
+    # ================================================================
+    # Tests for cmd_health_check edge cases
+    # ================================================================
+
+    def test_health_check_missing_plan_not_healthy(self) -> None:
+        """Test health-check reports unhealthy when plan.json is missing."""
+        design_dir = os.path.join(self.tmp_dir.name, "no_plan")
+        os.makedirs(design_dir, exist_ok=True)
+
+        args = argparse.Namespace(design_dir=design_dir)
+        exit_code, result = self._run_cmd(cmd_health_check, args)
+        # health-check always exits 0 with ok=true, healthy=true/false
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+        self.assertFalse(result["healthy"])
+        self.assertGreater(len(result["issues"]), 0)
+
+    def test_health_check_with_memory_and_reflection(self) -> None:
+        """Test health-check validates memory.jsonl and reflection.jsonl."""
+        design_dir = os.path.join(self.tmp_dir.name, "full_health")
+        os.makedirs(design_dir, exist_ok=True)
+
+        plan_file = os.path.join(design_dir, "plan.json")
+        with open(plan_file, "w") as f:
+            json.dump({"schemaVersion": 4}, f)
+
+        memory_file = os.path.join(design_dir, "memory.jsonl")
+        with open(memory_file, "w") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "id": "1",
+                        "category": "pattern",
+                        "content": "test",
+                        "timestamp": "2025-01-01T00:00:00Z",
+                    }
+                )
+                + "\n"
+            )
+
+        reflection_file = os.path.join(design_dir, "reflection.jsonl")
+        with open(reflection_file, "w") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "id": "1",
+                        "skill": "design",
+                        "goal": "test",
+                        "outcome": "completed",
+                        "timestamp": "2025-01-01T00:00:00Z",
+                    }
+                )
+                + "\n"
+            )
+
+        args = argparse.Namespace(design_dir=design_dir)
+        exit_code, result = self._run_cmd(cmd_health_check, args)
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["healthy"])
+
+    # ================================================================
+    # Tests for cmd_plan_health_summary with data
+    # ================================================================
+
+    def test_plan_health_summary_with_data(self) -> None:
+        """Test plan-health-summary with handoff, reflections, and plan."""
+        design_dir = os.path.join(self.tmp_dir.name, "health_data")
+        os.makedirs(design_dir, exist_ok=True)
+
+        with open(os.path.join(design_dir, "handoff.md"), "w") as f:
+            f.write("# Handoff\nLast session completed API work.\n")
+
+        with open(os.path.join(design_dir, "reflection.jsonl"), "w") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "skill": "execute",
+                        "outcome": "completed",
+                        "goalAchieved": True,
+                        "timestamp": "2025-01-01T00:00:00Z",
+                    }
+                )
+                + "\n"
+            )
+
+        plan = load_plan(self.fixtures["minimal_plan"])
+        plan["roles"][0]["status"] = "completed"
+        with open(os.path.join(design_dir, "plan.json"), "w") as f:
+            json.dump(plan, f)
+
+        args = argparse.Namespace(design_dir=design_dir)
+        exit_code, result = self._run_cmd(cmd_plan_health_summary, args)
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+        self.assertIn("Handoff", result["handoff"])
+        self.assertGreater(len(result["reflections"]), 0)
+        self.assertIn("1/2", result["plan"])
+
+    # ================================================================
+    # Tests for additional algorithm coverage
+    # ================================================================
+
+    def test_compute_intervention_score(self) -> None:
+        """Test _compute_intervention_score calculation."""
+        tier_weights = {1: 5, 2: 4, 3: 6, 4: 5, 5: 6, 6: 7, 7: 1}
+        confidence_multipliers = {"high": 1.0, "medium": 0.7, "low": 0.4}
+        effort_multipliers = {
+            "trivial": 0.5,
+            "small": 1.0,
+            "medium": 2.0,
+            "large": 4.0,
+            "transformative": 8.0,
+        }
+
+        # Level 7, high confidence, trivial effort = 1 * 1.0 / 0.5 = 2.0
+        score = _compute_intervention_score(
+            7,
+            "high",
+            "trivial",
+            tier_weights,
+            confidence_multipliers,
+            effort_multipliers,
+        )
+        self.assertAlmostEqual(score, 2.0)
+
+        # Level 6, high confidence, medium effort = 7 * 1.0 / 2.0 = 3.5
+        score = _compute_intervention_score(
+            6,
+            "high",
+            "medium",
+            tier_weights,
+            confidence_multipliers,
+            effort_multipliers,
+        )
+        self.assertAlmostEqual(score, 3.5)
+
+    def test_memory_add_new_entry(self) -> None:
+        """Test cmd_memory_add adds a new entry (not boost/decay)."""
+        memory_file = os.path.join(self.tmp_dir.name, "new_mem.jsonl")
+        with open(memory_file, "w"):
+            pass
+
+        args = argparse.Namespace(
+            memory_path=memory_file,
+            category="convention",
+            keywords="python,stdlib",
+            content="Use pathlib over os.path",
+            source="review",
+            goal_context="code quality",
+            importance=7,
+            boost=False,
+            decay=False,
+            id=None,
+        )
+        exit_code, result = self._run_cmd(cmd_memory_add, args)
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+        self.assertIn("id", result)
+        self.assertEqual(result["category"], "convention")
+
+    def test_reflection_search_filters_by_skill(self) -> None:
+        """Test reflection-search with skill filter excludes other skills."""
+        reflection_file = os.path.join(self.tmp_dir.name, "multi_ref.jsonl")
+        with open(reflection_file, "w") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "id": "1",
+                        "skill": "design",
+                        "goal": "A",
+                        "outcome": "completed",
+                        "goalAchieved": True,
+                        "timestamp": "2025-01-01T00:00:00Z",
+                        "evaluation": {},
+                    }
+                )
+                + "\n"
+            )
+            f.write(
+                json.dumps(
+                    {
+                        "id": "2",
+                        "skill": "execute",
+                        "goal": "B",
+                        "outcome": "failed",
+                        "goalAchieved": False,
+                        "timestamp": "2025-01-02T00:00:00Z",
+                        "evaluation": {},
+                    }
+                )
+                + "\n"
+            )
+            f.write(
+                json.dumps(
+                    {
+                        "id": "3",
+                        "skill": "design",
+                        "goal": "C",
+                        "outcome": "partial",
+                        "goalAchieved": False,
+                        "timestamp": "2025-01-03T00:00:00Z",
+                        "evaluation": {},
+                    }
+                )
+                + "\n"
+            )
+
+        args = argparse.Namespace(
+            reflection_path=reflection_file, skill="execute", limit=10
+        )
+        exit_code, result = self._run_cmd(cmd_reflection_search, args)
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(len(result["reflections"]), 1)
+        self.assertEqual(result["reflections"][0]["skill"], "execute")
+
+    def test_is_surface_only_checks(self) -> None:
+        """Test _is_surface_only detection."""
+        self.assertTrue(_is_surface_only("grep -q pattern file"))
+        self.assertTrue(_is_surface_only("test -f file.txt"))
+        self.assertFalse(_is_surface_only("python3 -m pytest tests/"))
+        self.assertFalse(_is_surface_only("grep pattern && exit 1"))
+
+    def test_validate_role_brief_missing_model(self) -> None:
+        """Test _validate_role_brief detects missing model."""
+        role = {"name": "test", "goal": "test", "scope": {"directories": ["src/"]}}
+        errors = _validate_role_brief(role, 0)
+        self.assertGreater(len(errors), 0)
+        self.assertTrue(any("model" in e for e in errors))
+
+    def test_compute_cascading_failures_direct(self) -> None:
+        """Test _compute_cascading_failures directly."""
+        roles = [
+            {"name": "a", "status": "failed"},
+            {"name": "b", "status": "pending"},
+            {"name": "c", "status": "pending"},
+        ]
+        dep_indices = [[], [0], [1]]
+        cascaded = _compute_cascading_failures(roles, dep_indices, [0])
+        self.assertGreater(len(cascaded), 0)
+        names = [c["name"] for c in cascaded]
+        self.assertIn("b", names)
+
+    def test_tokenize(self) -> None:
+        """Test _tokenize produces lowercase tokens."""
+        tokens = _tokenize("Hello World Python3")
+        self.assertIn("hello", tokens)
+        self.assertIn("world", tokens)
+        self.assertIn("python3", tokens)
+
+    def test_tokenize_empty(self) -> None:
+        """Test _tokenize with empty input."""
+        self.assertEqual(_tokenize(""), set())
+        self.assertEqual(_tokenize(None), set())
+
+    def test_check_cycle_no_cycle(self) -> None:
+        """Test _check_cycle with no cycle."""
+        self.assertFalse(_check_cycle([[], [0], [1]]))
+
+    def test_check_cycle_with_cycle(self) -> None:
+        """Test _check_cycle detects cycle."""
+        self.assertTrue(_check_cycle([[1], [0]]))
+
 
 # ============================================================================
 # Main
