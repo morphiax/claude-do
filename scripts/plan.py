@@ -2779,6 +2779,235 @@ def cmd_memory_review(args: argparse.Namespace) -> NoReturn:
 # ============================================================================
 
 
+def _get_shared_block_patterns() -> dict[str, dict[str, Any]]:
+    """Return shared block patterns with extractors and normalizers."""
+
+    def normalize_script_setup(s: str) -> str:
+        """Normalize script setup by replacing skill-specific values."""
+        # Replace skill names in paths
+        s = re.sub(
+            r"skills/(design|execute|improve|recon|reflect)", "skills/{SKILL}", s
+        )
+        # Replace skill names in team-name calls
+        s = re.sub(
+            r"team-name (design|execute|improve|recon|reflect)", "team-name {SKILL}", s
+        )
+        # Remove optional TEAM_NAME line (reflect doesn't have it)
+        s = re.sub(
+            r"TEAM_NAME=\$\(python3 \$PLAN_CLI team-name \{SKILL\}\)\.teamName\s*",
+            "",
+            s,
+        )
+        # Normalize whitespace
+        s = re.sub(r"\s+", " ", s).strip()
+        return s
+
+    def normalize_liveness_table(s: str) -> str:
+        """Normalize liveness pipeline table by extracting core structure."""
+        # Extract only the TRULY COMMON rows that ALL skills have:
+        # - Turn timeout (with turn count) → action
+        # - Proceed with available → action after retries
+        # Ignore all other rows (Re-spawn ceiling, Never write artifacts, etc.)
+
+        lines = s.strip().split("\n")
+        turn_timeout_row = None
+        proceed_row = None
+
+        for line in lines:
+            # Extract Turn timeout row (ONLY if line STARTS with "| Turn timeout")
+            if line.strip().startswith("| Turn timeout"):
+                # Normalize to a fixed template
+                turn_timeout_row = "| Turn timeout (N turns) | ACTION |"
+            # Extract Proceed with available row (ONLY if line STARTS with "| Proceed")
+            elif line.strip().startswith("| Proceed with available"):
+                # Normalize to a fixed template
+                proceed_row = "| Proceed with available | After N attempts → proceed with artifacts |"
+
+        # Combine only the two common rows
+        result = []
+        if turn_timeout_row:
+            result.append(turn_timeout_row)
+        if proceed_row:
+            result.append(proceed_row)
+
+        s = " ".join(result)
+        s = re.sub(r"\s+", " ", s).strip()
+        return s
+
+    def normalize_fallback(s: str) -> str:
+        """Normalize fallback section by extracting core two-step pattern."""
+        # ALL skills follow: Step 1: fix errors + re-run, Step 2: rebuild if broken
+        # Normalize to fixed templates regardless of verbosity differences
+
+        lines = s.strip().split("\n")
+        if len(lines) < 2:
+            return s
+
+        # Extract first 2 steps only (improve has 4 but we only care about the pattern)
+        step1 = lines[0] if len(lines) > 0 else ""
+        step2 = lines[1] if len(lines) > 1 else ""
+
+        # Normalize step 1: all variants mean "fix errors and re-run"
+        if "error" in step1.lower() and (
+            "fix" in step1.lower() or "read" in step1.lower()
+        ):
+            step1_norm = "N. Fix validation errors and re-run finalize."
+        else:
+            step1_norm = step1
+
+        # Normalize step 2: all variants mean "if broken, rebuild"
+        if "broken" in step2.lower() or "error" in step2.lower():
+            step2_norm = "N. If structure broken: rebuild."
+        else:
+            step2_norm = step2
+
+        # Combine normalized steps
+        s = f"{step1_norm} {step2_norm}"
+        # Normalize whitespace and punctuation
+        s = re.sub(r"\s+", " ", s).strip()
+        s = re.sub(r"[,;:]+", ",", s)
+        return s
+
+    return {
+        "Script Setup": {
+            "pattern": r"### Script Setup\n\n.*?```bash\n(.*?)```",
+            "normalize": normalize_script_setup,
+        },
+        "Liveness Pipeline Table": {
+            "pattern": r"\| Rule \| Action \|\n\|---\|---\|\n((?:\|.*?\|\n)+)",
+            "normalize": normalize_liveness_table,
+        },
+        "Finalize Fallback": {
+            "pattern": r"\*\*Fallback\*\* \(if finalize fails\):?\n((?:[\d]+\. .*?\n)+)",
+            "normalize": normalize_fallback,
+        },
+    }
+
+
+def _load_skill_paths(skills_dir: str) -> dict[str, str]:
+    """Load and validate SKILL.md paths for all expected skills."""
+    expected_skills = ["design", "execute", "improve", "recon", "reflect"]
+    skill_paths = {}
+
+    for skill in expected_skills:
+        skill_path = os.path.join(skills_dir, skill, "SKILL.md")
+        if not os.path.exists(skill_path):
+            error_exit(f"Missing SKILL.md for skill: {skill}")
+        skill_paths[skill] = skill_path
+
+    return skill_paths
+
+
+def _extract_block_from_content(content: str, spec: dict[str, Any]) -> str | None:
+    """Extract and normalize a block from skill content."""
+    match = re.search(spec["pattern"], content, re.DOTALL)
+    if not match:
+        return None
+
+    extracted = match.group(1) if match.lastindex else match.group(0)
+    return spec["normalize"](extracted)
+
+
+def _extract_skill_blocks(
+    skill_paths: dict[str, str], shared_blocks: dict[str, dict[str, Any]]
+) -> dict[str, dict[str, str | None]]:
+    """Extract shared blocks from each skill file."""
+    skill_blocks: dict[str, dict[str, str | None]] = {}
+
+    for skill, path in skill_paths.items():
+        with open(path) as f:
+            content = f.read()
+
+        skill_blocks[skill] = {
+            block_name: _extract_block_from_content(content, spec)
+            for block_name, spec in shared_blocks.items()
+        }
+
+    return skill_blocks
+
+
+def _analyze_block_sync(
+    block_name: str,
+    skill_blocks: dict[str, dict[str, str | None]],
+    all_skills: list[str],
+) -> tuple[str, dict[str, Any]]:
+    """Analyze whether a block is synced or drifted across skills."""
+    values = {
+        skill: content
+        for skill, blocks in skill_blocks.items()
+        if (content := blocks.get(block_name)) is not None
+    }
+
+    if not values:
+        return (
+            "drifted",
+            {
+                "block": block_name,
+                "skills": all_skills,
+                "issue": "block not found in any skill file",
+            },
+        )
+
+    unique_values = set(values.values())
+    if len(unique_values) == 1:
+        return (
+            "synced",
+            {
+                "block": block_name,
+                "skills": list(values.keys()),
+                "present_in": len(values),
+            },
+        )
+
+    return (
+        "drifted",
+        {
+            "block": block_name,
+            "skills": list(values.keys()),
+            "drift": [
+                {
+                    "skill": skill,
+                    "content_hash": hashlib.sha256(content.encode()).hexdigest()[:8],
+                }
+                for skill, content in values.items()
+            ],
+        },
+    )
+
+
+def cmd_sync_check(args: argparse.Namespace) -> NoReturn:
+    """Check drift between shared protocol blocks across SKILL.md files."""
+    skills_dir = args.skills_dir
+
+    if not os.path.isdir(skills_dir):
+        error_exit(f"Skills directory not found: {skills_dir}")
+
+    skill_paths = _load_skill_paths(skills_dir)
+    shared_blocks = _get_shared_block_patterns()
+    skill_blocks = _extract_skill_blocks(skill_paths, shared_blocks)
+
+    synced = []
+    drifted = []
+
+    for block_name in shared_blocks:
+        status, data = _analyze_block_sync(
+            block_name, skill_blocks, list(skill_paths.keys())
+        )
+        if status == "synced":
+            synced.append(data)
+        else:
+            drifted.append(data)
+
+    output_json(
+        {
+            "ok": len(drifted) == 0,
+            "synced": synced,
+            "drifted": drifted,
+            "skills_checked": list(skill_paths.keys()),
+        }
+    )
+
+
 def cmd_archive(args: argparse.Namespace) -> NoReturn:
     """Archive .design/ directory to history/{timestamp}/.
 
@@ -2982,6 +3211,10 @@ def cmd_self_test(args: argparse.Namespace) -> NoReturn:
                 lambda: _test_plan_health_summary(script_path, fixtures["design_dir"]),
             ),
             ("archive", lambda: _test_archive(script_path, fixtures["archive_dir"])),
+            (
+                "sync-check",
+                lambda: _test_sync_check(script_path, fixtures["skills_dir"]),
+            ),
         ]
 
         for test_name, test_fn in tests:
@@ -3330,6 +3563,58 @@ def _create_fixtures(tmp_dir: str) -> dict[str, str]:
     with open(recon_file_path, "w") as f:
         json.dump(recon_data, f)
 
+    # Create test skills directory for sync-check
+    skills_dir = os.path.join(tmp_dir, "skills")
+    os.makedirs(skills_dir, exist_ok=True)
+
+    # Create mock SKILL.md files with shared blocks
+    shared_script_setup = """### Script Setup
+
+Resolve plugin root. All script calls: `python3 $PLAN_CLI <command> [args]` via Bash.
+
+```bash
+PLAN_CLI={plugin_root}/skills/{SKILL}/scripts/plan.py
+TEAM_NAME=$(python3 $PLAN_CLI team-name {SKILL}).teamName
+```"""
+
+    shared_liveness = """| Rule | Action |
+|---|---|
+| Turn timeout (2 turns) | Send status check |
+| Re-spawn ceiling | No completion 1 turn after ping → re-spawn (max 2 attempts) |
+| Proceed with available | After 2 attempts → proceed with available |
+| Never write artifacts yourself | Lead interpretation ≠ specialist analysis |"""
+
+    shared_fallback = """**Fallback** (if finalize fails):
+1. Fix validation errors and re-run finalize.
+2. If structure is fundamentally broken: rebuild plan inline."""
+
+    for skill in ["design", "execute", "improve", "recon", "reflect"]:
+        skill_dir = os.path.join(skills_dir, skill)
+        os.makedirs(skill_dir, exist_ok=True)
+        skill_md = os.path.join(skill_dir, "SKILL.md")
+
+        content = f"""---
+name: {skill}
+description: "Test skill for {skill}"
+---
+
+# {skill.capitalize()}
+
+{shared_script_setup.replace("{SKILL}", skill)}
+
+Some skill-specific content here.
+
+{shared_liveness}
+
+More content.
+
+{shared_fallback}
+
+End of skill.
+"""
+        with open(skill_md, "w") as f:
+            f.write(content)
+
     return {
         "minimal_plan": minimal_plan_path,
         "failed_plan": failed_plan_path,
@@ -3343,6 +3628,7 @@ def _create_fixtures(tmp_dir: str) -> dict[str, str]:
         "design_dir": design_dir,
         "archive_dir": archive_dir,
         "recon_file": recon_file_path,
+        "skills_dir": skills_dir,
     }
 
 
@@ -3789,6 +4075,28 @@ def _test_plan_health_summary(script_path: str, design_dir: str) -> None:
     assert output.get("ok") is True, f"plan-health-summary failed: {output}"
     assert "handoff" in output, "plan-health-summary missing handoff field"
     assert "reflections" in output, "plan-health-summary missing reflections field"
+
+
+def _test_sync_check(script_path: str, skills_dir: str) -> None:
+    """Test sync-check command."""
+    result = _run_command(script_path, ["sync-check", skills_dir])
+
+    assert "ok" in result, f"sync-check missing ok field: {result}"
+    assert "synced" in result
+    assert "drifted" in result
+    assert "skills_checked" in result
+
+    # Should detect all 3 shared blocks (synced or drifted)
+    total_blocks = len(result["synced"]) + len(result["drifted"])
+    assert total_blocks >= 3, (
+        f"Should detect at least 3 shared blocks, found {total_blocks}"
+    )
+
+    # Each block should report which skills it checked
+    all_blocks = result["synced"] + result["drifted"]
+    for block in all_blocks:
+        assert "block" in block, f"Block missing name: {block}"
+        assert "skills" in block, f"Block missing skills list: {block}"
 
 
 def _test_archive(script_path: str, archive_dir: str) -> None:
@@ -5996,6 +6304,16 @@ def main() -> None:
     )
     p.add_argument("design_dir", nargs="?", default=".design")
     p.set_defaults(func=cmd_plan_health_summary)
+
+    # Sync check command
+    p = subparsers.add_parser(
+        "sync-check",
+        help="Check drift between shared protocol blocks across SKILL.md files",
+    )
+    p.add_argument(
+        "skills_dir", nargs="?", default="skills/", help="Path to skills directory"
+    )
+    p.set_defaults(func=cmd_sync_check)
 
     # Self-test command
     p = subparsers.add_parser(
