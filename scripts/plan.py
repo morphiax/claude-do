@@ -1838,8 +1838,10 @@ def cmd_reflection_add(args: argparse.Namespace) -> NoReturn:
     outcome = args.outcome
     goal_achieved = args.goal_achieved
 
-    if skill not in ("design", "execute", "improve", "reflect"):
-        error_exit(f"Invalid skill '{skill}'. Must be one of: design, execute, improve")
+    if skill not in ("design", "execute", "improve", "reflect", "recon"):
+        error_exit(
+            f"Invalid skill '{skill}'. Must be one of: design, execute, improve, reflect, recon"
+        )
 
     if outcome not in ("completed", "partial", "failed", "aborted"):
         error_exit(
@@ -1990,6 +1992,215 @@ def cmd_reflection_validate(args: argparse.Namespace) -> NoReturn:
         error_exit(f"Fields must be arrays: {', '.join(invalid)}")
 
     output_json({"ok": True, "valid": True})
+
+
+def _compute_intervention_score(
+    level: int,
+    confidence: str,
+    effort: str,
+    tier_weights: dict[int, int],
+    confidence_multipliers: dict[str, float],
+    effort_multipliers: dict[str, float],
+) -> float:
+    """Compute compositeScore for an intervention."""
+    tier_weight = tier_weights[level]
+    confidence_mult = confidence_multipliers[confidence]
+    effort_mult = effort_multipliers[effort]
+    return tier_weight * confidence_mult / effort_mult
+
+
+def _validate_recon_intervention(
+    intervention: dict[str, Any],
+    index: int,
+    tier_weights: dict[int, int],
+    confidence_multipliers: dict[str, float],
+    effort_multipliers: dict[str, float],
+) -> None:
+    """Validate a single intervention and compute its compositeScore."""
+    required = [
+        "title",
+        "leverageLevel",
+        "leverageGroup",
+        "designGoal",
+        "confidence",
+        "effort",
+    ]
+    missing = [f for f in required if f not in intervention]
+    if missing:
+        error_exit(f"Intervention {index}: missing fields {', '.join(missing)}")
+
+    level = intervention.get("leverageLevel")
+    if not isinstance(level, int) or not 1 <= level <= 7:
+        error_exit(
+            f"Intervention {index}: leverageLevel must be integer 1-7, got {level}"
+        )
+
+    group = intervention.get("leverageGroup")
+    if group not in {"Intent", "Design", "Feedbacks", "Parameters"}:
+        error_exit(f"Intervention {index}: invalid leverageGroup '{group}'")
+
+    if level <= 5 and not intervention.get("wrongDirection"):
+        error_exit(
+            f"Intervention {index}: wrongDirection required for leverageLevel {level}"
+        )
+
+    confidence = intervention.get("confidence")
+    if confidence not in confidence_multipliers:
+        error_exit(f"Intervention {index}: invalid confidence '{confidence}'")
+
+    effort = intervention.get("effort")
+    if effort not in effort_multipliers:
+        error_exit(f"Intervention {index}: invalid effort '{effort}'")
+
+    score = _compute_intervention_score(
+        level,
+        confidence,
+        effort,
+        tier_weights,
+        confidence_multipliers,
+        effort_multipliers,
+    )
+    intervention["compositeScore"] = round(score, 2)
+
+
+def _load_and_validate_recon_structure(
+    recon_path: str,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Load and validate recon.json top-level structure."""
+    if not os.path.exists(recon_path):
+        error_exit(f"Recon file not found: {recon_path}")
+
+    try:
+        with open(recon_path) as f:
+            data = json.load(f)
+    except json.JSONDecodeError as e:
+        error_exit(f"Invalid JSON in recon file: {e}")
+    except OSError as e:
+        error_exit(f"Error reading recon file: {e}")
+
+    if data.get("schemaVersion") != 1:
+        error_exit(
+            f"Invalid schemaVersion: expected 1, got {data.get('schemaVersion')}"
+        )
+
+    required = ["goal", "scope", "depthTier", "interventions", "contradictions"]
+    missing = [f for f in required if f not in data]
+    if missing:
+        error_exit(f"Missing required fields: {', '.join(missing)}")
+
+    depth_tier = data.get("depthTier")
+    if depth_tier not in ("shallow", "deep"):
+        error_exit(
+            f"Invalid depthTier: expected 'shallow' or 'deep', got '{depth_tier}'"
+        )
+
+    interventions = data.get("interventions", [])
+    if not isinstance(interventions, list):
+        error_exit("interventions must be an array")
+
+    max_count = 3 if depth_tier == "shallow" else 5
+    if len(interventions) > max_count:
+        error_exit(
+            f"Too many interventions for {depth_tier} mode: {len(interventions)} > {max_count}"
+        )
+
+    return data, interventions
+
+
+def cmd_recon_validate(args: argparse.Namespace) -> NoReturn:
+    """Validate recon.json schema and compute compositeScore for interventions.
+
+    Validates schemaVersion, required fields, intervention structure.
+    Computes compositeScore = tier_weight * confidence_multiplier / effort_multiplier.
+    Enforces wrongDirection required for levels 1-5.
+    """
+    _, interventions = _load_and_validate_recon_structure(args.recon_path)
+
+    # Tier weights (software-adjusted)
+    tier_weights = {1: 5, 2: 4, 3: 6, 4: 5, 5: 6, 6: 7, 7: 1}
+
+    # Confidence multipliers
+    confidence_multipliers = {"high": 1.0, "medium": 0.7, "low": 0.4}
+
+    # Effort multipliers
+    effort_multipliers = {
+        "trivial": 0.5,
+        "small": 1.0,
+        "medium": 2.0,
+        "large": 4.0,
+        "transformative": 8.0,
+    }
+
+    # Validate and score each intervention
+    for i, intervention in enumerate(interventions):
+        _validate_recon_intervention(
+            intervention, i, tier_weights, confidence_multipliers, effort_multipliers
+        )
+
+    output_json({"ok": True, "interventions": interventions, "validated": True})
+
+
+def cmd_recon_summary(args: argparse.Namespace) -> NoReturn:
+    """Extract summary from recon.json for display.
+
+    Returns intervention count, depth tier, top interventions with designGoal.
+    """
+    recon_path = args.recon_path
+
+    if not os.path.exists(recon_path):
+        error_exit(f"Recon file not found: {recon_path}")
+
+    try:
+        with open(recon_path) as f:
+            data = json.load(f)
+    except json.JSONDecodeError as e:
+        error_exit(f"Invalid JSON in recon file: {e}")
+    except OSError as e:
+        error_exit(f"Error reading recon file: {e}")
+
+    interventions = data.get("interventions", [])
+    depth_tier = data.get("depthTier", "unknown")
+    additional_findings = data.get("additionalFindings", 0)
+
+    # Extract top interventions
+    top_interventions = []
+    for intervention in interventions:
+        top_interventions.append(
+            {
+                "rank": intervention.get("rank", 0),
+                "title": intervention.get("title", ""),
+                "designGoal": intervention.get("designGoal", ""),
+                "leverageGroup": intervention.get("leverageGroup", ""),
+                "compositeScore": intervention.get("compositeScore", 0),
+            }
+        )
+
+    # Compute overall confidence (average)
+    if interventions:
+        confidence_map = {"high": 1.0, "medium": 0.7, "low": 0.4}
+        confidence_sum = sum(
+            confidence_map.get(i.get("confidence", "low"), 0.4) for i in interventions
+        )
+        avg_confidence = confidence_sum / len(interventions)
+        if avg_confidence >= 0.85:
+            confidence_overall = "high"
+        elif avg_confidence >= 0.55:
+            confidence_overall = "medium"
+        else:
+            confidence_overall = "low"
+    else:
+        confidence_overall = "unknown"
+
+    output_json(
+        {
+            "ok": True,
+            "interventionCount": len(interventions),
+            "depthTier": depth_tier,
+            "topInterventions": top_interventions,
+            "additionalFindings": additional_findings,
+            "confidenceOverall": confidence_overall,
+        }
+    )
 
 
 def _load_memories(memory_path: str) -> list[dict[str, Any]]:
@@ -2419,6 +2630,14 @@ def cmd_self_test(args: argparse.Namespace) -> NoReturn:
             ),
             ("reflection-validate", lambda: _test_reflection_validate(script_path)),
             (
+                "recon-validate",
+                lambda: _test_recon_validate(script_path, fixtures["recon_file"]),
+            ),
+            (
+                "recon-summary",
+                lambda: _test_recon_summary(script_path, fixtures["recon_file"]),
+            ),
+            (
                 "validate-checks (valid)",
                 lambda: _test_validate_checks_valid(
                     script_path, fixtures["minimal_plan"]
@@ -2771,6 +2990,40 @@ def _create_fixtures(tmp_dir: str) -> dict[str, str]:
     with open(bad_check_plan_path, "w") as f:
         json.dump(bad_check_plan, f)
 
+    # Recon.json fixture
+    recon_data = {
+        "schemaVersion": 1,
+        "goal": "Test recon",
+        "scope": "test area",
+        "depthTier": "shallow",
+        "sources": [],
+        "interventions": [
+            {
+                "rank": 1,
+                "title": "Test intervention",
+                "description": "Test description",
+                "leverageLevel": 6,
+                "leverageGroup": "Feedbacks",
+                "leverageName": "structure",
+                "designGoal": "Test design goal",
+                "evidence": ["test evidence"],
+                "constraints": [],
+                "wrongDirection": "Test wrong direction",
+                "confidence": "high",
+                "effort": "medium",
+                "risk": "low",
+                "authorityRequired": "developer",
+            }
+        ],
+        "contradictions": [],
+        "knowledgeGaps": [],
+        "additionalFindings": 0,
+    }
+
+    recon_file_path = os.path.join(tmp_dir, "recon.json")
+    with open(recon_file_path, "w") as f:
+        json.dump(recon_data, f)
+
     return {
         "minimal_plan": minimal_plan_path,
         "failed_plan": failed_plan_path,
@@ -2783,6 +3036,7 @@ def _create_fixtures(tmp_dir: str) -> dict[str, str]:
         "expert_artifact": expert_artifact_path,
         "design_dir": design_dir,
         "archive_dir": archive_dir,
+        "recon_file": recon_file_path,
     }
 
 
@@ -3028,6 +3282,31 @@ def _test_reflection_validate(script_path: str) -> None:
     assert output.get("ok") is False, "reflection-validate should reject invalid input"
 
 
+def _test_recon_validate(script_path: str, recon_path: str) -> None:
+    """Test recon-validate command."""
+    output = _run_command(script_path, ["recon-validate", recon_path])
+    assert output.get("ok") is True, f"recon-validate failed: {output}"
+    assert output.get("validated") is True, (
+        "recon-validate should report validated=True"
+    )
+    assert "interventions" in output, "recon-validate missing interventions field"
+    assert len(output["interventions"]) > 0, "Should have at least one intervention"
+    assert "compositeScore" in output["interventions"][0], (
+        "Interventions should have compositeScore"
+    )
+
+
+def _test_recon_summary(script_path: str, recon_path: str) -> None:
+    """Test recon-summary command."""
+    output = _run_command(script_path, ["recon-summary", recon_path])
+    assert output.get("ok") is True, f"recon-summary failed: {output}"
+    assert "topInterventions" in output, "recon-summary missing topInterventions field"
+    assert "interventionCount" in output, (
+        "recon-summary missing interventionCount field"
+    )
+    assert "depthTier" in output, "recon-summary missing depthTier field"
+
+
 def _test_validate_checks_valid(script_path: str, plan_path: str) -> None:
     """Test validate-checks command with valid plan."""
     output = _run_command(script_path, ["validate-checks", plan_path])
@@ -3261,6 +3540,19 @@ def main() -> None:
     p.add_argument("--skill", type=str, help="Filter by skill name")
     p.add_argument("--limit", type=int, default=5, help="Max results to return")
     p.set_defaults(func=cmd_reflection_search)
+
+    # Recon commands
+    p = subparsers.add_parser(
+        "recon-validate", help="Validate recon.json and compute composite scores"
+    )
+    p.add_argument("recon_path", nargs="?", default=".design/recon.json")
+    p.set_defaults(func=cmd_recon_validate)
+
+    p = subparsers.add_parser(
+        "recon-summary", help="Extract summary from recon.json for display"
+    )
+    p.add_argument("recon_path", nargs="?", default=".design/recon.json")
+    p.set_defaults(func=cmd_recon_summary)
 
     # Validation commands
     p = subparsers.add_parser(
