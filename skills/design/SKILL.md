@@ -197,6 +197,8 @@ The lead collects expert findings and writes the plan.
    ```
    This is non-blocking — continue to finalization. If the user objects, adjust before finalizing. For trivial/standard tiers, skip this review.
 
+**Validate acceptance criteria checks**: After writing plan.json, run `python3 $PLAN_CLI validate-checks .design/plan.json`. If errors found, display them to the user with role name and criterion. Attempt to fix obvious syntax errors by editing the check commands in plan.json (e.g., missing quotes, unescaped characters, invalid Python syntax). This is non-blocking — proceed to finalization even if some checks remain unfixable, but flag them to the user.
+
 ### 4.5. Generate Verification Specs (OPTIONAL)
 
 Verification specs are property-based tests workers must satisfy. They codify expert verificationProperties as executable tests without constraining implementation.
