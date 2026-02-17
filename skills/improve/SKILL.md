@@ -187,7 +187,7 @@ The lead collects expert findings and builds improvement roles for plan.json.
    - `goal`: The testable hypothesis — what to change and predicted behavioral effect
    - `scope.directories/patterns`: The skill file(s) to modify
    - `constraints`: Must preserve YAML frontmatter, must not break plan.json contract, must not exceed token budget, must not regress other dimensions
-   - `acceptanceCriteria`: Concrete checks that verify the improvement (e.g., line count checks, structural pattern checks, dimension-specific verification)
+   - `acceptanceCriteria`: Concrete checks that verify the improvement works, not just that it exists. For SKILL.md changes: verify finalize still validates (`python3 $PLAN_CLI finalize .design/test-plan.json`), verify YAML frontmatter parses (`python3 -c "import yaml; yaml.safe_load(open(...))" `), verify behavioral change took effect. **Acceptance criteria anti-patterns to avoid**: `grep -q` (text presence, not function), `wc -l` (size, not behavior), `test -f` alone (file exists, not correct), `cmd || echo` (masks exit code).
    - `expertContext`: References to the analyst artifacts with relevance notes
    - `assumptions`, `rollbackTriggers`, `fallback` as appropriate
 5. **CRITICAL: Anti-pattern guards** after building roles (DO NOT proceed to Step 6 if any guard triggers without user approval):

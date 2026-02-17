@@ -83,7 +83,7 @@ The two skills communicate through `.design/plan.json` (schemaVersion 4) written
 - `scope` — `{directories, patterns, dependencies}` where dependencies are role names resolved to indices
 - `expertContext` — array of `{expert, artifact, relevance}` referencing full expert artifacts
 - `constraints` — array of hard rules the worker must follow
-- `acceptanceCriteria` — array of `{criterion, check}` where `check` is a concrete, independently runnable shell command (e.g., `"bun run build 2>&1 | tail -20"`). Checks must verify functional correctness, not just pattern existence (a grep confirming a rule exists is insufficient — verify it takes effect). Workers execute these literally during CoVe verification
+- `acceptanceCriteria` — array of `{criterion, check}` where `check` is a concrete, independently runnable shell command (e.g., `"bun run build"`, `"python3 -m pytest tests/"`). Checks must verify functional correctness, not just pattern existence (a grep confirming a rule exists is insufficient — verify it takes effect). Check commands must exit non-zero on failure. Anti-patterns to avoid: grep-only checks, `|| echo` or `|| true` fallbacks, `test -f` as sole verification, `wc -l` counts, pipe chains without explicit exit-code handling. Workers execute these literally during CoVe verification
 - `assumptions` — array of `{text, severity}` documenting assumptions (`blocking` or `non-blocking`)
 - `rollbackTriggers` — array of conditions that should cause the worker to stop and report
 - `fallback` — alternative approach if primary fails (included in initial brief)

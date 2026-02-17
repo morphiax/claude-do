@@ -176,7 +176,15 @@ The lead collects expert findings and writes the plan.
    - Workers decide HOW to implement — briefs define WHAT and WHY
 4. Write `.design/plan.json` with role briefs (see schema below).
 5. For each role, include `expertContext[]` referencing specific expert artifacts and the sections relevant to that role. **Do not lossy-compress expert findings into terse fields** — reference the full artifacts.
-6. Write criteria-based `acceptanceCriteria` — define WHAT should work, not WHICH files should exist. Workers verify against criteria, not file lists. **Every criterion MUST have a `check` that is a concrete, independently runnable shell command** (e.g., `"bun run build 2>&1 | tail -5"`, `"bun test --run 2>&1 | tail -10"`). Never leave checks as prose descriptions — workers execute these literally. If a role touches compiled code, include BOTH a build check AND a test check as separate criteria. **Checks must verify functional correctness, not just pattern existence.** A grep confirming a CSS rule exists is insufficient — the check must verify the rule actually takes effect (e.g., start a dev server and curl the page, or verify that referenced classes/imports resolve to definitions). At least one criterion per role should test end-to-end behavior, not just file contents.
+6. Write criteria-based `acceptanceCriteria` — define WHAT should work, not WHICH files should exist. Workers verify against criteria, not file lists. **Every criterion MUST have a `check` that is a concrete, independently runnable shell command** (e.g., `"bun run build"`, `"bun test --run"`). Never leave checks as prose descriptions — workers execute these literally. If a role touches compiled code, include BOTH a build check AND a test check as separate criteria. **Checks must verify functional correctness, not just pattern existence.** A grep confirming a CSS rule exists is insufficient — the check must verify the rule actually takes effect (e.g., start a dev server and curl the page, or verify that referenced classes/imports resolve to definitions). At least one criterion per role should test end-to-end behavior, not just file contents. **Check commands must fail-fast with non-zero exit codes on failure.**
+
+   **Acceptance criteria anti-patterns** (NEVER use these as the sole check for a criterion):
+   - `grep -q "pattern" file` — anti-pattern: verifies text exists, not that feature works
+   - `test -f output.json` — anti-pattern: file exists but may contain errors
+   - `wc -l file` — anti-pattern: verifies size, not correctness
+   - `cmd || echo "fallback"` — anti-pattern: always exits 0, masks failures completely
+   - `cmd 2>&1 | tail -N` — anti-pattern: pipe may mask exit code unless `set -o pipefail` is used
+
 7. Add `auxiliaryRoles[]` (see Auxiliary Roles section).
 8. Write to `.design/plan.json` (do NOT run finalize yet — that happens in Step 4.5).
 9. **Draft plan review** (complex/high-stakes tier only): Display the draft plan to the user before finalization:
@@ -243,8 +251,8 @@ Verification specs are property-based tests workers must satisfy. They codify ex
   ],
   "acceptanceCriteria": [
     { "criterion": "Rate limiting active on all /api/* routes", "check": "10 rapid requests to /api/health — last returns 429" },
-    { "criterion": "Build succeeds", "check": "npm run build 2>&1 | tail -20" },
-    { "criterion": "Existing tests pass", "check": "npm test 2>&1 | tail -20" }
+    { "criterion": "Build succeeds", "check": "npm run build" },
+    { "criterion": "Existing tests pass", "check": "npm test" }
   ],
   "assumptions": [
     { "text": "Express middleware pattern used", "severity": "non-blocking" }

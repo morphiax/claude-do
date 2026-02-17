@@ -138,7 +138,7 @@ Top improvement hypotheses:
    - `goal`: The hypothesis — what to change, why (citing reflection evidence), predicted effect
    - `scope.directories/patterns`: The skill file(s) to modify
    - `constraints`: Must preserve YAML frontmatter, must not break plan.json contract, must not regress other skills
-   - `acceptanceCriteria`: Checks that verify the change was made correctly. Include at least one functional check beyond grep
+   - `acceptanceCriteria`: Checks that verify the change was made correctly. Include at least one functional check beyond grep. For SKILL.md changes: verify finalize still validates (`python3 $PLAN_CLI finalize`), verify YAML frontmatter parses (`python3 -c "import yaml; ..."`), verify referenced plan.py commands exist (`python3 $PLAN_CLI <command> --help`), verify behavioral change took effect. **Anti-patterns to avoid**: `grep -q "text"` alone, `wc -l` counts, `test -f` existence checks, `cmd || echo` fallbacks.
    - `expertContext`: Reference to the analyst artifact with specific hypothesis
    - `assumptions`, `rollbackTriggers`, `fallback` as appropriate
 7. If improvements touch multiple skills, add a `docs-updater` role to sync CLAUDE.md and README.md.
