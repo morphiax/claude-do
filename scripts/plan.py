@@ -35,11 +35,30 @@ import tempfile
 import time
 import uuid
 from collections import defaultdict, deque
+from datetime import datetime, timezone
 from typing import Any, NoReturn
 
 # ============================================================================
 # Shared Utilities
 # ============================================================================
+
+
+def _now_iso() -> str:
+    """Return current UTC time as ISO 8601 string."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _parse_timestamp(value: Any) -> float:
+    """Parse a timestamp to epoch seconds. Handles both ISO strings and floats."""
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            dt = datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+            return dt.replace(tzinfo=timezone.utc).timestamp()
+        except ValueError:
+            pass
+    return 0.0
 
 
 def load_plan(path: str) -> dict[str, Any]:
@@ -1564,7 +1583,7 @@ def _score_memory(
     keyword_score = overlap / len(query_tokens)
 
     # Recency decay: entries lose 10% relevance per 30 days
-    timestamp = entry.get("timestamp", current_time)
+    timestamp = _parse_timestamp(entry.get("timestamp", current_time))
     age_seconds = current_time - timestamp
     age_months = age_seconds / (30 * 24 * 60 * 60)
     recency_factor = 0.9**age_months
@@ -1599,7 +1618,7 @@ def _format_memory_result(score: float, entry: dict[str, Any]) -> dict[str, Any]
         "keywords": entry.get("keywords", []),
         "content": entry.get("content", ""),
         "source": entry.get("source", ""),
-        "timestamp": entry.get("timestamp", 0),
+        "timestamp": _parse_timestamp(entry.get("timestamp", 0)),
         "goal_context": entry.get("goal_context", ""),
         "importance": entry.get("importance", 5),
         "usage_count": entry.get("usage_count", 0),
@@ -1741,7 +1760,7 @@ def _add_new_memory_entry(
 
     entry = {
         "id": str(uuid.uuid4()),
-        "timestamp": time.time(),
+        "timestamp": _now_iso(),
         "category": category,
         "keywords": keywords,
         "content": content,
@@ -1839,7 +1858,7 @@ def cmd_reflection_add(args: argparse.Namespace) -> NoReturn:
 
     entry = {
         "id": str(uuid.uuid4()),
-        "timestamp": time.time(),
+        "timestamp": _now_iso(),
         "skill": skill,
         "goal": goal,
         "outcome": outcome,
@@ -1895,7 +1914,7 @@ def cmd_reflection_search(args: argparse.Namespace) -> NoReturn:
         error_exit(f"Error reading reflection file: {e}")
 
     # Sort by timestamp descending (most recent first)
-    entries.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
+    entries.sort(key=lambda x: _parse_timestamp(x.get("timestamp", 0)), reverse=True)
 
     output_json({"ok": True, "reflections": entries[:limit]})
 
@@ -2013,7 +2032,7 @@ def _score_and_format_memories(
         )
 
         # Recency decay (10% per 30 days)
-        timestamp = mem.get("timestamp", 0)
+        timestamp = _parse_timestamp(mem.get("timestamp", 0))
         if timestamp:
             age_days = (time.time() - timestamp) / 86400
             recency_factor = max(0.1, 1.0 - (age_days / 30) * 0.1)
@@ -2101,7 +2120,8 @@ def _filter_memories(
 
 def _format_memory_for_review(mem: dict[str, Any]) -> dict[str, Any]:
     """Format a single memory entry for human-readable display."""
-    ts = mem.get("timestamp", 0)
+    raw_ts = mem.get("timestamp", 0)
+    ts = _parse_timestamp(raw_ts)
     date_str = time.strftime("%Y-%m-%d", time.localtime(ts)) if ts else "unknown"
 
     return {
@@ -2146,7 +2166,9 @@ def _read_recent_reflections(design_dir: str) -> list[str]:
                         entries.append(json.loads(line))
                     except json.JSONDecodeError:
                         pass
-            entries.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
+            entries.sort(
+                key=lambda x: _parse_timestamp(x.get("timestamp", 0)), reverse=True
+            )
             recent = entries[:2]
 
             summaries = []
@@ -2225,7 +2247,8 @@ def cmd_memory_review(args: argparse.Namespace) -> NoReturn:
     # Apply filters and sort
     filtered = _filter_memories(all_memories, category_filter, keyword_filter)
     filtered.sort(
-        key=lambda m: (m.get("importance", 5), m.get("timestamp", 0)), reverse=True
+        key=lambda m: (m.get("importance", 5), _parse_timestamp(m.get("timestamp", 0))),
+        reverse=True,
     )
 
     # Format for display
@@ -2466,7 +2489,12 @@ def cmd_self_test(args: argparse.Namespace) -> NoReturn:
 
 def _create_fixtures(tmp_dir: str) -> dict[str, str]:
     """Create test fixtures and return their paths."""
-    current_time = int(time.time())
+    from datetime import timedelta as _td
+
+    now = datetime.now(timezone.utc)
+    one_day_ago = (now - _td(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    one_week_ago = (now - _td(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    two_days_ago = (now - _td(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     # Minimal valid plan
     minimal_plan = {
@@ -2605,7 +2633,7 @@ def _create_fixtures(tmp_dir: str) -> dict[str, str]:
     memory_entries = [
         {
             "id": "mem-1",
-            "timestamp": current_time - 86400,
+            "timestamp": one_day_ago,
             "category": "pattern",
             "keywords": ["api", "rest"],
             "content": "REST APIs should use consistent error format",
@@ -2616,7 +2644,7 @@ def _create_fixtures(tmp_dir: str) -> dict[str, str]:
         },
         {
             "id": "mem-2",
-            "timestamp": current_time - 604800,
+            "timestamp": one_week_ago,
             "category": "mistake",
             "keywords": ["test", "timeout"],
             "content": "Integration tests need explicit timeouts",
@@ -2636,7 +2664,7 @@ def _create_fixtures(tmp_dir: str) -> dict[str, str]:
     reflection_entries = [
         {
             "id": "ref-1",
-            "timestamp": current_time - 86400,
+            "timestamp": one_day_ago,
             "skill": "execute",
             "goal": "Build API",
             "outcome": "completed",
@@ -2649,7 +2677,7 @@ def _create_fixtures(tmp_dir: str) -> dict[str, str]:
         },
         {
             "id": "ref-2",
-            "timestamp": current_time - 172800,
+            "timestamp": two_days_ago,
             "skill": "design",
             "goal": "Design auth",
             "outcome": "partial",
