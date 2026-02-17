@@ -1415,6 +1415,8 @@ def _format_memory_result(score: float, entry: dict[str, Any]) -> dict[str, Any]
         "source": entry.get("source", ""),
         "timestamp": entry.get("timestamp", 0),
         "goal_context": entry.get("goal_context", ""),
+        "importance": entry.get("importance", 5),
+        "usage_count": entry.get("usage_count", 0),
         "score": round(score, 3),
     }
 
@@ -1461,7 +1463,14 @@ def cmd_memory_search(args: argparse.Namespace) -> NoReturn:
 
 def _validate_memory_input(category: str, content: str, keywords_str: str) -> list[str]:
     """Validate memory add inputs. Returns list of keywords or exits on error."""
-    valid_categories = {"pattern", "mistake", "convention", "approach", "failure"}
+    valid_categories = {
+        "pattern",
+        "mistake",
+        "convention",
+        "approach",
+        "failure",
+        "procedure",
+    }
     if category not in valid_categories:
         error_exit(f"Invalid category '{category}'. Must be one of: {valid_categories}")
 
@@ -1482,9 +1491,72 @@ def _ensure_memory_dir(memory_path: str) -> None:
         os.makedirs(memory_dir)
 
 
+def _update_memory_importance(memory_path: str, entry_id: str, boost: bool) -> NoReturn:
+    """Update importance of an existing memory entry."""
+    if not os.path.exists(memory_path):
+        error_exit(f"Memory file not found: {memory_path}")
+
+    try:
+        entries = _load_memory_entries(memory_path)
+    except OSError as e:
+        error_exit(f"Error reading memory file: {e}")
+
+    # Find and update entry
+    updated = False
+    new_importance = 5
+    for entry in entries:
+        if entry.get("id") == entry_id:
+            current_importance = entry.get("importance", 5)
+            new_importance = (
+                min(10, current_importance + 1)
+                if boost
+                else max(1, current_importance - 1)
+            )
+            entry["importance"] = new_importance
+            updated = True
+            break
+
+    if not updated:
+        error_exit(f"Entry with id '{entry_id}' not found")
+
+    # Rewrite file
+    try:
+        _ensure_memory_dir(memory_path)
+        with open(memory_path, "w") as f:
+            for e in entries:
+                f.write(json.dumps(e) + "\n")
+    except OSError as e:
+        error_exit(f"Error writing memory file: {e}")
+
+    output_json(
+        {
+            "ok": True,
+            "id": entry_id,
+            "importance": new_importance,
+            "action": "boosted" if boost else "decayed",
+        }
+    )
+
+
 def cmd_memory_add(args: argparse.Namespace) -> NoReturn:
-    """Add a new memory entry to memory.jsonl."""
+    """Add a new memory entry or update importance of existing entry.
+
+    --boost: increase importance by 1 (capped at 10)
+    --decay: decrease importance by 1 (floor at 1)
+    --id: specify entry ID to update (required for boost/decay)
+    """
     memory_path = args.memory_path
+    boost = getattr(args, "boost", False)
+    decay = getattr(args, "decay", False)
+    entry_id = getattr(args, "id", None)
+
+    # Mode: update existing entry importance
+    if boost or decay:
+        if not entry_id:
+            error_exit("--id required when using --boost or --decay")
+        _update_memory_importance(memory_path, entry_id, boost)
+
+    # Mode: add new entry
     category = args.category
     keywords_str = args.keywords or ""
     content = args.content
@@ -1499,7 +1571,7 @@ def cmd_memory_add(args: argparse.Namespace) -> NoReturn:
     # Validate and parse inputs
     keywords = _validate_memory_input(category, content, keywords_str)
 
-    # Create entry
+    # Create entry with usage tracking
     entry = {
         "id": str(uuid.uuid4()),
         "timestamp": time.time(),
@@ -1509,6 +1581,7 @@ def cmd_memory_add(args: argparse.Namespace) -> NoReturn:
         "source": source,
         "goal_context": goal_context,
         "importance": importance,
+        "usage_count": 0,
     }
 
     # Append to JSONL file
@@ -1800,6 +1873,178 @@ def cmd_memory_summary(args: argparse.Namespace) -> NoReturn:
     )
 
 
+def _filter_memories(
+    memories: list[dict[str, Any]],
+    category_filter: str | None,
+    keyword_filter: str | None,
+) -> list[dict[str, Any]]:
+    """Filter memories by category and keyword."""
+    filtered = []
+    for mem in memories:
+        if category_filter and mem.get("category") != category_filter:
+            continue
+
+        if keyword_filter:
+            entry_keywords = mem.get("keywords", [])
+            if isinstance(entry_keywords, str):
+                entry_keywords = [entry_keywords]
+            if not any(keyword_filter.lower() in k.lower() for k in entry_keywords):
+                continue
+
+        filtered.append(mem)
+    return filtered
+
+
+def _format_memory_for_review(mem: dict[str, Any]) -> dict[str, Any]:
+    """Format a single memory entry for human-readable display."""
+    ts = mem.get("timestamp", 0)
+    date_str = time.strftime("%Y-%m-%d", time.localtime(ts)) if ts else "unknown"
+
+    return {
+        "id": mem.get("id", ""),
+        "category": mem.get("category", "unknown"),
+        "importance": mem.get("importance", 5),
+        "usage_count": mem.get("usage_count", 0),
+        "date": date_str,
+        "keywords": mem.get("keywords", []),
+        "content": mem.get("content", ""),
+        "source": mem.get("source", ""),
+    }
+
+
+def _read_handoff_summary(design_dir: str) -> str:
+    """Read first 5 lines of handoff.md as summary."""
+    handoff_path = os.path.join(design_dir, "handoff.md")
+    if not os.path.exists(handoff_path):
+        return ""
+
+    try:
+        with open(handoff_path) as f:
+            lines = [line.strip() for line in f if line.strip()]
+            return "\n".join(lines[:5])
+    except OSError:
+        return ""
+
+
+def _read_recent_reflections(design_dir: str) -> list[str]:
+    """Read last 2 reflections and format as summaries."""
+    reflection_path = os.path.join(design_dir, "reflection.jsonl")
+    if not os.path.exists(reflection_path):
+        return []
+
+    try:
+        with open(reflection_path) as f:
+            entries = []
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        entries.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        pass
+            entries.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
+            recent = entries[:2]
+
+            summaries = []
+            for ref in recent:
+                skill = ref.get("skill", "unknown")
+                outcome = ref.get("outcome", "unknown")
+                status = "succeeded" if ref.get("goalAchieved", False) else "failed"
+                summaries.append(f"{skill}: {outcome} ({status})")
+            return summaries
+    except OSError:
+        return []
+
+
+def _read_plan_status(design_dir: str) -> str:
+    """Read current plan completion status."""
+    plan_path = os.path.join(design_dir, "plan.json")
+    if not os.path.exists(plan_path):
+        return ""
+
+    try:
+        with open(plan_path) as f:
+            plan = json.load(f)
+            roles = plan.get("roles", [])
+            completed = sum(1 for r in roles if r.get("status") == "completed")
+            total = len(roles)
+            return f"Current plan: {completed}/{total} roles completed"
+    except (json.JSONDecodeError, OSError):
+        return "Plan file exists but cannot be read"
+
+
+def cmd_plan_health_summary(args: argparse.Namespace) -> NoReturn:
+    """Generate lifecycle context summary from handoff.md and recent reflections.
+
+    Shows users where they are in the workflow lifecycle.
+    """
+    design_dir = args.design_dir
+
+    handoff_summary = _read_handoff_summary(design_dir)
+    reflection_summaries = _read_recent_reflections(design_dir)
+    plan_status = _read_plan_status(design_dir)
+
+    output_json(
+        {
+            "ok": True,
+            "handoff": handoff_summary,
+            "reflections": reflection_summaries,
+            "plan": plan_status,
+        }
+    )
+
+
+def cmd_memory_review(args: argparse.Namespace) -> NoReturn:
+    """List all memories in human-readable format with filtering.
+
+    Allows filtering by category and keyword. Outputs formatted for user review.
+    """
+    memory_path = args.memory_path
+    category_filter = getattr(args, "category", None)
+    keyword_filter = getattr(args, "keyword", None)
+
+    if not os.path.exists(memory_path):
+        output_json(
+            {"ok": True, "summary": "No memory file found", "count": 0, "memories": []}
+        )
+
+    try:
+        all_memories = _load_memory_entries(memory_path)
+    except OSError as e:
+        error_exit(f"Error reading memory file: {e}")
+
+    if not all_memories:
+        output_json(
+            {"ok": True, "summary": "No memories found", "count": 0, "memories": []}
+        )
+
+    # Apply filters and sort
+    filtered = _filter_memories(all_memories, category_filter, keyword_filter)
+    filtered.sort(
+        key=lambda m: (m.get("importance", 5), m.get("timestamp", 0)), reverse=True
+    )
+
+    # Format for display
+    memories_formatted = [_format_memory_for_review(mem) for mem in filtered]
+
+    # Build summary text
+    summary = f"Showing {len(filtered)} of {len(all_memories)} memories"
+    if category_filter:
+        summary += f" (category: {category_filter})"
+    if keyword_filter:
+        summary += f" (keyword: {keyword_filter})"
+
+    output_json(
+        {
+            "ok": True,
+            "summary": summary,
+            "count": len(filtered),
+            "total": len(all_memories),
+            "memories": memories_formatted,
+        }
+    )
+
+
 # ============================================================================
 # Archive Command
 # ============================================================================
@@ -1924,11 +2169,17 @@ def main() -> None:
     p.add_argument("plan_path", nargs="?", default=".design/plan.json")
     p.set_defaults(func=cmd_resume_reset)
 
-    p = subparsers.add_parser("memory-add", help="Add a new memory entry")
+    p = subparsers.add_parser(
+        "memory-add",
+        help="Add a new memory entry or update importance of existing entry",
+    )
     p.add_argument("memory_path", nargs="?", default=".design/memory.jsonl")
-    p.add_argument("--category", required=True, help="Memory category")
-    p.add_argument("--keywords", required=True, help="Comma-separated keywords")
-    p.add_argument("--content", required=True, help="Memory content")
+    p.add_argument(
+        "--category",
+        help="Memory category (pattern|mistake|convention|approach|failure|procedure)",
+    )
+    p.add_argument("--keywords", help="Comma-separated keywords")
+    p.add_argument("--content", help="Memory content")
     p.add_argument("--source", help="Source of the memory")
     p.add_argument("--goal-context", help="Goal context for the memory")
     p.add_argument(
@@ -1937,6 +2188,9 @@ def main() -> None:
         default=5,
         help="Importance rating 1-10 (10 = most important, default: 5)",
     )
+    p.add_argument("--boost", action="store_true", help="Increase importance by 1")
+    p.add_argument("--decay", action="store_true", help="Decrease importance by 1")
+    p.add_argument("--id", help="Entry ID to update (required for --boost/--decay)")
     p.set_defaults(func=cmd_memory_add)
 
     p = subparsers.add_parser(
@@ -1989,6 +2243,14 @@ def main() -> None:
     p.add_argument("--goal", type=str, help="Goal or context for memory search")
     p.set_defaults(func=cmd_memory_summary)
 
+    p = subparsers.add_parser(
+        "memory-review", help="List all memories in human-readable format"
+    )
+    p.add_argument("memory_path", nargs="?", default=".design/memory.jsonl")
+    p.add_argument("--category", help="Filter by category")
+    p.add_argument("--keyword", help="Filter by keyword")
+    p.set_defaults(func=cmd_memory_review)
+
     # Archive command
     p = subparsers.add_parser(
         "archive", help="Archive .design/ to history/{timestamp}/"
@@ -2019,6 +2281,13 @@ def main() -> None:
     p.add_argument("plan_a", help="First plan file")
     p.add_argument("plan_b", help="Second plan file")
     p.set_defaults(func=cmd_plan_diff)
+
+    p = subparsers.add_parser(
+        "plan-health-summary",
+        help="Show lifecycle context from handoff and reflections",
+    )
+    p.add_argument("design_dir", nargs="?", default=".design")
+    p.set_defaults(func=cmd_plan_health_summary)
 
     args = parser.parse_args()
 

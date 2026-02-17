@@ -50,7 +50,7 @@ TEAM_NAME = $(python3 $PLAN_CLI team-name design).teamName
 
 ### 1. Pre-flight
 
-1. **Lifecycle context**: If `.design/handoff.md` exists, read it via Bash and display a brief summary to user: "Previous session: {goal} — {outcome}. {key notes}." If `.design/reflection.jsonl` exists, show: "Past runs: {count} reflections available."
+1. **Lifecycle context**: Run `python3 $PLAN_CLI plan-health-summary .design` and display to user: "Previous session: {handoff summary}. Recent runs: {reflection summaries}. {plan status}." Skip if all fields empty.
 2. **Check for ambiguity**: If the goal has multiple valid interpretations per the Clarification Protocol, use `AskUserQuestion` before proceeding.
 3. If >5 roles likely needed, suggest phases. Design only phase 1.
 4. Check existing plan: `python3 $PLAN_CLI status .design/plan.json`. If `ok` and `isResume`: ask user "Existing plan has {counts} roles. Overwrite?" If declined, stop.

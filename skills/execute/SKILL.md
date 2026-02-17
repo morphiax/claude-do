@@ -37,7 +37,7 @@ TEAM_NAME = $(python3 $PLAN_CLI team-name execute).teamName
 
 ### 1. Setup
 
-1. **Lifecycle context**: If `.design/handoff.md` exists, read it via Bash and display to user: "Previous session: {goal} — {outcome}. {key notes}." If `.design/reflection.jsonl` exists, show: "Past runs: {count} reflections available."
+1. **Lifecycle context**: Run `python3 $PLAN_CLI plan-health-summary .design` and display to user: "Previous session: {handoff summary}. Recent runs: {reflection summaries}. {plan status}." Skip if all fields empty.
 2. Validate: `python3 $PLAN_CLI status .design/plan.json`. On failure: `not_found` = "No plan found. Run `/do:design <goal>` first." and stop; `bad_schema` = unsupported schema, stop; `empty_roles` = no roles, stop.
 3. Resume detection: If `isResume`: run `python3 $PLAN_CLI resume-reset .design/plan.json`. If `noWorkRemaining`: "All roles already resolved." and stop.
 4. Create team: `TeamDelete(team_name: $TEAM_NAME)` (ignore errors), then `TeamCreate(team_name: $TEAM_NAME)`. If TeamCreate fails, tell user Agent Teams is required and stop. Health check: verify team state via `ls ~/.claude/teams/$TEAM_NAME/config.json`. If missing, delete and retry: `TeamDelete(team_name: $TEAM_NAME)`, `TeamCreate(team_name: $TEAM_NAME)`. If retry fails, abort with error message.
