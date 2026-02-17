@@ -5,13 +5,17 @@ Schema version 4: Role-based briefs with goal-directed execution.
 
 Query commands (read-only):
   team-name, status, summary, overlap-matrix, tasklist-data, worker-pool,
-  retry-candidates, circuit-breaker, memory-search, reflection-search
+  retry-candidates, circuit-breaker, memory-search, reflection-search,
+  memory-summary
 
 Mutation commands (modify plan.json):
   resume-reset, update-status, memory-add, reflection-add
 
 Build commands (validation & enrichment):
-  finalize
+  finalize, expert-validate, reflection-validate
+
+Archive command:
+  archive
 
 All commands output JSON to stdout with top-level 'ok' field.
 Exit code: 0 for success, 1 for errors.
@@ -1313,6 +1317,182 @@ def cmd_reflection_search(args: argparse.Namespace) -> NoReturn:
 
 
 # ============================================================================
+# Validation Commands
+# ============================================================================
+
+
+def cmd_expert_validate(args: argparse.Namespace) -> NoReturn:
+    """Validate expert artifact JSON against minimal required schema.
+
+    Required fields: summary, verificationProperties
+    """
+    artifact_path = args.artifact_path
+
+    if not os.path.exists(artifact_path):
+        error_exit(f"Artifact file not found: {artifact_path}")
+
+    try:
+        with open(artifact_path) as f:
+            data = json.load(f)
+    except json.JSONDecodeError as e:
+        error_exit(f"Invalid JSON in artifact: {e}")
+    except OSError as e:
+        error_exit(f"Error reading artifact: {e}")
+
+    # Check required fields
+    missing = []
+    if "summary" not in data:
+        missing.append("summary")
+    if "verificationProperties" not in data:
+        missing.append("verificationProperties")
+
+    if missing:
+        error_exit(f"Missing required fields: {', '.join(missing)}")
+
+    # Validate verificationProperties is a list
+    if not isinstance(data["verificationProperties"], list):
+        error_exit("verificationProperties must be an array")
+
+    output_json({"ok": True, "valid": True})
+
+
+def cmd_reflection_validate(args: argparse.Namespace) -> NoReturn:
+    """Validate reflection evaluation JSON against minimal schema.
+
+    Reads evaluation JSON from stdin.
+    Required fields: whatWorked, whatFailed, doNextTime (all arrays)
+    """
+    try:
+        evaluation = json.load(sys.stdin)
+    except json.JSONDecodeError as e:
+        error_exit(f"Invalid JSON in evaluation: {e}")
+
+    # Check required fields
+    missing = []
+    for field in ["whatWorked", "whatFailed", "doNextTime"]:
+        if field not in evaluation:
+            missing.append(field)
+
+    if missing:
+        error_exit(f"Missing required fields: {', '.join(missing)}")
+
+    # Validate all required fields are arrays
+    invalid = []
+    for field in ["whatWorked", "whatFailed", "doNextTime"]:
+        if not isinstance(evaluation.get(field), list):
+            invalid.append(field)
+
+    if invalid:
+        error_exit(f"Fields must be arrays: {', '.join(invalid)}")
+
+    output_json({"ok": True, "valid": True})
+
+
+def _load_memories(memory_path: str) -> list[dict[str, Any]]:
+    """Load memories from JSONL file."""
+    memories = []
+    try:
+        with open(memory_path) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    memories.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+    except OSError:
+        return []
+    return memories
+
+
+def _score_and_format_memories(
+    memories: list[dict[str, Any]], goal: str
+) -> list[dict[str, Any]]:
+    """Score memories by relevance and format for display."""
+
+    def score_memory(mem: dict[str, Any]) -> float:
+        content = mem.get("content", "").lower()
+        keywords = mem.get("keywords", "")
+        # Handle keywords as string or list
+        if isinstance(keywords, list):
+            keywords_str = " ".join(keywords).lower()
+        else:
+            keywords_str = str(keywords).lower()
+        importance = mem.get("importance", 5)
+
+        # Count keyword matches
+        query_tokens = goal.lower().split()
+        matches = sum(
+            1 for token in query_tokens if token in content or token in keywords_str
+        )
+
+        # Recency decay (10% per 30 days)
+        timestamp = mem.get("timestamp", 0)
+        if timestamp:
+            age_days = (time.time() - timestamp) / 86400
+            recency_factor = max(0.1, 1.0 - (age_days / 30) * 0.1)
+        else:
+            recency_factor = 1.0
+
+        return matches * recency_factor * (importance / 10)
+
+    # Score and sort
+    scored = [(mem, score_memory(mem)) for mem in memories]
+    scored.sort(key=lambda x: x[1], reverse=True)
+    top_memories = scored[:5]
+
+    # Format for display
+    entries = []
+    for mem, score in top_memories:
+        entries.append(
+            {
+                "category": mem.get("category", "unknown"),
+                "content": mem.get("content", ""),
+                "importance": mem.get("importance", 5),
+                "score": round(score, 2),
+            }
+        )
+
+    return entries
+
+
+def cmd_memory_summary(args: argparse.Namespace) -> NoReturn:
+    """Format memory injection summary for user display.
+
+    Searches memory.jsonl and formats top results in human-readable format.
+    """
+    memory_path = args.memory_path
+    goal = args.goal or ""
+
+    # If memory file doesn't exist, return empty result
+    if not os.path.exists(memory_path):
+        output_json(
+            {"ok": True, "summary": "No memory file found", "count": 0, "entries": []}
+        )
+
+    # Load memories
+    memories = _load_memories(memory_path)
+    if not memories:
+        output_json(
+            {"ok": True, "summary": "No memories found", "count": 0, "entries": []}
+        )
+
+    # Score and format
+    entries = _score_and_format_memories(memories, goal)
+    summary_text = f"Found {len(memories)} memories, showing top {len(entries)}"
+
+    output_json(
+        {
+            "ok": True,
+            "summary": summary_text,
+            "count": len(entries),
+            "entries": entries,
+        }
+    )
+
+
+# ============================================================================
 # Archive Command
 # ============================================================================
 
@@ -1481,6 +1661,27 @@ def main() -> None:
     p.add_argument("--limit", type=int, default=5, help="Max results to return")
     p.set_defaults(func=cmd_reflection_search)
 
+    # Validation commands
+    p = subparsers.add_parser(
+        "expert-validate", help="Validate expert artifact JSON schema"
+    )
+    p.add_argument("artifact_path", help="Path to expert artifact JSON file")
+    p.set_defaults(func=cmd_expert_validate)
+
+    p = subparsers.add_parser(
+        "reflection-validate",
+        help="Validate reflection evaluation schema (reads JSON from stdin)",
+    )
+    p.set_defaults(func=cmd_reflection_validate)
+
+    p = subparsers.add_parser(
+        "memory-summary", help="Format memory injection summary for user display"
+    )
+    p.add_argument("memory_path", nargs="?", default=".design/memory.jsonl")
+    p.add_argument("--goal", type=str, help="Goal or context for memory search")
+    p.set_defaults(func=cmd_memory_summary)
+
+    # Archive command
     p = subparsers.add_parser(
         "archive", help="Archive .design/ to history/{timestamp}/"
     )
