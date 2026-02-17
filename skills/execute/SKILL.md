@@ -138,11 +138,12 @@ Task(subagent_type: "general-purpose", team_name: $TEAM_NAME, name: "{worker-nam
 Event-driven loop — process worker messages as they arrive.
 
 **On role completion**: Worker reports what they achieved, acceptance criteria results, and handoff context.
-1. Update plan.json: `echo '[{"roleIndex": N, "status": "completed", "result": "..."}]' | python3 $PLAN_CLI update-status .design/plan.json`
-2. Handle cascaded dependencies: For each roleIndex in the `cascaded[]` array returned by update-status: `TaskUpdate(taskId: roleIdMapping[roleIndex], status: pending)` and output progress update "⊘ Skipped: {role.name} (dependency failed)".
-3. **Worker-to-worker handoff**: If the completed role is a dependency for other roles, extract `keyDecisions` and `contextForDependents` from the worker's completion report. When waking dependent workers, inject this context via SendMessage: "Dependency completed: {role.name}. Key decisions: {keyDecisions}. Context: {contextForDependents}. Files changed: {filesChanged}."
-4. Wake idle workers — tell them to check for new tasks.
-5. **Progress update**: Output "✓ Completed: {role.name} — {one-line summary}"
+1. **Lead-side verification** (trust but verify): For each criterion in `plan.json roles[N].acceptanceCriteria`, run the `check` command via Bash independently. If any check exits non-zero, reject completion with SendMessage: "Verification failed for {role.name}: criterion '{criterion}' did not pass. Check output: {output}. Fix and re-report." Do NOT proceed to status update if verification fails.
+2. Update plan.json: `echo '[{"roleIndex": N, "status": "completed", "result": "..."}]' | python3 $PLAN_CLI update-status .design/plan.json`
+3. Handle cascaded dependencies: For each roleIndex in the `cascaded[]` array returned by update-status: `TaskUpdate(taskId: roleIdMapping[roleIndex], status: pending)` and output progress update "⊘ Skipped: {role.name} (dependency failed)".
+4. **Worker-to-worker handoff**: If the completed role is a dependency for other roles, extract `keyDecisions` and `contextForDependents` from the worker's completion report. When waking dependent workers, inject this context via SendMessage: "Dependency completed: {role.name}. Key decisions: {keyDecisions}. Context: {contextForDependents}. Files changed: {filesChanged}."
+5. Wake idle workers — tell them to check for new tasks.
+6. **Progress update**: Output "✓ Completed: {role.name} — {one-line summary}"
 
 **On role failure**: Worker reports what failed and why.
 1. Update plan.json: `echo '[{"roleIndex": N, "status": "failed", "result": "..."}]' | python3 $PLAN_CLI update-status .design/plan.json`
