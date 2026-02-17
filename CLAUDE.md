@@ -77,7 +77,7 @@ Key points:
 - Memory retrieval uses keyword matching with recency decay (10%/30 days) and importance weighting (score = keyword_match * recency_factor * importance/10). Dynamic importance tracking via --boost/--decay flags correlates outcomes with memory relevance
 - Reflection storage: `.design/reflection.jsonl` contains per-run episodic self-evaluations (JSONL format with UUID, skill, goal, outcome, goalAchieved, evaluation object, timestamp). Both design and execute append entries at end of each run. Memory-curator reads reflections as primary signal for what to record
 - Session handoff: `.design/handoff.md` persists across archives for cross-session context recovery. Written by execute at completion
-- **Persistent `.design/` files** (survive archiving): `memory.jsonl`, `reflection.jsonl`, `handoff.md`. Everything else is archived to `.design/history/{timestamp}/`
+- **Persistent `.design/` files** (survive archiving): `memory.jsonl`, `reflection.jsonl`, `handoff.md`, `recon.json`. Everything else is archived to `.design/history/{timestamp}/`
 - Plan history: completed runs are archived to `.design/history/{timestamp}/`; design pre-flight archives stale artifacts
 - Verification specs: optional schema layer for property-based testing. Lead writes spec files in `.design/specs/{role-name}.{ext}` (shell scripts or native test framework). Specs are immutable during execution; workers run them after acceptance criteria pass and report failures as blocking. `finalize` validates spec references and computes SHA256 checksums for tamper detection.
 
