@@ -91,13 +91,14 @@ Perform analysis directly via Bash commands — no Task agent. This eliminates h
 
 #### 2b. Compute analysis metrics
 
-Run a single `python3 -c` script via Bash that reads the reflection-search JSON output and computes all analysis metrics. Pass `$REFLECTIONS` via stdin or as a file argument.
+Run a single `python3 -c` script via Bash that reads the reflection-search JSON output and computes all analysis metrics. Pass `$REFLECTIONS` via stdin or as a file argument. Also reads `$MEMORIES` (from Step 1.6) to cross-reference resolution records.
 
 ```bash
 python3 -c "
 import json, sys, collections
 
 reflections = json.loads('''$REFLECTIONS''')['entries']
+memories = json.loads('''$MEMORIES''').get('memories', []) if '''$MEMORIES''' and '''$MEMORIES''' != 'null' else []
 N = len(reflections)
 
 # 1. Goal achievement by skill
@@ -109,18 +110,59 @@ for r in reflections:
 overall = sum(v['achieved'] for v in by_skill.values()) / max(N,1)
 achievement = {s: v['achieved']/max(v['total'],1) for s,v in by_skill.items()}
 
-# 2. Recurring failures (items in whatFailed appearing >=2 times)
+# 2. Recurring failures (items in whatFailed appearing >=2 times) with temporal resolution
 fail_counts = collections.Counter()
 fail_skills = collections.defaultdict(set)
 fail_ids = collections.defaultdict(list)
+fail_timestamps = collections.defaultdict(list)
 for r in reflections:
     ev = r.get('evaluation',{})
+    ts = r.get('timestamp', 0)
     for item in ev.get('whatFailed',[]):
         fail_counts[item] += 1
         fail_skills[item].add(r.get('skill','unknown'))
         fail_ids[item].append(r.get('id',''))
-recurring = [{'pattern':p,'skill':list(fail_skills[p]),'occurrences':c,'reflectionIds':fail_ids[p]}
-             for p,c in fail_counts.items() if c >= 2]
+        fail_timestamps[item].append(ts)
+
+# Temporal resolution: classify patterns by recency (most recent 3 runs)
+recent_window = 3
+recurring = []
+for p, c in fail_counts.items():
+    if c < 2:
+        continue
+    # Sort timestamps for this pattern (most recent last)
+    sorted_ts = sorted(fail_timestamps[p])
+    # Check if pattern appears in most recent 3 runs
+    most_recent_runs = sorted([r.get('timestamp',0) for r in reflections])[-recent_window:]
+    in_recent = any(ts in most_recent_runs for ts in sorted_ts[-recent_window:])
+
+    resolution_status = 'active' if in_recent else 'likely_resolved'
+
+    # Cross-reference memory.jsonl for resolution records (category: procedure)
+    # Check if any memory documents a fix for this pattern
+    memory_match = False
+    for m in memories:
+        if m.get('category') == 'procedure':
+            # Simple keyword matching: if pattern keywords appear in memory content
+            pattern_lower = p.lower()
+            content_lower = m.get('content', '').lower()
+            # Check for resolution indicators and pattern match
+            if any(kw in content_lower for kw in ['fix', 'resolve', 'solution', 'prevent']) and \
+               any(word in content_lower for word in pattern_lower.split()[:3]):
+                memory_match = True
+                break
+
+    if memory_match and not in_recent:
+        resolution_status = 'confirmed_resolved'
+
+    recurring.append({
+        'pattern': p,
+        'skill': list(fail_skills[p]),
+        'occurrences': c,
+        'reflectionIds': fail_ids[p],
+        'resolutionStatus': resolution_status,
+        'lastSeen': max(sorted_ts) if sorted_ts else 0
+    })
 
 # 3. Unaddressed feedback (doNextTime items that recur in later whatFailed)
 all_do = set()
@@ -156,7 +198,9 @@ Store the output as `$METRICS`.
 
 For each recurring failure pattern in `$METRICS`, the lead formulates improvement hypotheses. This is the lead's analytical work — use the recurring failures, unaddressed feedback, and trends to identify root causes and propose changes.
 
-For each recurring failure, determine:
+**Temporal resolution guidance**: Only generate hypotheses for patterns with `resolutionStatus: 'active'`. Skip patterns marked `'likely_resolved'` or `'confirmed_resolved'` unless there's strong evidence of regression (pattern was absent, then reappeared).
+
+For each active recurring failure, determine:
 - `skillFile`: which SKILL.md likely governs the behavior (map skill name to `skills/{skill}/SKILL.md`)
 - `section`: which section/step to change (infer from the failure pattern description)
 - `currentBehavior`: what the instruction currently produces (from reflection evidence)
@@ -197,13 +241,17 @@ After Step 2 completes:
 ```
 Reflection Analysis ({N} runs analyzed):
 - Goal achievement: {X}% overall ({bySkill breakdown})
-- Recurring failures: {count} patterns identified
+- Recurring failures: {count} patterns ({count_active} active, {count_resolved} likely/confirmed resolved)
 - Unaddressed feedback: {count} items still recurring
 - Trend: {overall trend}
 
-Top improvement hypotheses:
+Top improvement hypotheses (active patterns only):
 1. [{confidence}] {skill}: {proposedChange} — evidence from {N} runs
 2. [{confidence}] {skill}: {proposedChange} — evidence from {N} runs
+...
+
+Resolved patterns (not addressed):
+- {pattern} — last seen {timestamp}, {resolution_status}
 ...
 ```
 
