@@ -12,7 +12,7 @@ Analyze a Claude Code skill and produce `.design/plan.json` with improvement rol
 
 **Do NOT use `EnterPlanMode`** — this skill IS the plan.
 
-**Lead boundaries**: Use only `TeamCreate`, `TeamDelete`, `TaskCreate`, `TaskUpdate`, `TaskList`, `SendMessage`, `Task`, `AskUserQuestion`, and `Bash` (cleanup, verification, `python3 $PLAN_CLI` only). Project metadata (CLAUDE.md, package.json, README) allowed. Application source code prohibited — experts read source files. The lead orchestrates — agents think.
+**Lead boundaries**: Use only `TeamCreate`, `TeamDelete`, `TaskCreate`, `TaskUpdate`, `TaskList`, `SendMessage`, `Task`, `AskUserQuestion`, and `Bash` (cleanup, verification, `python3 $PLAN_CLI` only). Project metadata (CLAUDE.md, package.json, README) allowed. Application source code prohibited — experts read source files. The lead orchestrates — agents think. Do NOT use Read, Grep, Glob, LSP, WebFetch, or WebSearch on project source.
 
 **No polling**: Messages auto-deliver automatically. Never use `sleep`, loops, or Bash waits. When a teammate sends a message, it appears in your next turn.
 
@@ -83,15 +83,7 @@ TEAM_NAME = $(python3 $PLAN_CLI team-name improve).teamName
    ```
    If found, warn user: "Previous improvement runs detected. Review history to avoid circular changes."
 5. **Check existing plan**: `python3 $PLAN_CLI status .design/plan.json`. If `ok` and `isResume`: ask user "Existing plan found. Overwrite?" If declined, stop.
-6. **Archive stale artifacts**:
-   ```bash
-   mkdir -p .design/history
-   if [ "$(find .design -mindepth 1 -maxdepth 1 ! -name history | head -1)" ]; then
-     ARCHIVE_DIR=".design/history/$(date -u +%Y%m%dT%H%M%SZ)"
-     mkdir -p "$ARCHIVE_DIR"
-     find .design -mindepth 1 -maxdepth 1 ! -name history ! -name memory.jsonl ! -name reflection.jsonl ! -name handoff.md -exec mv {} "$ARCHIVE_DIR/" \;
-   fi
-   ```
+6. **Archive stale artifacts**: `python3 $PLAN_CLI archive .design`
 7. **Re-snapshot** (archive may have moved it): Copy target SKILL.md to `.design/skill-snapshot.md` again.
 
 ### 2. Lead Research
@@ -107,7 +99,7 @@ The lead assesses the target skill and determines the analysis approach.
 | **General** | No focus area — full quality analysis | Team `$TEAM_NAME` | 2-3 experts |
 | **Cross-skill** | Path is `--all` or multiple paths | Team `$TEAM_NAME` | 2-3 experts + cross-review |
 
-3. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "improve {skill-name}" --stack "SKILL.md prompt engineering"`. If memories exist, inject top 3-5 into expert prompts.
+3. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "improve {skill-name}" --stack "SKILL.md prompt engineering"`. If `ok: true` and memories exist, inject top 3-5 into expert prompts. If `ok: false` or no memories, proceed without memory injection.
 4. **Historical evidence**: Check for past execution artifacts:
    ```bash
    ls .design/history/*/handoff.md 2>/dev/null | head -5
@@ -131,6 +123,8 @@ Prompt includes:
 - "In your findings JSON, include a `verificationProperties` section: an array of properties that should hold regardless of implementation (behavioral invariants, boundary conditions). Format: `[{\"property\": \"...\", \"category\": \"invariant|boundary|integration\", \"testableVia\": \"how to test this\"}]`."
 - "Save findings to `.design/expert-analyst.json` with structure: `{\"skillPath\": \"...\", \"focusArea\": \"...\", \"qualityScores\": {\"dimension\": {\"score\": N, \"evidence\": \"...\"}}, \"findings\": [{\"location\": \"section/line\", \"issue\": \"...\", \"severity\": \"high|medium|low\", \"hypothesis\": {\"change\": \"...\", \"predictedEffect\": \"...\", \"verification\": \"...\"}}], \"verificationProperties\": [...], \"tokenAnalysis\": {\"totalLines\": N, \"heaviestSections\": [...]}, \"summary\": \"...\"}`. Return a summary."
 
+**Artifact verification**: After Task completes, verify artifact exists: `ls .design/expert-analyst.json`. If missing, retry Task once with the same prompt. If still missing, report to user and stop.
+
 Proceed directly to Step 4 (Synthesize) after receiving the analyst's report.
 
 #### General/Cross-skill Mode (team-based)
@@ -153,7 +147,11 @@ Proceed directly to Step 4 (Synthesize) after receiving the analyst's report.
 
 Every expert prompt MUST end with: "In your findings JSON, include a `verificationProperties` section: an array of properties that should hold regardless of implementation (behavioral invariants, boundary conditions, cross-role contracts). Format: `[{\"property\": \"...\", \"category\": \"invariant|boundary|integration\", \"testableVia\": \"how to test this with concrete commands/endpoints\"}]`. Provide concrete, externally observable properties that can be tested without reading source code. Save your complete findings to `.design/expert-{name}.json` as structured JSON. Then SendMessage to the lead with a summary." Include past learnings and historical evidence paths if available.
 
-4. **Wait for all N experts to report**: Track completion count. When all spawned experts (protocol-analyst, prompt-engineer, coordination-analyst if applicable) have sent messages, proceed to artifact verification. The system batches all expert messages in a single turn.
+4. **Wait for all N experts to report — expert liveness pipeline**: After spawning N experts, maintain a completion checklist. Mark each expert complete when: (a) its SendMessage arrives AND (b) its artifact file exists (`ls .design/expert-{name}.json`). Only proceed to artifact validation when all N experts are complete.
+   - **Turn-based timeout**: If an expert has not completed after 2 turns of processing other experts, send: "Status check — artifact expected at `.design/expert-{name}.json`. Report completion or blockers."
+   - **Re-spawn after 1 more turn**: If still no completion after the status ping and 1 additional turn, re-spawn the expert with the same prompt (max 2 re-spawn attempts per expert).
+   - **Proceed with available data**: After 2 re-spawn attempts, if the expert still hasn't completed, log the failure and proceed to artifact validation with the artifacts from responsive experts.
+   - **Never write artifacts yourself** — the lead's interpretation is not a substitute for specialist analysis.
 5. **Validate expert artifacts** before cross-review:
    - Verify existence: `ls .design/expert-*.json`
    - Validate JSON structure: For each artifact, parse and confirm it contains required fields: `skillPath`, `dimensions` (or `qualityScores`), `findings`, `summary`
