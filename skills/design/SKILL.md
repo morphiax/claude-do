@@ -200,11 +200,22 @@ The lead collects expert findings and writes the plan.
 
 **Validate acceptance criteria checks**: After writing plan.json, run `python3 $PLAN_CLI validate-checks .design/plan.json`. If errors found, display them to the user with role name and criterion. Attempt to fix obvious syntax errors by editing the check commands in plan.json (e.g., missing quotes, unescaped characters, invalid Python syntax). This is non-blocking — proceed to finalization even if some checks remain unfixable, but flag them to the user.
 
-### 4.5. Generate Verification Specs (OPTIONAL)
+### 4.5. Generate Verification Specs
 
 Verification specs are property-based tests workers must satisfy. They codify expert verificationProperties as executable tests without constraining implementation.
 
-**When to generate**: Goal has 2+ roles with testable properties AND expert artifacts contain verificationProperties AND stack supports tests (context.testCommand/buildCommand exists). Skip for trivial goals or sparse properties.
+**When to generate**:
+
+| Condition | Required? | Rationale |
+|---|---|---|
+| **4+ roles** | **MANDATORY** | Integration complexity requires property-based validation |
+| **New skill creation** (new SKILL.md files) | **MANDATORY** | End-to-end workflow must be testable |
+| **API integration** (external services, auth, rate limits) | **MANDATORY** | External contracts need verification |
+| **1-3 roles** with simple scope | **OPTIONAL** | Acceptance criteria may suffice |
+| **Docs-only** or **config-only** changes | **OPTIONAL** | Low integration risk |
+| **Sparse verificationProperties** (experts provide <2 properties) | **OPTIONAL** | Insufficient property coverage |
+
+Additional requirements for all cases: expert artifacts contain verificationProperties AND stack supports tests (context.testCommand/buildCommand exists).
 
 **Authorship**: Simple goals (1-3 roles) → lead writes from expert verificationProperties. Complex goals (4+ roles) → spawn spec-writer Task agent with `subagent_type: "general-purpose"` that reads expert artifacts + actual codebase, writes specs in `.design/specs/{role-name}.{ext}` using project's test framework or shell scripts, returns created paths.
 
