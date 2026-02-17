@@ -1145,24 +1145,43 @@ def cmd_finalize(args: argparse.Namespace) -> NoReturn:
 # ============================================================================
 
 
+def _update_fstring_depth(depth: int, char: str) -> int:
+    """Update f-string brace depth based on character."""
+    if char == "{":
+        return depth + 1
+    if char == "}" and depth > 0:
+        return depth - 1
+    return depth
+
+
 def _find_closing_quote(check: str, start_pos: int, quote_char: str) -> int:
-    """Find matching closing quote. Returns index or -1 if not found."""
-    end_pos = start_pos + 1
-    if quote_char == "'":
-        # Single quotes: find next single quote
-        while end_pos < len(check):
-            if check[end_pos] == "'":
-                return end_pos
-            end_pos += 1
-    else:
-        # Double quotes: find next unescaped double quote
-        while end_pos < len(check):
-            if check[end_pos] == "\\" and end_pos + 1 < len(check):
-                end_pos += 2  # Skip escaped character
-                continue
-            if check[end_pos] == '"':
-                return end_pos
-            end_pos += 1
+    """Find matching closing quote.
+
+    Handles f-strings with nested quotes inside braces by tracking brace depth.
+    Returns index of closing quote or -1 if not found.
+    """
+    is_fstring = start_pos >= 1 and check[start_pos - 1] == "f"
+    pos = start_pos + 1
+    depth = 0
+
+    while pos < len(check):
+        ch = check[pos]
+
+        # Skip escaped characters in double-quoted strings
+        if quote_char == '"' and ch == "\\" and pos + 1 < len(check):
+            pos += 2
+            continue
+
+        # Track brace nesting in f-strings
+        if is_fstring:
+            depth = _update_fstring_depth(depth, ch)
+
+        # Check for closing quote when not inside braces
+        if ch == quote_char and depth == 0:
+            return pos
+
+        pos += 1
+
     return -1
 
 
@@ -2975,8 +2994,8 @@ def _create_fixtures(tmp_dir: str) -> dict[str, str]:
                 "constraints": [],
                 "acceptanceCriteria": [
                     {
-                        "criterion": "Broken Python",
-                        "check": 'python3 -c "print(f\'bad {d["x"]}\')"',
+                        "criterion": "Broken Python - f-string with backslash escape in braces",
+                        "check": r'python3 -c "x = f\"value: {d[\"key\"]}\"; print(x)"',
                     }
                 ],
                 "assumptions": [],
