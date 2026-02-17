@@ -14,7 +14,7 @@ Decompose a goal into `.design/plan.json` with role briefs — goal-directed sco
 
 **CRITICAL: Always use agent teams.** When spawning any expert via Task tool, you MUST include `team_name: $TEAM_NAME` and `name: "{role}"` parameters. Without these, agents are standalone and cannot coordinate.
 
-**Lead boundaries**: Use only `TeamCreate`, `TeamDelete`, `TaskCreate`, `TaskUpdate`, `TaskList`, `SendMessage`, `Task`, `AskUserQuestion`, and `Bash` (cleanup, verification, `python3 $PLAN_CLI` only). Project metadata (CLAUDE.md, package.json, README) allowed. Application source code prohibited. The lead orchestrates — agents think.
+**Lead boundaries**: Use only `TeamCreate`, `TeamDelete`, `TaskCreate`, `TaskUpdate`, `TaskList`, `SendMessage`, `Task`, `AskUserQuestion`, and `Bash` (cleanup, verification, `python3 $PLAN_CLI` only). Project metadata (CLAUDE.md, package.json, README) allowed. Application source code prohibited. **Never use Read, Grep, Glob, Edit, Write, LSP, WebFetch, or WebSearch on project source files.** The lead orchestrates — agents think.
 
 **No polling**: Messages auto-deliver automatically. Never use `sleep`, loops, or Bash waits. When a teammate sends a message, it appears in your next turn.
 
@@ -53,21 +53,13 @@ TEAM_NAME = $(python3 $PLAN_CLI team-name design).teamName
 1. **Check for ambiguity**: If the goal has multiple valid interpretations per the Clarification Protocol, use `AskUserQuestion` before proceeding.
 2. If >5 roles likely needed, suggest phases. Design only phase 1.
 3. Check existing plan: `python3 $PLAN_CLI status .design/plan.json`. If `ok` and `isResume`: ask user "Existing plan has {counts} roles. Overwrite?" If declined, stop.
-4. Archive stale artifacts (instead of deleting — avoids destructive commands):
-   ```bash
-   mkdir -p .design/history
-   if [ "$(find .design -mindepth 1 -maxdepth 1 ! -name history | head -1)" ]; then
-     ARCHIVE_DIR=".design/history/$(date -u +%Y%m%dT%H%M%SZ)"
-     mkdir -p "$ARCHIVE_DIR"
-     find .design -mindepth 1 -maxdepth 1 ! -name history ! -name memory.jsonl ! -name reflection.jsonl ! -name handoff.md -exec mv {} "$ARCHIVE_DIR/" \;
-   fi
-   ```
+4. Archive stale artifacts: `python3 $PLAN_CLI archive .design`
 
 ### 2. Lead Research
 
 The lead directly assesses the goal to determine needed perspectives.
 
-1. Read the goal. Quick WebSearch (if external patterns/libraries relevant) or scan project metadata (CLAUDE.md, package.json) via Bash to understand stack.
+1. Read the goal. Scan project metadata (CLAUDE.md, package.json, README) via Bash to understand stack.
 2. Decide what expert perspectives would help.
 3. Assess complexity tier (drives role count and expert depth):
 
@@ -111,9 +103,10 @@ Analyze the goal type and spawn appropriate experts:
 Create the team and spawn experts in parallel.
 
 1. `TeamDelete(team_name: $TEAM_NAME)` (ignore errors), `TeamCreate(team_name: $TEAM_NAME)`. If TeamCreate fails, tell user Agent Teams is required and stop. If TeamDelete succeeds, a previous session's team was cleaned up.
-2. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "{goal}" --stack "{stack}"`. If `ok: true` and memories exist, inject top 3-5 into expert prompts as a "Past Learnings" section (format: `- {category}: {summary} (from {created})`).
-3. `TaskCreate` for each expert.
-4. Spawn experts as teammates using the Task tool. For each expert:
+2. **TeamCreate health check**: Verify team is reachable. If verification fails, `TeamDelete`, then retry `TeamCreate` once. If retry fails, abort with clear error message.
+3. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "{goal}" --stack "{stack}"`. If `ok: false` or no memories returned, proceed without memory injection. Otherwise inject top 3-5 memories into expert prompts as a "Past Learnings" section (format: `- {category}: {summary} (from {created})`).
+4. `TaskCreate` for each expert.
+5. Spawn experts as teammates using the Task tool. For each expert:
    - Use Task with `team_name: $TEAM_NAME` and `name: "{expert-name}"`.
    - Write prompts appropriate to the goal and each expert's focus area. Ask them to score relevant dimensions and trace scenarios.
    - Every expert prompt MUST end with: "In your findings JSON, include a `verificationProperties` section: an array of properties that should hold regardless of implementation (behavioral invariants, boundary conditions, cross-role contracts). Format: `[{\"property\": \"...\", \"category\": \"invariant|boundary|integration\", \"testableVia\": \"how to test this with concrete commands/endpoints\"}]`. Provide concrete, externally observable properties that can be tested without reading source code."
@@ -121,7 +114,7 @@ Create the team and spawn experts in parallel.
    - Instruct: "Then SendMessage to the lead with a summary."
 
    Expert artifacts flow directly to execution workers — they are structured JSON with sections that can be referenced selectively.
-5. **Expert liveness tracking**: After spawning N experts, maintain a completion checklist. Mark each expert complete when: (a) its SendMessage arrives AND (b) its artifact file exists (`ls .design/expert-{name}.json`). Only proceed to Step 3.5 when all N experts are complete.
+6. **Expert liveness tracking**: After spawning N experts, maintain a completion checklist. Mark each expert complete when: (a) its SendMessage arrives AND (b) its artifact file exists (`ls .design/expert-{name}.json`). Only proceed to Step 3.5 when all N experts are complete.
    - **Turn-based timeout**: If an expert has not completed after 2 turns of processing other experts, send: "Status check — artifact expected at `.design/expert-{name}.json`. Report completion or blockers."
    - **Re-spawn after 1 more turn**: If still no completion after the status ping and 1 additional turn, re-spawn the expert with the same prompt (max 2 re-spawn attempts per expert).
    - **Proceed with available data**: After 2 re-spawn attempts, if the expert still hasn't completed, log the failure and proceed to Step 3.5 with the artifacts from responsive experts.
@@ -129,109 +122,42 @@ Create the team and spawn experts in parallel.
 
 ### 3.5. Interface Negotiation & Cross-Review
 
-Expert coordination prevents two distinct failure modes: **integration failures** (domains don't fit together) and **convergence failures** (experts with different lenses reach incompatible conclusions about the same thing). The protocol addresses both.
+Expert coordination prevents **integration failures** (domains don't fit together) and **convergence failures** (experts reach incompatible conclusions). Assess which phases apply per the decision matrix, then execute them.
 
-#### Two coordination needs
+**CRITICAL ENFORCEMENT**: The lead MUST NOT perform cross-review solo. Every phase requires actual `SendMessage` calls to experts and collecting their responses. Skipping expert interaction when the decision matrix says a phase is mandatory is a protocol violation.
 
-| Need | When it applies | Example |
+| Phase | Trigger | Purpose |
 |---|---|---|
-| **Interface negotiation** | Experts in *different domains* produce/consume across boundaries | Backend architect + frontend designer must agree on API response shape |
-| **Perspective reconciliation** | Experts with *different lenses* analyze the *same domain* | Architect, researcher, and prompt-engineer all analyze a SKILL.md — architect wants more structure, researcher finds simpler protocols have better adherence |
+| **A: Interface negotiation** | >=2 experts whose roles will share data/APIs/file boundaries | Producer-consumer pairs agree on shared interface contracts |
+| **B: Perspective reconciliation** | >=2 experts analyzed same domain from different angles, OR >=3 experts in complex/high-stakes tier | Resolve conflicting recommendations about the same thing |
+| **C: Cross-domain challenge** | Complex/high-stakes tier with >=3 experts | Catch cross-domain assumptions neither A nor B would surface |
 
-Both can apply in the same design session. Assess each independently.
+**Decision matrix**: If condition matches → phase is **mandatory**. If <2 experts or trivial tier → skip all phases.
 
-**Enforcement**: The lead MUST NOT perform cross-review analysis solo. Every phase requires actual `SendMessage` calls to experts and waiting for their responses. If a phase applies per the decision matrix, the lead must send messages and collect expert responses before proceeding. Skipping to plan synthesis without expert interaction when the decision matrix says a phase is mandatory is a protocol violation.
+#### Phase Execution Pattern
 
-#### Decision Matrix — When to Run Each
+All phases follow: **maximum 2 rounds** of negotiation per conflict. If no convergence after 2 rounds, lead decides and documents reasoning.
 
-| Condition | Interface negotiation | Perspective reconciliation |
-|---|---|---|
-| >=2 experts whose execution roles will share data, APIs, or file boundaries | **Mandatory** | — |
-| >=2 experts analyzed the same artifact/domain from different angles | — | **Mandatory** |
-| Both conditions apply | **Run both** | **Run both** |
-| All experts operate on fully independent domains with no shared interfaces or overlapping analysis | Skip | Skip |
-| <2 experts or trivial tier | Skip | Skip |
+**Phase A steps**:
+1. Lead identifies domain boundaries (API shapes, schemas, file formats, shared state)
+2. Lead drafts consumer-driven contracts: `{boundary, producer, consumer, contract}` (use format: `Interface: {name}, Producer: {role}, Consumer: {role}, Contract: {concrete spec}`)
+3. SendMessage each contract to producer-consumer pair: "Does this work for your domain? Flag constraints."
+4. Collect responses, negotiate (max 2 rounds)
+5. Save to `.design/interfaces.json` as binding constraints
 
-#### Phase A: Interface Negotiation
+**Phase B steps**:
+1. Lead identifies overlapping analysis (>=2 experts made recommendations about same thing)
+2. SendMessage relevant experts (not broadcast): "You both analyzed {topic}. Your positions differ: {A's position} vs {B's position}. Read each other's artifact. Respond: (a) agreements, (b) disagreements + why yours is better, (c) synthesis."
+3. Collect responses, negotiate synthesis (max 2 rounds)
+4. Lead decides if no convergence, documents trade-off
 
-**Trigger**: Execution roles will share data, APIs, or file boundaries.
+**Phase C steps**:
+1. Broadcast to all experts: "Read OTHER experts' artifacts. Challenge claims affecting your domain. Format: Challenge to {expert}, Claim: '{quote}', Severity: [blocking|important|minor], Evidence: {why problematic}, Alternative: {proposal}. If no challenges: send 'No challenges found'."
+2. Collect structured challenge messages
+3. Forward each challenge to targeted expert for defense or concession (max 2 rounds per challenge)
+4. Lead resolves conflicts, updates `.design/interfaces.json` if contracts changed
 
-After all experts have saved artifacts:
-
-1. **Lead identifies domain boundaries**: Read expert artifacts and list every point where one role's output feeds another role's input (API response shapes, database schemas consumed by multiple roles, file formats, shared state).
-
-2. **Lead drafts interface contracts**: For each boundary, write a concrete contract specifying the shared interface. Use **consumer-driven contracts** — define what the *consuming* side expects:
-
-   ```
-   Interface: {boundary-name}
-   Producer: {expert/role-name}
-   Consumer: {expert/role-name}
-   Contract: {concrete specification — field names, types, response shape, error format}
-   ```
-
-3. **Send contracts to both sides**: Message each producer-consumer pair with their shared contract. Ask: "Does this interface work for your domain? Flag any constraints that make this infeasible."
-
-4. **Collect responses**: Each expert confirms feasibility or proposes modifications. **Maximum 2 rounds** of negotiation per interface (Delphi research: diminishing returns after 2-3 rounds). If no convergence after 2 rounds, lead decides and documents reasoning.
-
-5. **Save agreed interfaces**: Store finalized contracts in `.design/interfaces.json` (array of `{boundary, producer, consumer, contract, negotiationNotes}`). These flow to execution workers as binding constraints.
-
-#### Phase B: Perspective Reconciliation
-
-**Trigger**: Multiple experts analyzed the same domain/artifact from different angles, OR complex/high-stakes tier with >=3 experts.
-
-This resolves conflicting recommendations when experts with different priorities (performance vs maintainability, structure vs simplicity, security vs usability) examine the same thing.
-
-1. **Lead identifies overlapping analysis**: Find topics where >=2 experts made recommendations about the same thing. List specific conflicts or tensions.
-
-2. Lead messages the relevant experts (not broadcast — only those with overlapping analysis): "Experts {A} and {B}: you both analyzed {topic}. Your recommendations differ:
-   - {Expert A}: '{summary of their position}'
-   - {Expert B}: '{summary of their position}'
-
-   Read each other's artifact at {path}. Then each send me: (a) where you agree, (b) where you disagree and why your approach is better, (c) any synthesis that combines both perspectives."
-
-3. Experts read the other's artifact and respond with agreements, disagreements, and proposed synthesis.
-
-4. **Maximum 2 rounds**. If experts converge — great. If they don't converge after 2 rounds, lead decides based on the goal's priorities and documents the trade-off.
-
-#### Phase C: Cross-Domain Challenge (for complex/high-stakes with >=3 experts)
-
-**Trigger**: Complex or high-stakes tier with >=3 experts. Runs after Phase A and/or B if applicable.
-
-This catches cross-domain assumptions that neither interface negotiation nor perspective reconciliation would surface — e.g., a metadata expert assuming the database supports a feature that the architect flagged as unavailable.
-
-1. Lead broadcasts to all experts: "Read OTHER experts' artifacts at {paths}. Challenge claims that make assumptions about your domain or affect shared interfaces.
-
-   **Challenge to {expert-name}**
-   - **Claim challenged**: '{exact quote from their artifact}'
-   - **Severity**: [blocking|important|minor]
-   - **Evidence**: {why this claim is incorrect or problematic for your domain}
-   - **Alternative**: {your proposed alternative}
-
-   Send one message per challenge. If you have no challenges, send 'No challenges found'."
-
-2. Each expert reads OTHER experts' artifacts (not their own).
-3. Each expert sends structured challenge messages to lead.
-4. Lead collects challenges. For each:
-   - Forward to the targeted expert
-   - Targeted expert responds with defense or concession
-   - **Maximum 2 rounds per challenge** — if unresolved, lead decides
-5. Lead resolves all conflicts. Update `.design/interfaces.json` if any interface contracts changed.
-
-Interfaces, reconciled perspectives, and challenge resolutions all inform conflict resolution in the next step.
-
-#### Cross-Review Checkpoint
-
-Before proceeding to plan synthesis, save `.design/cross-review.json`:
-```json
-{
-  "phasesRun": ["A", "B", "C"],
-  "interfaces": {"count": 0, "rounds": 0},
-  "reconciliations": {"count": 0, "rounds": 0},
-  "challenges": {"sent": 0, "resolved": 0},
-  "skippedPhases": [{"phase": "C", "reason": "<2 experts or trivial"}]
-}
-```
-This creates an audit trail. If no phases were applicable (all experts independent, <2 experts), save with `"phasesRun": []` and the skip reasons.
+**Checkpoint**: Save `.design/cross-review.json` with audit trail: `{phasesRun: ["A"|"B"|"C"], interfaces: {count, rounds}, reconciliations: {count, rounds}, challenges: {sent, resolved}, skippedPhases: [{phase, reason}]}`. If no phases applicable, save with `phasesRun: []` and skip reasons.
 
 ### 4. Synthesize into Role Briefs
 
@@ -360,6 +286,13 @@ Add auxiliary roles to `auxiliaryRoles[]` in plan.json. Challenger and integrati
     "type": "post-execution",
     "goal": "Run full test suite. Check cross-role contracts. Validate all acceptanceCriteria. Test goal end-to-end.",
     "model": "sonnet",
+    "trigger": "after-all-roles-complete"
+  },
+  {
+    "name": "memory-curator",
+    "type": "post-execution",
+    "goal": "Distill design learnings: expert selection effectiveness, cross-review value, plan structure quality. Apply five quality gates before storing to .design/memory.jsonl.",
+    "model": "haiku",
     "trigger": "after-all-roles-complete"
   }
 ]
