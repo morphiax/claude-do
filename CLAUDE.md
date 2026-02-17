@@ -124,7 +124,7 @@ Recon produces a ranked list of high-leverage interventions rather than role bri
 - Schema fields: schemaVersion (1), goal, context {same as plan.json}, researchFindings[], interventions[], contradictions[]
 - **Intervention fields**: id, name, leverageLevel (1-7 int), leverageName (Meadows level name), leverageGroup (Abson 4-group: Parameters/Feedbacks/Design/Intent), score (computed), confidence (low/medium/high), effort (low/medium/high), designGoal (string), constraints (array), supportingFindings (array of finding IDs)
 - **Finding fields**: id, domain (codebase/literature/comparative/theoretical), source, summary, implications, relevantLeverageLevels
-- Depth tiers: shallow mode (max 3 interventions), deep mode (max 5 interventions) with additionalFindings count for transparency
+- Max 5 interventions with additionalFindings count for transparency
 
 ### Verification Specs Protocol
 
@@ -219,9 +219,9 @@ All five skills use the **main conversation as team lead** with Agent Teams (or 
 - Phase announcements: lead announces each major phase (pre-flight, research spawning, synthesis, finalization) for user visibility
 - Lifecycle context: runs `plan-health-summary` to display previous session handoff and recent reflections at skill start
 - TeamCreate health check: verifies team is reachable, retries once on failure
-- Depth tiers: shallow mode (max 3 interventions, 2-3 researchers) or deep mode (max 5 interventions, 3-4 researchers). User selects via optional `--deep` flag
+- Always spawns full research team (codebase-analyst, external-researcher, domain-specialist) — recon is inherently exploratory, external research is always valuable
 - Memory injection: lead searches .design/memory.jsonl for relevant past learnings and injects top 3 into researcher prompts with transparency. Memory search failures gracefully fallback to empty results
-- Lead spawns researcher teammates (codebase-analyst, literature-researcher, comparative-analyst, theory-researcher) based on depth tier. Researcher prompts include behavioral trait instructions (e.g., "prefer empirical evidence", "ground in Meadows framework")
+- Researcher prompts include behavioral trait instructions (e.g., "prefer empirical evidence", "ground in Meadows framework")
 - Researcher liveness pipeline: completion checklist tracking which researchers have reported, turn-based timeout (3 turns then re-spawn), re-spawn ceiling (max 2 attempts then proceed with available findings)
 - Synthesis: lead ranks findings by leverage level (1-7 using Meadows framework with software-adjusted weights), computes scores via tier-weight formula (leverageLevel weight × confidenceMultiplier ÷ effortMultiplier), detects contradictions
 - Synthesis delegation: lead synthesizes by default. For >15 findings across >3 domains, spawns single synthesis Task agent

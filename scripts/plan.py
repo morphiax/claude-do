@@ -2107,26 +2107,17 @@ def _load_and_validate_recon_structure(
             f"Invalid schemaVersion: expected 1, got {data.get('schemaVersion')}"
         )
 
-    required = ["goal", "scope", "depthTier", "interventions", "contradictions"]
+    required = ["goal", "scope", "interventions", "contradictions"]
     missing = [f for f in required if f not in data]
     if missing:
         error_exit(f"Missing required fields: {', '.join(missing)}")
-
-    depth_tier = data.get("depthTier")
-    if depth_tier not in ("shallow", "deep"):
-        error_exit(
-            f"Invalid depthTier: expected 'shallow' or 'deep', got '{depth_tier}'"
-        )
 
     interventions = data.get("interventions", [])
     if not isinstance(interventions, list):
         error_exit("interventions must be an array")
 
-    max_count = 3 if depth_tier == "shallow" else 5
-    if len(interventions) > max_count:
-        error_exit(
-            f"Too many interventions for {depth_tier} mode: {len(interventions)} > {max_count}"
-        )
+    if len(interventions) > 5:
+        error_exit(f"Too many interventions: {len(interventions)} > 5")
 
     return data, interventions
 
@@ -2183,7 +2174,6 @@ def cmd_recon_summary(args: argparse.Namespace) -> NoReturn:
         error_exit(f"Error reading recon file: {e}")
 
     interventions = data.get("interventions", [])
-    depth_tier = data.get("depthTier", "unknown")
     additional_findings = data.get("additionalFindings", 0)
 
     # Extract top interventions
@@ -2219,7 +2209,6 @@ def cmd_recon_summary(args: argparse.Namespace) -> NoReturn:
         {
             "ok": True,
             "interventionCount": len(interventions),
-            "depthTier": depth_tier,
             "topInterventions": top_interventions,
             "additionalFindings": additional_findings,
             "confidenceOverall": confidence_overall,
@@ -3019,7 +3008,6 @@ def _create_fixtures(tmp_dir: str) -> dict[str, str]:
         "schemaVersion": 1,
         "goal": "Test recon",
         "scope": "test area",
-        "depthTier": "shallow",
         "sources": [],
         "interventions": [
             {
@@ -3328,7 +3316,7 @@ def _test_recon_summary(script_path: str, recon_path: str) -> None:
     assert "interventionCount" in output, (
         "recon-summary missing interventionCount field"
     )
-    assert "depthTier" in output, "recon-summary missing depthTier field"
+    assert "interventionCount" in output, "recon-summary missing interventionCount"
 
 
 def _test_validate_checks_valid(script_path: str, plan_path: str) -> None:

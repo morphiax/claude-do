@@ -1,7 +1,7 @@
 ---
 name: recon
 description: "Investigate an area to identify high-leverage interventions using systems thinking."
-argument-hint: "<area or question to investigate> [--depth shallow|deep]"
+argument-hint: "<area or question to investigate>"
 ---
 
 # Recon
@@ -101,8 +101,7 @@ Example: "Responding to slow tests by skipping tests rather than making them fas
 
 1. **Lifecycle context**: Run `python3 $PLAN_CLI plan-health-summary .design` and display to user: "Previous session: {handoff summary}. Recent runs: {reflection summaries}." Skip if all fields empty.
 2. **Check for ambiguity**: If the area has multiple valid interpretations per the Clarification Protocol, use `AskUserQuestion` before proceeding.
-3. **Parse depth**: Extract `--depth shallow|deep` from arguments. Default to `shallow` if not specified. Shallow = quick structural scan with git-based hotspot heuristics. Deep = full research + literature + codebase analysis.
-4. **Check existing recon**: `ls .design/recon.json`. If exists, ask user: "Existing recon output found. Overwrite?" If declined, stop.
+3. **Check existing recon**: `ls .design/recon.json`. If exists, ask user: "Existing recon output found. Overwrite?" If declined, stop.
 5. **Archive stale artifacts**: `python3 $PLAN_CLI archive .design`
 
 ### 2. Scope Assessment
@@ -111,14 +110,8 @@ The lead assesses the area to investigate and determines research team compositi
 
 1. Read the area/question. Scan project metadata (CLAUDE.md, package.json, README) via Bash to understand stack and context.
 2. Determine research domains needed (codebase analysis, external research, domain-specific).
-3. Assess depth and select team:
-
-| Depth | Researchers | Focus |
-|---|---|---|
-| **Shallow** | 1 codebase-analyst + 1 domain-specialist | Quick structural scan, git hotspots, obvious leverage points |
-| **Deep** | 1 codebase-analyst + 1 external-researcher + 1 domain-specialist | Thorough investigation, literature, prior art, deep analysis |
-
-4. **Announce to user**: "Recon ({depth}): investigating '{area}'. Spawning {N} researchers ({names})."
+3. Select team — always spawn the full research team: 1 codebase-analyst + 1 external-researcher + 1 domain-specialist. Recon is inherently exploratory ("I don't know what I don't know") — external research is always valuable for grounding interventions in prior art and literature.
+4. **Announce to user**: "Recon: investigating '{area}'. Spawning 3 researchers (codebase-analyst, external-researcher, domain-specialist)."
 
 ### 3. Research
 
@@ -185,7 +178,7 @@ The lead combines researcher findings into leverage-ranked interventions.
    - `wrongDirection` — what pushing this the wrong way looks like (REQUIRED for levels 1-5, optional 6-7).
    - `evidence[]` — references to researcher findings that support this.
 7. Rank interventions by composite score (computed by `recon-validate`).
-8. **Cap interventions**: Shallow mode max 3, deep mode max 5. Record `additionalFindings` count for transparency.
+8. **Cap interventions**: Max 5 interventions. Record `additionalFindings` count for transparency.
 9. Add `knowledgeGaps[]` — areas where additional information would most improve the analysis.
 10. **Validate**: Run `python3 $PLAN_CLI recon-validate .design/recon.json`. Fix any validation errors.
 
@@ -194,7 +187,7 @@ The lead combines researcher findings into leverage-ranked interventions.
 1. **Display to user** — Present ranked interventions:
 
 ```
-Recon: {area} ({depth} mode)
+Recon: {area}
 
 Interventions (ranked by leverage):
 | # | Intervention | Group | Effort | Confidence | Score |
@@ -243,7 +236,6 @@ The lead writes `.design/recon.json` — this is NOT `.design/plan.json`. Recon 
   "schemaVersion": 1,
   "goal": "the investigated area/question",
   "scope": "directories or systems investigated",
-  "depthTier": "shallow|deep",
   "sources": [
     {
       "name": "researcher-name",

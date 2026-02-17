@@ -3,7 +3,7 @@
 > Multi-agent planning with structured debate, self-verifying execution, and cross-session memory
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Version](https://img.shields.io/badge/version-2.12.0-green.svg)
+![Version](https://img.shields.io/badge/version-2.13.0-green.svg)
 ![Claude Code](https://img.shields.io/badge/Claude%20Code-2.1.32%2B-orange.svg)
 
 ## What's Novel
@@ -36,7 +36,6 @@
 
 # Reconnaissance: identify high-leverage interventions
 /do:recon improve observability in our microservices
-# (optional --deep flag for more thorough analysis)
 
 # Plan and execute a goal
 /do:design implement user authentication with JWT tokens
@@ -53,7 +52,7 @@
 
 ## How It Works
 
-**`/do:recon`** spawns researchers (codebase analyst, literature researcher, comparative analyst, theory researcher) based on depth tier (shallow: 2-3, deep: 3-4). Researchers gather findings across 4 domains (codebase/literature/comparative/theoretical). Lead synthesizes findings using 7-level Meadows framework (paradigm/goals/rules/information_flows/feedback_loops/structure/parameters) with software-adjusted weights. Ranks interventions by tier-weight formula (leverageLevel × confidence ÷ effort). Outputs to `.design/recon.json` with designGoal + constraints per intervention (NOT implementation suggestions). Detects contradictions. Memory injection with transparency. 3-turn liveness timeout. End-of-run summary shows top leverage levels and findings analyzed.
+**`/do:recon`** always spawns full research team (codebase analyst, external researcher, domain specialist) — recon is inherently exploratory, so external research is always included. Researchers gather findings across multiple domains. Lead synthesizes findings using 7-level Meadows framework (paradigm/goals/rules/information_flows/feedback_loops/structure/parameters) with software-adjusted weights. Ranks interventions by tier-weight formula (leverageLevel × confidence ÷ effort). Outputs to `.design/recon.json` with designGoal + constraints per intervention (NOT implementation suggestions). Max 5 interventions. Detects contradictions. Memory injection with transparency. 3-turn liveness timeout. End-of-run summary shows top leverage levels and findings analyzed.
 
 **`/do:design`** spawns experts (architects, researchers, domain specialists) based on goal type. For complex goals, experts debate via structured challenges/defenses. The lead synthesizes findings into role briefs with acceptance criteria. Scout auxiliaries verify expert assumptions against the real codebase. Phase announcements show progress. Draft plan review checkpoint for complex goals. Memory injection with transparency. Behavioral trait instructions for experts and auxiliaries. 3-turn liveness timeout (simplified from 5+7). End-of-run summary with metrics.
 
