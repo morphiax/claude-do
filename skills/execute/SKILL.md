@@ -96,7 +96,7 @@ Spawn workers as teammates using the Task tool. Each worker prompt MUST include:
 |---|---|
 | Task discovery | Check TaskList for your pending unblocked task. Claim by setting status to in_progress. |
 | Committing | git add specific files + git commit with conventional commit message (feat:/fix:/refactor: etc). Never git add -A. |
-| Completion reporting | When done, SendMessage to lead with this JSON structure: `{"role": "{name}", "achieved": true, "filesChanged": ["path1", "path2"], "acceptanceCriteria": [{"criterion": "...", "passed": true\|false, "evidence": "exit code and output"}]}`. |
+| Completion reporting | When done, SendMessage to lead with this JSON structure: `{"role": "{name}", "achieved": true, "filesChanged": ["path1", "path2"], "acceptanceCriteria": [{"criterion": "...", "passed": true\|false, "evidence": "exit code and output"}], "keyDecisions": ["brief decision and why"], "contextForDependents": "one paragraph summarizing what downstream roles need to know"}`. |
 | Tool boundaries | You may use Read, Grep, Glob, Edit, Write, Bash (for tests/build/git), LSP. Do NOT use WebFetch, WebSearch, MCP tools, or Task (no sub-spawning). |
 | Failure handling | If you cannot complete your goal, SendMessage to lead with: role name, what failed, why, what you tried, suggested alternative. If rollback triggers fire ({rollbackTriggers}), stop immediately and report. |
 | Scope boundaries | Stay within your scope directories. Do not modify files outside your scope unless absolutely necessary for integration. |
@@ -109,11 +109,12 @@ Task(subagent_type: "general-purpose", team_name: $TEAM_NAME, name: "{worker-nam
 
 Event-driven loop — process worker messages as they arrive.
 
-**On role completion**: Worker reports what they achieved and acceptance criteria results.
+**On role completion**: Worker reports what they achieved, acceptance criteria results, and handoff context.
 1. Update plan.json: `echo '[{"roleIndex": N, "status": "completed", "result": "..."}]' | python3 $PLAN_CLI update-status .design/plan.json`
 2. Handle cascaded dependencies: For each roleIndex in the `cascaded[]` array returned by update-status: `TaskUpdate(taskId: roleIdMapping[roleIndex], status: pending)` and output progress update "⊘ Skipped: {role.name} (dependency failed)".
-3. Wake idle workers — tell them to check for new tasks.
-4. **Progress update**: Output "✓ Completed: {role.name} — {one-line summary}"
+3. **Worker-to-worker handoff**: If the completed role is a dependency for other roles, extract `keyDecisions` and `contextForDependents` from the worker's completion report. When waking dependent workers, inject this context via SendMessage: "Dependency completed: {role.name}. Key decisions: {keyDecisions}. Context: {contextForDependents}. Files changed: {filesChanged}."
+4. Wake idle workers — tell them to check for new tasks.
+5. **Progress update**: Output "✓ Completed: {role.name} — {one-line summary}"
 
 **On role failure**: Worker reports what failed and why.
 1. Update plan.json: `echo '[{"roleIndex": N, "status": "failed", "result": "..."}]' | python3 $PLAN_CLI update-status .design/plan.json`
@@ -124,15 +125,16 @@ Event-driven loop — process worker messages as they arrive.
    a. **Reflexion step**: Before retry, generate a 2-3 sentence reflection analyzing what went wrong. Ask: What was the root cause? What assumptions were incorrect? What should be done differently? Update plan.json to append reflection to role.result: `echo '[{"roleIndex": N, "status": "failed", "result": "{existing_result}\n\n--- Retry {attempt+1} Reflexion ---\n{reflection_text}\n--- End Reflexion ---"}]' | python3 $PLAN_CLI update-status .design/plan.json`.
    b. Clean up partial work: `git checkout` + `rm` any artifacts from failed attempt.
    c. Reset in TaskList: `TaskUpdate(taskId, status: pending)`.
-   d. Tell the worker to retry via SendMessage with structured context: "Retry {attempt+1}/3 for {role.name}. Previous attempt failed: {result}. Reflection: {generated reflection}. What to try differently: {suggested alternative or fallback}. Re-read acceptance criteria and verify each independently before reporting."
-   e. **Progress update**: Output "↻ Retry {attempt+1}/3: {role.name}"
+   d. **Adaptive model escalation**: On retry, escalate the worker's model to the next tier: haiku → sonnet → opus. If already on opus, keep opus. This gives failing roles more capability without wasting tokens on first attempts.
+   e. Tell the worker to retry via SendMessage with structured context: "Retry {attempt+1}/3 for {role.name}. Previous attempt failed: {result}. Reflection: {generated reflection}. What to try differently: {suggested alternative or fallback}. Re-read acceptance criteria and verify each independently before reporting." Spawn the retried worker with the escalated model.
+   f. **Progress update**: Output "↻ Retry {attempt+1}/3: {role.name} (escalated to {new_model})"
 
 **On idle**: Worker reports no tasks available. Track idle workers. Check completion.
 
-**Worker liveness check** (turn-based timeout for silent workers):
+**Worker liveness check** (3-turn timeout for silent workers):
 Track silence per worker (count lead turns where an in_progress worker sends no message).
-- After 5 turns of silence: SendMessage to worker asking "You've been working on {role.name} for 5 turns with no updates. Are you stuck? Report progress or blockers."
-- After 7 total turns of silence (2 more after ping): Mark role as failed with `echo '[{"roleIndex": N, "status": "failed", "result": "worker_timeout: no response after 7 turns"}]' | python3 $PLAN_CLI update-status .design/plan.json`. Trigger retry if attempts < 3 (see retry logic below). Output progress update "✗ Timeout: {role.name} — worker silent for 7 turns".
+- After 3 turns of silence: SendMessage to worker: "No updates for 3 turns on {role.name}. Report progress or blockers."
+- After 5 total turns of silence (2 more after ping): Mark role as failed with `echo '[{"roleIndex": N, "status": "failed", "result": "worker_timeout: no response after 5 turns"}]' | python3 $PLAN_CLI update-status .design/plan.json`. Re-spawn worker (max 2 attempts per role, then proceed with available progress). Output progress update "✗ Timeout: {role.name} — worker silent for 5 turns".
 
 **Completion check** (after each idle/completion):
 1. `python3 $PLAN_CLI status .design/plan.json`
