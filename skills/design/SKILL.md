@@ -178,42 +178,7 @@ The lead collects expert findings and writes the plan.
 
 ### 4.5. Generate Verification Specs (OPTIONAL)
 
-Verification specs are broad, property-based tests that workers must satisfy. They codify expert-provided properties as executable tests without constraining implementation creativity. **Specs are optional** — skip this step for trivial goals (1-2 roles) or when expert verificationProperties are sparse.
-
-**When to generate specs:**
-- Goal has 2+ roles with testable behavioral properties
-- Expert artifacts contain concrete verificationProperties sections
-- Stack supports test execution (context.testCommand or context.buildCommand exists)
-
-**Authorship:**
-- **Simple goals** (1-3 roles, clear external interfaces): Lead writes specs from expert verificationProperties
-- **Complex goals** (4+ roles): Spawn a spec-writer Task agent with `Task(subagent_type: "general-purpose")` that CAN read source code. Prompt: "Read expert verificationProperties from `.design/expert-*.json` and the actual codebase in scope directories from plan.json roles. Write verification spec files in `.design/specs/{role-name}.{ext}` using the project's test framework (bun test, pytest, cargo test) or shell scripts as fallback. Specs test behavioral properties, not implementation details. Return paths of created spec files."
-
-**Spec generation steps:**
-1. Read expert verificationProperties sections from all expert artifacts
-2. For each role, extract relevant properties (filter by role scope/goal alignment)
-3. Create `mkdir -p .design/specs`
-4. Write spec files in project's native test framework or shell scripts:
-   - **Native tests** (preferred): `.design/specs/spec-{role-name}.test.{ext}` using bun test, pytest, jest, cargo test, etc. Use property-based testing frameworks where available (fast-check, hypothesis, proptest)
-   - **Shell fallback**: `.design/specs/spec-{role-name}.sh` with exit 0 = pass
-5. For each spec file created, add an entry to plan.json's `verificationSpecs[]` array:
-   ```json
-   {
-     "role": "{role-name}",
-     "path": ".design/specs/spec-{role-name}.{ext}",
-     "runCommand": "{command to execute spec, e.g., 'bun test .design/specs/spec-api.test.ts'}",
-     "properties": ["brief description of each property tested"]
-   }
-   ```
-
-**Spec content guidelines:**
-- Test WHAT the system does (external behavior), not HOW (implementation structure)
-- Include positive cases (valid inputs succeed) AND negative cases (invalid inputs fail correctly)
-- Use property-based testing where possible (for all X, property P(X) holds)
-- Test cross-role contracts for integration boundaries
-- Specs must be independently runnable via their runCommand (no global setup dependencies)
-
-6. Run `python3 $PLAN_CLI finalize .design/plan.json` to validate structure, compute overlaps, and compute SHA256 checksums for spec files (tamper detection).
+See **Verification Specs Protocol** in CLAUDE.md for the full protocol (when to generate, authorship rules, spec generation steps, content guidelines, and finalization).
 
 **Role brief principles**:
 - `goal`: Clear statement of what this role must achieve
