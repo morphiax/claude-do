@@ -1019,12 +1019,14 @@ def _compute_directory_overlaps(plan: dict[str, Any]) -> int:
         dirs.update(scope.get("patterns", []))
         role_dirs.append(dirs)
 
+    # Enforce j>i ordering to prevent bidirectional deadlocks.
+    # When roles i and j overlap, only the later role (j) blocks on the earlier (i).
     for i, role in enumerate(roles):
         overlaps: list[int] = []
         i_closure = set(_transitive_closure(dep_indices, i))
         for j in range(len(roles)):
-            if i == j:
-                continue
+            if i == j or j <= i:
+                continue  # Skip self and enforce j>i rule
             j_closure = set(_transitive_closure(dep_indices, j))
             if (
                 j not in i_closure
