@@ -28,15 +28,14 @@ import hashlib
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 import time
 import uuid
 from collections import defaultdict, deque
-from typing import TYPE_CHECKING, Any, NoReturn
-
-if TYPE_CHECKING:
-    pass
-
+from typing import Any, NoReturn
 
 # ============================================================================
 # Shared Utilities
@@ -166,8 +165,6 @@ def cmd_team_name(args: argparse.Namespace) -> NoReturn:
     hash of the full path to avoid collisions between projects with the
     same directory name.
     """
-    import hashlib
-
     skill = args.skill
     cwd = os.getcwd()
     basename = os.path.basename(cwd).lower()
@@ -752,14 +749,36 @@ def _validate_required_fields(role: dict[str, Any], idx: int, name: str) -> list
     return issues
 
 
-_GREP_ONLY_PATTERN = re.compile(r"^\s*(grep|egrep|fgrep|rg)\s", re.IGNORECASE)
+_SURFACE_ONLY_PATTERNS = [
+    re.compile(r"^\s*(grep|egrep|fgrep|rg)\s", re.IGNORECASE),  # Direct grep
+    re.compile(r"\|\s*(grep|egrep|fgrep|rg)\s", re.IGNORECASE),  # Piped grep
+    re.compile(
+        r"^\s*(test\s+-[fedsrwx]|\[\s+-[fedsrwx]|\[\[\s+-[fedsrwx])", re.IGNORECASE
+    ),  # File existence
+]
 
 
-def _is_grep_only(check: str) -> bool:
-    """Return True if a check command is purely a grep/pattern-match."""
+def _is_surface_only(check: str) -> bool:
+    """Return True if a check command is purely surface-level (grep, file existence).
+
+    Surface-level checks include:
+    - Direct grep commands (grep, egrep, fgrep, rg)
+    - Piped grep as the final command (e.g., 'cat file | grep pattern')
+    - File existence checks (test -f, [ -f ], [[ -f ]])
+
+    Excludes legitimate patterns like:
+    - wc -l (legitimate for counting output lines)
+    - tail/head (legitimate for truncating output)
+    - Compound commands with && (legitimate for exit-code checks)
+    """
     # Strip leading shell constructs like `! ` (negation)
     stripped = re.sub(r"^[!\s]+", "", check.strip())
-    return bool(_GREP_ONLY_PATTERN.match(stripped))
+
+    # If there's && or || after the command, it's a compound command (not surface-only)
+    if "&&" in stripped or "||" in stripped:
+        return False
+
+    return any(pattern.search(stripped) for pattern in _SURFACE_ONLY_PATTERNS)
 
 
 def _validate_criteria(role: dict[str, Any], idx: int, name: str) -> list[str]:
@@ -779,11 +798,11 @@ def _validate_criteria(role: dict[str, Any], idx: int, name: str) -> list[str]:
             issues.append(
                 f"Role {idx} ({name}): acceptanceCriteria[{j}] missing 'check'"
             )
-        elif not _is_grep_only(check):
+        elif not _is_surface_only(check):
             has_functional = True
     if criteria and not has_functional:
         issues.append(
-            f"Role {idx} ({name}): all acceptance criteria are grep-only — "
+            f"Role {idx} ({name}): all acceptance criteria are surface-level — "
             "at least one must verify functional correctness "
             "(e.g., build, test, curl, or run command)"
         )
@@ -1538,6 +1557,43 @@ def _update_memory_importance(memory_path: str, entry_id: str, boost: bool) -> N
     )
 
 
+def _add_new_memory_entry(
+    memory_path: str,
+    category: str,
+    content: str,
+    keywords_str: str,
+    source: str,
+    goal_context: str,
+    importance: int,
+) -> dict[str, Any]:
+    """Create and append a new memory entry."""
+    if importance < 1 or importance > 10:
+        error_exit("Importance must be between 1 and 10 (inclusive)")
+
+    keywords = _validate_memory_input(category, content, keywords_str)
+
+    entry = {
+        "id": str(uuid.uuid4()),
+        "timestamp": time.time(),
+        "category": category,
+        "keywords": keywords,
+        "content": content,
+        "source": source,
+        "goal_context": goal_context,
+        "importance": importance,
+        "usage_count": 0,
+    }
+
+    try:
+        _ensure_memory_dir(memory_path)
+        with open(memory_path, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+    except OSError as e:
+        error_exit(f"Error writing memory file: {e}")
+
+    return entry
+
+
 def cmd_memory_add(args: argparse.Namespace) -> NoReturn:
     """Add a new memory entry or update importance of existing entry.
 
@@ -1557,48 +1613,28 @@ def cmd_memory_add(args: argparse.Namespace) -> NoReturn:
         _update_memory_importance(memory_path, entry_id, boost)
 
     # Mode: add new entry
-    category = args.category
-    keywords_str = args.keywords or ""
-    content = args.content
-    source = args.source or "unknown"
-    goal_context = args.goal_context or ""
-    importance = args.importance
+    if not args.category:
+        error_exit("--category is required for new entries")
+    if not args.content:
+        error_exit("--content is required for new entries")
 
-    # Validate importance range
-    if importance < 1 or importance > 10:
-        error_exit("Importance must be between 1 and 10 (inclusive)")
-
-    # Validate and parse inputs
-    keywords = _validate_memory_input(category, content, keywords_str)
-
-    # Create entry with usage tracking
-    entry = {
-        "id": str(uuid.uuid4()),
-        "timestamp": time.time(),
-        "category": category,
-        "keywords": keywords,
-        "content": content,
-        "source": source,
-        "goal_context": goal_context,
-        "importance": importance,
-        "usage_count": 0,
-    }
-
-    # Append to JSONL file
-    try:
-        _ensure_memory_dir(memory_path)
-        with open(memory_path, "a") as f:
-            f.write(json.dumps(entry) + "\n")
-    except OSError as e:
-        error_exit(f"Error writing memory file: {e}")
+    entry = _add_new_memory_entry(
+        memory_path,
+        args.category,
+        args.content,
+        args.keywords or "",
+        args.source or "unknown",
+        args.goal_context or "",
+        args.importance,
+    )
 
     output_json(
         {
             "ok": True,
             "id": entry["id"],
-            "category": category,
-            "keywords": keywords,
-            "importance": importance,
+            "category": entry["category"],
+            "keywords": entry["keywords"],
+            "importance": entry["importance"],
         }
     )
 
@@ -1743,6 +1779,7 @@ def cmd_reflection_validate(args: argparse.Namespace) -> NoReturn:
     Reads evaluation JSON from stdin.
     Required fields: whatWorked, whatFailed, doNextTime (all arrays)
     """
+    _ = args  # Unused but required for dispatch compatibility
     try:
         evaluation = json.load(sys.stdin)
     except json.JSONDecodeError as e:
@@ -2104,6 +2141,746 @@ def cmd_archive(args: argparse.Namespace) -> NoReturn:
 
 
 # ============================================================================
+# Self-Test
+# ============================================================================
+
+
+def cmd_self_test(args: argparse.Namespace) -> NoReturn:
+    """Run self-tests on all commands using synthetic fixtures.
+
+    Creates a temporary directory with test fixtures, runs each command
+    via subprocess to validate the full CLI path, and reports results.
+    """
+    _ = args  # Unused but required for dispatch signature
+
+    # Track results
+    results: list[dict[str, Any]] = []
+    passed = 0
+    failed = 0
+
+    # Create temp directory for fixtures
+    tmp_dir = tempfile.mkdtemp(prefix="plan-self-test-")
+
+    try:
+        # Get path to this script
+        script_path = os.path.abspath(__file__)
+
+        # Create fixtures
+        fixtures = _create_fixtures(tmp_dir)
+
+        # Run tests
+        tests = [
+            ("team-name", lambda: _test_team_name(script_path)),
+            ("status", lambda: _test_status(script_path, fixtures["minimal_plan"])),
+            ("summary", lambda: _test_summary(script_path, fixtures["minimal_plan"])),
+            (
+                "overlap-matrix",
+                lambda: _test_overlap_matrix(script_path, fixtures["minimal_plan"]),
+            ),
+            (
+                "tasklist-data",
+                lambda: _test_tasklist_data(script_path, fixtures["minimal_plan"]),
+            ),
+            (
+                "worker-pool",
+                lambda: _test_worker_pool(script_path, fixtures["minimal_plan"]),
+            ),
+            (
+                "retry-candidates",
+                lambda: _test_retry_candidates(script_path, fixtures["failed_plan"]),
+            ),
+            (
+                "circuit-breaker",
+                lambda: _test_circuit_breaker(script_path, fixtures["failed_plan"]),
+            ),
+            (
+                "memory-search",
+                lambda: _test_memory_search(script_path, fixtures["memory_file"]),
+            ),
+            (
+                "memory-add",
+                lambda: _test_memory_add(script_path, fixtures["memory_file"]),
+            ),
+            (
+                "memory-add --boost",
+                lambda: _test_memory_boost(script_path, fixtures["memory_file"]),
+            ),
+            (
+                "memory-add --decay",
+                lambda: _test_memory_decay(script_path, fixtures["memory_file"]),
+            ),
+            (
+                "memory-summary",
+                lambda: _test_memory_summary(script_path, fixtures["memory_file"]),
+            ),
+            (
+                "memory-review",
+                lambda: _test_memory_review(script_path, fixtures["memory_file"]),
+            ),
+            (
+                "reflection-add",
+                lambda: _test_reflection_add(script_path, fixtures["reflection_file"]),
+            ),
+            (
+                "reflection-search",
+                lambda: _test_reflection_search(
+                    script_path, fixtures["reflection_file"]
+                ),
+            ),
+            ("reflection-validate", lambda: _test_reflection_validate(script_path)),
+            (
+                "expert-validate",
+                lambda: _test_expert_validate(script_path, fixtures["expert_artifact"]),
+            ),
+            (
+                "update-status",
+                lambda: _test_update_status(script_path, fixtures["minimal_plan"]),
+            ),
+            (
+                "resume-reset",
+                lambda: _test_resume_reset(script_path, fixtures["in_progress_plan"]),
+            ),
+            ("finalize", lambda: _test_finalize(script_path, fixtures["unfin_plan"])),
+            (
+                "health-check",
+                lambda: _test_health_check(script_path, fixtures["design_dir"]),
+            ),
+            (
+                "plan-diff",
+                lambda: _test_plan_diff(
+                    script_path, fixtures["minimal_plan"], fixtures["modified_plan"]
+                ),
+            ),
+            (
+                "plan-health-summary",
+                lambda: _test_plan_health_summary(script_path, fixtures["design_dir"]),
+            ),
+            ("archive", lambda: _test_archive(script_path, fixtures["archive_dir"])),
+        ]
+
+        for test_name, test_fn in tests:
+            try:
+                test_fn()
+                results.append({"command": test_name, "passed": True, "error": None})
+                passed += 1
+            except AssertionError as e:
+                results.append({"command": test_name, "passed": False, "error": str(e)})
+                failed += 1
+            except (OSError, subprocess.TimeoutExpired, ValueError) as e:
+                results.append(
+                    {
+                        "command": test_name,
+                        "passed": False,
+                        "error": f"Unexpected error: {e}",
+                    }
+                )
+                failed += 1
+
+        output_json(
+            {"ok": True, "passed": passed, "failed": failed, "results": results}
+        )
+
+    finally:
+        # Clean up temp directory
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def _create_fixtures(tmp_dir: str) -> dict[str, str]:
+    """Create test fixtures and return their paths."""
+    current_time = int(time.time())
+
+    # Minimal valid plan
+    minimal_plan = {
+        "schemaVersion": 4,
+        "goal": "Test goal",
+        "context": {
+            "stack": "python",
+            "conventions": [],
+            "testCommand": "python -m pytest",
+            "buildCommand": "python -m build",
+        },
+        "expertArtifacts": [],
+        "designDecisions": [],
+        "verificationSpecs": [],
+        "roles": [
+            {
+                "name": "backend-developer",
+                "goal": "Implement backend API",
+                "model": "sonnet",
+                "scope": {
+                    "directories": ["src/api"],
+                    "patterns": [],
+                    "dependencies": [],
+                },
+                "constraints": ["Use REST"],
+                "acceptanceCriteria": [
+                    {
+                        "criterion": "API responds",
+                        "check": "curl -s localhost:8080/health",
+                    }
+                ],
+                "assumptions": [],
+                "rollbackTriggers": [],
+                "expertContext": [],
+                "fallback": "Use files",
+                "status": "pending",
+                "attempts": 0,
+                "result": None,
+                "directoryOverlaps": [],
+            },
+            {
+                "name": "test-writer",
+                "goal": "Write tests",
+                "model": "haiku",
+                "scope": {
+                    "directories": ["tests/"],
+                    "patterns": [],
+                    "dependencies": ["backend-developer"],
+                },
+                "constraints": ["Use pytest"],
+                "acceptanceCriteria": [
+                    {"criterion": "Tests pass", "check": "python -m pytest tests/"}
+                ],
+                "assumptions": [],
+                "rollbackTriggers": [],
+                "expertContext": [],
+                "fallback": None,
+                "status": "pending",
+                "attempts": 0,
+                "result": None,
+                "directoryOverlaps": [],
+            },
+        ],
+        "auxiliaryRoles": [],
+        "progress": {"completedRoles": []},
+    }
+
+    minimal_plan_path = os.path.join(tmp_dir, "minimal_plan.json")
+    with open(minimal_plan_path, "w") as f:
+        json.dump(minimal_plan, f)
+
+    # Failed plan (role 0 failed)
+    failed_plan = json.loads(json.dumps(minimal_plan))
+    failed_plan["roles"][0]["status"] = "failed"
+    failed_plan["roles"][0]["attempts"] = 1
+    failed_plan["roles"][0]["result"] = "build error"
+
+    failed_plan_path = os.path.join(tmp_dir, "failed_plan.json")
+    with open(failed_plan_path, "w") as f:
+        json.dump(failed_plan, f)
+
+    # In-progress plan
+    in_progress_plan = json.loads(json.dumps(minimal_plan))
+    in_progress_plan["roles"][0]["status"] = "in_progress"
+
+    in_progress_plan_path = os.path.join(tmp_dir, "in_progress_plan.json")
+    with open(in_progress_plan_path, "w") as f:
+        json.dump(in_progress_plan, f)
+
+    # Unfinalized plan (no status fields)
+    unfin_plan = {
+        "schemaVersion": 4,
+        "goal": "Test goal",
+        "context": {
+            "stack": "python",
+            "conventions": [],
+            "testCommand": "python -m pytest",
+            "buildCommand": "python -m build",
+        },
+        "expertArtifacts": [],
+        "designDecisions": [],
+        "verificationSpecs": [],
+        "roles": [
+            {
+                "name": "simple-role",
+                "goal": "Do something",
+                "model": "sonnet",
+                "scope": {"directories": ["src/"], "patterns": [], "dependencies": []},
+                "constraints": [],
+                "acceptanceCriteria": [
+                    {"criterion": "Build succeeds", "check": "python -m build"}
+                ],
+                "assumptions": [],
+                "rollbackTriggers": [],
+                "expertContext": [],
+                "fallback": None,
+            }
+        ],
+        "auxiliaryRoles": [],
+        "progress": {"completedRoles": []},
+    }
+
+    unfin_plan_path = os.path.join(tmp_dir, "unfin_plan.json")
+    with open(unfin_plan_path, "w") as f:
+        json.dump(unfin_plan, f)
+
+    # Modified plan (for plan-diff)
+    modified_plan = json.loads(json.dumps(minimal_plan))
+    modified_plan["roles"][0]["goal"] = "Different goal"
+
+    modified_plan_path = os.path.join(tmp_dir, "modified_plan.json")
+    with open(modified_plan_path, "w") as f:
+        json.dump(modified_plan, f)
+
+    # Memory file
+    memory_entries = [
+        {
+            "id": "mem-1",
+            "timestamp": current_time - 86400,
+            "category": "pattern",
+            "keywords": ["api", "rest"],
+            "content": "REST APIs should use consistent error format",
+            "source": "execute",
+            "goal_context": "API development",
+            "importance": 7,
+            "usage_count": 2,
+        },
+        {
+            "id": "mem-2",
+            "timestamp": current_time - 604800,
+            "category": "mistake",
+            "keywords": ["test", "timeout"],
+            "content": "Integration tests need explicit timeouts",
+            "source": "execute",
+            "goal_context": "Testing",
+            "importance": 8,
+            "usage_count": 0,
+        },
+    ]
+
+    memory_file_path = os.path.join(tmp_dir, "memory.jsonl")
+    with open(memory_file_path, "w") as f:
+        for entry in memory_entries:
+            f.write(json.dumps(entry) + "\n")
+
+    # Reflection file
+    reflection_entries = [
+        {
+            "id": "ref-1",
+            "timestamp": current_time - 86400,
+            "skill": "execute",
+            "goal": "Build API",
+            "outcome": "completed",
+            "goalAchieved": True,
+            "evaluation": {
+                "whatWorked": ["Clear criteria"],
+                "whatFailed": ["Slow tests"],
+                "doNextTime": ["Parallel tests"],
+            },
+        },
+        {
+            "id": "ref-2",
+            "timestamp": current_time - 172800,
+            "skill": "design",
+            "goal": "Design auth",
+            "outcome": "partial",
+            "goalAchieved": False,
+            "evaluation": {
+                "whatWorked": ["Expert debate"],
+                "whatFailed": ["Missing edge cases"],
+                "doNextTime": ["Security expert"],
+            },
+        },
+    ]
+
+    reflection_file_path = os.path.join(tmp_dir, "reflection.jsonl")
+    with open(reflection_file_path, "w") as f:
+        for entry in reflection_entries:
+            f.write(json.dumps(entry) + "\n")
+
+    # Expert artifact
+    expert_artifact = {
+        "summary": "Architecture recommendations",
+        "verificationProperties": [
+            {
+                "property": "All endpoints return JSON",
+                "category": "interface",
+                "testableVia": "curl + jq",
+            }
+        ],
+    }
+
+    expert_artifact_path = os.path.join(tmp_dir, "expert-architect.json")
+    with open(expert_artifact_path, "w") as f:
+        json.dump(expert_artifact, f)
+
+    # Design directory for health-check and plan-health-summary
+    design_dir = os.path.join(tmp_dir, "test_design")
+    os.makedirs(design_dir, exist_ok=True)
+
+    shutil.copy(minimal_plan_path, os.path.join(design_dir, "plan.json"))
+    shutil.copy(memory_file_path, os.path.join(design_dir, "memory.jsonl"))
+    shutil.copy(reflection_file_path, os.path.join(design_dir, "reflection.jsonl"))
+
+    handoff_content = (
+        "# Session Handoff\n\nGoal: Build API\nStatus: 2/2 roles completed"
+    )
+    with open(os.path.join(design_dir, "handoff.md"), "w") as f:
+        f.write(handoff_content)
+
+    # Archive directory (for testing archive command)
+    archive_dir = os.path.join(tmp_dir, "test_archive")
+    os.makedirs(archive_dir, exist_ok=True)
+
+    # Create some files to archive
+    shutil.copy(minimal_plan_path, os.path.join(archive_dir, "plan.json"))
+    shutil.copy(expert_artifact_path, os.path.join(archive_dir, "expert-test.json"))
+
+    # Add persistent files that should NOT be archived
+    shutil.copy(memory_file_path, os.path.join(archive_dir, "memory.jsonl"))
+
+    return {
+        "minimal_plan": minimal_plan_path,
+        "failed_plan": failed_plan_path,
+        "in_progress_plan": in_progress_plan_path,
+        "unfin_plan": unfin_plan_path,
+        "modified_plan": modified_plan_path,
+        "memory_file": memory_file_path,
+        "reflection_file": reflection_file_path,
+        "expert_artifact": expert_artifact_path,
+        "design_dir": design_dir,
+        "archive_dir": archive_dir,
+    }
+
+
+def _run_command(
+    script_path: str, args: list[str], stdin_data: str | None = None
+) -> dict[str, Any]:
+    """Run a plan.py command and return parsed JSON output."""
+    cmd = ["python3", script_path, *args]
+    result = subprocess.run(  # noqa: S603
+        cmd, capture_output=True, text=True, input=stdin_data, timeout=10
+    )
+
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError as e:
+        raise AssertionError(
+            f"Command {' '.join(args)} produced invalid JSON: {result.stdout[:200]}, stderr: {result.stderr[:200]}, error: {e}"
+        ) from None
+
+
+def _test_team_name(script_path: str) -> None:
+    """Test team-name command."""
+    output = _run_command(script_path, ["team-name", "design"])
+    assert output.get("ok") is True, f"team-name failed: {output}"
+    assert "teamName" in output, "team-name missing teamName field"
+    assert output["teamName"].startswith("do-design-"), (
+        f"Invalid team name pattern: {output['teamName']}"
+    )
+
+
+def _test_status(script_path: str, plan_path: str) -> None:
+    """Test status command."""
+    output = _run_command(script_path, ["status", plan_path])
+    assert output.get("ok") is True, f"status failed: {output}"
+    assert output.get("roleCount") == 2, (
+        f"Expected 2 roles, got {output.get('roleCount')}"
+    )
+    assert "pending" in output.get("counts", {}), "status missing counts.pending"
+
+
+def _test_summary(script_path: str, plan_path: str) -> None:
+    """Test summary command."""
+    output = _run_command(script_path, ["summary", plan_path])
+    assert output.get("ok") is True, f"summary failed: {output}"
+    assert output.get("roleCount") == 2, (
+        f"Expected 2 roles, got {output.get('roleCount')}"
+    )
+    assert "maxDepth" in output, "summary missing maxDepth"
+
+
+def _test_overlap_matrix(script_path: str, plan_path: str) -> None:
+    """Test overlap-matrix command."""
+    output = _run_command(script_path, ["overlap-matrix", plan_path])
+    assert output.get("ok") is True, f"overlap-matrix failed: {output}"
+    assert "matrix" in output, "overlap-matrix missing matrix field"
+    assert isinstance(output["matrix"], dict), "overlap-matrix matrix is not a dict"
+
+
+def _test_tasklist_data(script_path: str, plan_path: str) -> None:
+    """Test tasklist-data command."""
+    output = _run_command(script_path, ["tasklist-data", plan_path])
+    assert output.get("ok") is True, f"tasklist-data failed: {output}"
+    assert len(output.get("roles", [])) == 2, "tasklist-data should return 2 roles"
+    # Role 1 depends on role 0
+    assert 0 in output["roles"][1].get("blockedBy", []), (
+        "Role 1 should be blocked by role 0"
+    )
+
+
+def _test_worker_pool(script_path: str, plan_path: str) -> None:
+    """Test worker-pool command."""
+    output = _run_command(script_path, ["worker-pool", plan_path])
+    assert output.get("ok") is True, f"worker-pool failed: {output}"
+    assert "totalWorkers" in output, "worker-pool missing totalWorkers"
+    # Only role 0 is runnable (role 1 depends on it)
+    assert output["totalWorkers"] >= 1, (
+        "worker-pool should find at least 1 runnable worker"
+    )
+
+
+def _test_retry_candidates(script_path: str, plan_path: str) -> None:
+    """Test retry-candidates command."""
+    output = _run_command(script_path, ["retry-candidates", plan_path])
+    assert output.get("ok") is True, f"retry-candidates failed: {output}"
+    assert "retryable" in output, "retry-candidates missing retryable field"
+    assert len(output["retryable"]) == 1, "Should find 1 retryable role (failed role 0)"
+
+
+def _test_circuit_breaker(script_path: str, plan_path: str) -> None:
+    """Test circuit-breaker command."""
+    output = _run_command(script_path, ["circuit-breaker", plan_path])
+    assert output.get("ok") is True, f"circuit-breaker failed: {output}"
+    assert "shouldAbort" in output, "circuit-breaker missing shouldAbort field"
+    assert isinstance(output["shouldAbort"], bool), "shouldAbort must be bool"
+
+
+def _test_memory_search(script_path: str, memory_path: str) -> None:
+    """Test memory-search command."""
+    output = _run_command(
+        script_path, ["memory-search", memory_path, "--goal", "api rest"]
+    )
+    assert output.get("ok") is True, f"memory-search failed: {output}"
+    assert "memories" in output, "memory-search missing memories field"
+    assert len(output["memories"]) > 0, "memory-search should find at least 1 match"
+
+
+def _test_memory_add(script_path: str, memory_path: str) -> None:
+    """Test memory-add command."""
+    output = _run_command(
+        script_path,
+        [
+            "memory-add",
+            memory_path,
+            "--category",
+            "pattern",
+            "--keywords",
+            "test,self-test",
+            "--content",
+            "Self-test validates all commands",
+            "--importance",
+            "5",
+        ],
+    )
+    assert output.get("ok") is True, f"memory-add failed: {output}"
+    assert "id" in output, "memory-add missing id field"
+
+    # Verify entry was actually added
+    with open(memory_path) as f:
+        lines = f.readlines()
+    last_entry = json.loads(lines[-1])
+    assert last_entry["content"] == "Self-test validates all commands", (
+        "Memory entry not added correctly"
+    )
+
+
+def _test_memory_boost(script_path: str, memory_path: str) -> None:
+    """Test memory-add --boost command."""
+    output = _run_command(
+        script_path, ["memory-add", memory_path, "--boost", "--id", "mem-1"]
+    )
+    assert output.get("ok") is True, f"memory-add --boost failed: {output}"
+    assert output.get("importance") == 8, (
+        f"Expected importance 8 (7+1), got {output.get('importance')}"
+    )
+
+
+def _test_memory_decay(script_path: str, memory_path: str) -> None:
+    """Test memory-add --decay command."""
+    output = _run_command(
+        script_path, ["memory-add", memory_path, "--decay", "--id", "mem-2"]
+    )
+    assert output.get("ok") is True, f"memory-add --decay failed: {output}"
+    assert output.get("importance") == 7, (
+        f"Expected importance 7 (8-1), got {output.get('importance')}"
+    )
+
+
+def _test_memory_summary(script_path: str, memory_path: str) -> None:
+    """Test memory-summary command."""
+    output = _run_command(script_path, ["memory-summary", memory_path, "--goal", "api"])
+    assert output.get("ok") is True, f"memory-summary failed: {output}"
+    assert "count" in output, "memory-summary missing count field"
+    assert "entries" in output, "memory-summary missing entries field"
+
+
+def _test_memory_review(script_path: str, memory_path: str) -> None:
+    """Test memory-review command."""
+    output = _run_command(
+        script_path, ["memory-review", memory_path, "--category", "pattern"]
+    )
+    assert output.get("ok") is True, f"memory-review failed: {output}"
+    assert "memories" in output, "memory-review missing memories field"
+    # All returned memories should have category=pattern
+    for mem in output["memories"]:
+        assert mem.get("category") == "pattern", (
+            f"Expected category=pattern, got {mem.get('category')}"
+        )
+
+
+def _test_reflection_add(script_path: str, reflection_path: str) -> None:
+    """Test reflection-add command."""
+    evaluation = {
+        "whatWorked": ["Good planning"],
+        "whatFailed": ["Time estimates"],
+        "doNextTime": ["Buffer more time"],
+    }
+
+    output = _run_command(
+        script_path,
+        [
+            "reflection-add",
+            reflection_path,
+            "--skill",
+            "execute",
+            "--goal",
+            "Test goal",
+            "--outcome",
+            "completed",
+            "--goal-achieved",
+            "true",
+        ],
+        stdin_data=json.dumps(evaluation),
+    )
+    assert output.get("ok") is True, f"reflection-add failed: {output}"
+    assert "id" in output, "reflection-add missing id field"
+
+
+def _test_reflection_search(script_path: str, reflection_path: str) -> None:
+    """Test reflection-search command."""
+    output = _run_command(
+        script_path, ["reflection-search", reflection_path, "--skill", "execute"]
+    )
+    assert output.get("ok") is True, f"reflection-search failed: {output}"
+    assert "reflections" in output, "reflection-search missing reflections field"
+    # All returned reflections should have skill=execute
+    for refl in output["reflections"]:
+        assert refl.get("skill") == "execute", (
+            f"Expected skill=execute, got {refl.get('skill')}"
+        )
+
+
+def _test_reflection_validate(script_path: str) -> None:
+    """Test reflection-validate command."""
+    valid_evaluation = {
+        "whatWorked": ["Good"],
+        "whatFailed": ["Bad"],
+        "doNextTime": ["Better"],
+    }
+
+    output = _run_command(
+        script_path, ["reflection-validate"], stdin_data=json.dumps(valid_evaluation)
+    )
+    assert output.get("ok") is True, (
+        f"reflection-validate failed with valid input: {output}"
+    )
+    assert output.get("valid") is True, "reflection-validate should report valid=True"
+
+    # Test invalid input
+    invalid_evaluation = {"incomplete": "data"}
+    output = _run_command(
+        script_path, ["reflection-validate"], stdin_data=json.dumps(invalid_evaluation)
+    )
+    assert output.get("ok") is False, "reflection-validate should reject invalid input"
+
+
+def _test_expert_validate(script_path: str, artifact_path: str) -> None:
+    """Test expert-validate command."""
+    output = _run_command(script_path, ["expert-validate", artifact_path])
+    assert output.get("ok") is True, f"expert-validate failed: {output}"
+    assert output.get("valid") is True, (
+        "expert-validate should report valid=True for valid artifact"
+    )
+
+
+def _test_update_status(script_path: str, plan_path: str) -> None:
+    """Test update-status command."""
+    updates = [{"roleIndex": 0, "status": "in_progress"}]
+
+    output = _run_command(
+        script_path, ["update-status", plan_path], stdin_data=json.dumps(updates)
+    )
+    assert output.get("ok") is True, f"update-status failed: {output}"
+    assert 0 in output.get("updated", []), "Role 0 should be in updated list"
+
+    # Verify the change was persisted
+    with open(plan_path) as f:
+        plan = json.load(f)
+    assert plan["roles"][0]["status"] == "in_progress", "Role 0 status was not updated"
+
+
+def _test_resume_reset(script_path: str, plan_path: str) -> None:
+    """Test resume-reset command."""
+    output = _run_command(script_path, ["resume-reset", plan_path])
+    assert output.get("ok") is True, f"resume-reset failed: {output}"
+    assert "resetRoles" in output, "resume-reset missing resetRoles field"
+
+    # Verify role was reset
+    with open(plan_path) as f:
+        plan = json.load(f)
+    assert plan["roles"][0]["status"] == "pending", "Role 0 should be reset to pending"
+    assert plan["roles"][0]["attempts"] == 1, "Role 0 attempts should be incremented"
+
+
+def _test_finalize(script_path: str, plan_path: str) -> None:
+    """Test finalize command."""
+    output = _run_command(script_path, ["finalize", plan_path])
+    assert output.get("ok") is True, f"finalize failed: {output}"
+    assert output.get("validated") is True, "finalize should report validated=True"
+
+    # Verify plan was enriched
+    with open(plan_path) as f:
+        plan = json.load(f)
+    assert "status" in plan["roles"][0], "finalize should add status field"
+    assert "directoryOverlaps" in plan["roles"][0], (
+        "finalize should add directoryOverlaps"
+    )
+
+
+def _test_health_check(script_path: str, design_dir: str) -> None:
+    """Test health-check command."""
+    output = _run_command(script_path, ["health-check", design_dir])
+    assert output.get("ok") is True, f"health-check failed: {output}"
+    assert "healthy" in output, "health-check missing healthy field"
+
+
+def _test_plan_diff(script_path: str, plan_a: str, plan_b: str) -> None:
+    """Test plan-diff command."""
+    output = _run_command(script_path, ["plan-diff", plan_a, plan_b])
+    assert output.get("ok") is True, f"plan-diff failed: {output}"
+    assert "summary" in output, "plan-diff missing summary field"
+    assert "modifiedRoles" in output, "plan-diff missing modifiedRoles field"
+
+
+def _test_plan_health_summary(script_path: str, design_dir: str) -> None:
+    """Test plan-health-summary command."""
+    output = _run_command(script_path, ["plan-health-summary", design_dir])
+    assert output.get("ok") is True, f"plan-health-summary failed: {output}"
+    assert "handoff" in output, "plan-health-summary missing handoff field"
+    assert "reflections" in output, "plan-health-summary missing reflections field"
+
+
+def _test_archive(script_path: str, archive_dir: str) -> None:
+    """Test archive command."""
+    output = _run_command(script_path, ["archive", archive_dir])
+    assert output.get("ok") is True, f"archive failed: {output}"
+    assert "archivedTo" in output or "message" in output, (
+        "archive missing archivedTo or message field"
+    )
+
+    # Verify persistent files remain
+    assert os.path.exists(os.path.join(archive_dir, "memory.jsonl")), (
+        "memory.jsonl should not be archived"
+    )
+
+    # Verify non-persistent files were moved
+    assert not os.path.exists(os.path.join(archive_dir, "plan.json")), (
+        "plan.json should be archived"
+    )
+
+
+# ============================================================================
 # Main
 # ============================================================================
 
@@ -2288,6 +3065,12 @@ def main() -> None:
     )
     p.add_argument("design_dir", nargs="?", default=".design")
     p.set_defaults(func=cmd_plan_health_summary)
+
+    # Self-test command
+    p = subparsers.add_parser(
+        "self-test", help="Run self-tests on all commands using synthetic fixtures"
+    )
+    p.set_defaults(func=cmd_self_test)
 
     args = parser.parse_args()
 
