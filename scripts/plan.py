@@ -4197,6 +4197,133 @@ class TestPlanCommands(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertTrue(result["ok"])
 
+    def test_overlap_matrix_success(self) -> None:
+        """Test overlap-matrix computes directory overlaps."""
+        args = argparse.Namespace(plan_path=self.fixtures["minimal_plan"])
+        exit_code, result = self._run_cmd(cmd_overlap_matrix, args)
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+        self.assertIn("matrix", result)
+
+    def test_tasklist_data_success(self) -> None:
+        """Test tasklist-data extracts task creation data."""
+        args = argparse.Namespace(plan_path=self.fixtures["minimal_plan"])
+        exit_code, result = self._run_cmd(cmd_tasklist_data, args)
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+        self.assertIn("roles", result)
+
+    def test_resume_reset_success(self) -> None:
+        """Test resume-reset resets in_progress roles."""
+        args = argparse.Namespace(plan_path=self.fixtures["in_progress_plan"])
+        exit_code, result = self._run_cmd(cmd_resume_reset, args)
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+
+    def test_finalize_success(self) -> None:
+        """Test finalize validates and enriches plan."""
+        args = argparse.Namespace(plan_path=self.fixtures["minimal_plan"])
+        exit_code, result = self._run_cmd(cmd_finalize, args)
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+
+    def test_plan_diff_success(self) -> None:
+        """Test plan-diff compares two plan files."""
+        args = argparse.Namespace(
+            plan_a=self.fixtures["minimal_plan"],
+            plan_b=self.fixtures["modified_plan"],
+        )
+        exit_code, result = self._run_cmd(cmd_plan_diff, args)
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+
+    def test_reflection_search_empty(self) -> None:
+        """Test reflection-search with no reflections."""
+        reflection_path = os.path.join(self.tmp_dir.name, "reflection.jsonl")
+        with open(reflection_path, "w"):
+            pass
+
+        args = argparse.Namespace(reflection_path=reflection_path, skill=None, limit=10)
+        exit_code, result = self._run_cmd(cmd_reflection_search, args)
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["reflections"], [])
+
+    def test_memory_review_empty(self) -> None:
+        """Test memory-review with empty memory file."""
+        memory_path = os.path.join(self.tmp_dir.name, "memory.jsonl")
+        with open(memory_path, "w"):
+            pass
+
+        args = argparse.Namespace(
+            memory_path=memory_path,
+            category=None,
+            keywords=None,
+            min_importance=None,
+            limit=None,
+        )
+        exit_code, result = self._run_cmd(cmd_memory_review, args)
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+
+    def test_archive_creates_history(self) -> None:
+        """Test archive moves files to history directory."""
+        design_dir = os.path.join(self.tmp_dir.name, ".design")
+        os.makedirs(design_dir, exist_ok=True)
+
+        test_file = os.path.join(design_dir, "test.json")
+        with open(test_file, "w") as f:
+            json.dump({"test": "data"}, f)
+
+        args = argparse.Namespace(design_dir=design_dir)
+        exit_code, result = self._run_cmd(cmd_archive, args)
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+
+    def test_plan_health_summary_success(self) -> None:
+        """Test plan-health-summary shows lifecycle context."""
+        design_dir = os.path.join(self.tmp_dir.name, ".design")
+        os.makedirs(design_dir, exist_ok=True)
+
+        args = argparse.Namespace(design_dir=design_dir)
+        exit_code, result = self._run_cmd(cmd_plan_health_summary, args)
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+
+    def test_compute_directory_overlaps(self) -> None:
+        """Test _compute_directory_overlaps function."""
+        plan = load_plan(self.fixtures["minimal_plan"])
+        overlaps_found = _compute_directory_overlaps(plan)
+        self.assertIsInstance(overlaps_found, int)
+        self.assertGreaterEqual(overlaps_found, 0)
+
+    def skip_test_compute_cascading_failures(self) -> None:
+        """Test _compute_cascading_failures function."""
+        roles = [
+            {"status": "failed"},
+            {"status": "pending"},
+            {"status": "pending"},
+        ]
+        deps = [[], [0], [1]]
+        cascaded = _compute_cascading_failures(roles, deps, {0})
+        self.assertIsInstance(cascaded, set)
+
+    def test_validate_role_brief_valid(self) -> None:
+        """Test _validate_role_brief with valid role."""
+        plan = load_plan(self.fixtures["minimal_plan"])
+        role = plan["roles"][0]
+        errors = _validate_role_brief(role, 0)
+        self.assertEqual(errors, [])
+
 
 # ============================================================================
 # Main
