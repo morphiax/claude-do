@@ -12,7 +12,7 @@ Execute `.design/plan.json` with persistent, self-organizing workers. Design pro
 
 **CRITICAL: Always use agent teams.** When spawning any worker via Task tool, you MUST include `team_name: $TEAM_NAME` and `name: "{role}"` parameters. Without these, workers are standalone and cannot coordinate.
 
-**Lead boundaries**: Use only `TeamCreate`, `TeamDelete`, `TaskCreate`, `TaskUpdate`, `TaskList`, `SendMessage`, `Task`, `AskUserQuestion`, and `Bash` (only for `python3 $PLAN_CLI`, `git`, verification scripts, and cleanup). Never read source files, use MCP tools, `Grep`, `Glob`, or `LSP`. Never execute tasks directly — spawn a worker.
+**Lead boundaries**: Use only `TeamCreate`, `TeamDelete`, `TaskCreate`, `TaskUpdate`, `TaskList`, `SendMessage`, `Task`, `AskUserQuestion`, and `Bash` (for `python3 $PLAN_CLI`, cleanup, verification, `git`). Project metadata (CLAUDE.md, package.json, README) allowed via Bash. **Never use Read, Grep, Glob, Edit, Write, LSP, WebFetch, WebSearch, or MCP tools on project source files.** The lead orchestrates — agents think.
 
 **Progress reporting**: After the initial summary, output brief progress updates for significant events. Keep updates to one line each. Suppress intermediate worker tool calls and chatter.
 
@@ -66,11 +66,11 @@ Auxiliaries: {pre-execution auxiliaries run, post-execution pending}
 ```
 Warn if git is dirty. If resuming: "Resuming execution."
 
-**Memory injection** — For each role, retrieve relevant memories:
+**Memory injection** — For each role:
 ```bash
 python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "{role.goal}" --stack "{context.stack}" --keywords "{role.scope.directories + role.name}"
 ```
-Parse JSON output. If `ok: false` or no memories found, proceed without memory injection. Otherwise, take top 2-3 `memories[]` per role. Log injected memories: output "Memory: {role.name} ← {count} memories ({keywords})".
+If `ok: false` or no memories → proceed without injection. Otherwise take top 2-3, log "Memory: {role.name} ← {count} memories."
 
 Spawn workers as teammates using the Task tool. Each worker prompt MUST include:
 

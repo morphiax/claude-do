@@ -12,7 +12,7 @@ Analyze a Claude Code skill and produce `.design/plan.json` with improvement rol
 
 **Do NOT use `EnterPlanMode`** — this skill IS the plan.
 
-**Lead boundaries**: Use only `TeamCreate`, `TeamDelete`, `TaskCreate`, `TaskUpdate`, `TaskList`, `SendMessage`, `Task`, `AskUserQuestion`, and `Bash` (cleanup, verification, `python3 $PLAN_CLI` only). Project metadata (CLAUDE.md, package.json, README) allowed. Application source code prohibited — experts read source files. The lead orchestrates — agents think. Do NOT use Read, Grep, Glob, LSP, WebFetch, or WebSearch on project source.
+**Lead boundaries**: Use only `TeamCreate`, `TeamDelete`, `TaskCreate`, `TaskUpdate`, `TaskList`, `SendMessage`, `Task`, `AskUserQuestion`, and `Bash` (for `python3 $PLAN_CLI`, cleanup, verification). Project metadata (CLAUDE.md, package.json, README) allowed via Bash. **Never use Read, Grep, Glob, Edit, Write, LSP, WebFetch, WebSearch, or MCP tools on project source files.** The lead orchestrates — agents think.
 
 **No polling**: Messages auto-deliver automatically. Never use `sleep`, loops, or Bash waits. When a teammate sends a message, it appears in your next turn.
 
@@ -99,7 +99,7 @@ The lead assesses the target skill and determines the analysis approach.
 | **General** | No focus area — full quality analysis | Team `$TEAM_NAME` | 2-3 experts |
 | **Cross-skill** | Path is `--all` or multiple paths | Team `$TEAM_NAME` | 2-3 experts + cross-review |
 
-3. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "improve {skill-name}" --stack "SKILL.md prompt engineering"`. If `ok: true` and memories exist, inject top 3-5 into expert prompts. If `ok: false` or no memories, proceed without memory injection.
+3. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "improve {skill-name}" --stack "SKILL.md prompt engineering"`. If `ok: false` or no memories → proceed without injection. Otherwise inject top 3-5 into expert prompts as "Relevant past learnings: {bullet list, format: '- {category}: {summary}'}."
 4. **Historical evidence**: Check for past execution artifacts:
    ```bash
    ls .design/history/*/handoff.md 2>/dev/null | head -5
@@ -147,11 +147,11 @@ Proceed directly to Step 4 (Synthesize) after receiving the analyst's report.
 
 Every expert prompt MUST end with: "In your findings JSON, include a `verificationProperties` section: an array of properties that should hold regardless of implementation (behavioral invariants, boundary conditions, cross-role contracts). Format: `[{\"property\": \"...\", \"category\": \"invariant|boundary|integration\", \"testableVia\": \"how to test this with concrete commands/endpoints\"}]`. Provide concrete, externally observable properties that can be tested without reading source code. Save your complete findings to `.design/expert-{name}.json` as structured JSON. Then SendMessage to the lead with a summary." Include past learnings and historical evidence paths if available.
 
-4. **Wait for all N experts to report — expert liveness pipeline**: After spawning N experts, maintain a completion checklist. Mark each expert complete when: (a) its SendMessage arrives AND (b) its artifact file exists (`ls .design/expert-{name}.json`). Only proceed to artifact validation when all N experts are complete.
-   - **Turn-based timeout**: If an expert has not completed after 2 turns of processing other experts, send: "Status check — artifact expected at `.design/expert-{name}.json`. Report completion or blockers."
-   - **Re-spawn after 1 more turn**: If still no completion after the status ping and 1 additional turn, re-spawn the expert with the same prompt (max 2 re-spawn attempts per expert).
-   - **Proceed with available data**: After 2 re-spawn attempts, if the expert still hasn't completed, log the failure and proceed to artifact validation with the artifacts from responsive experts.
-   - **Never write artifacts yourself** — the lead's interpretation is not a substitute for specialist analysis.
+4. **Expert liveness pipeline**: After spawning N experts, track completion. Mark each expert complete when: (a) SendMessage received AND (b) artifact file exists (`ls .design/expert-{name}.json`). Proceed when all complete.
+   - **Turn-based timeout**: Expert not complete after 2 turns → send: "Status check — artifact expected at `.design/expert-{name}.json`. Report completion or blockers."
+   - **Re-spawn ceiling**: No completion 1 turn after ping → re-spawn with same prompt (max 2 re-spawn attempts per expert).
+   - **Proceed with available**: After 2 re-spawn attempts → log failure, proceed with responsive experts' artifacts.
+   - **Never write artifacts yourself** — lead interpretation ≠ specialist analysis.
 5. **Validate expert artifacts** before cross-review:
    - Verify existence: `ls .design/expert-*.json`
    - Validate JSON structure: For each artifact, parse and confirm it contains required fields: `skillPath`, `dimensions` (or `qualityScores`), `findings`, `summary`
@@ -208,7 +208,22 @@ The lead collects expert findings and builds improvement roles for plan.json.
 
 #### 4.5. Generate Verification Specs (OPTIONAL)
 
-See **Verification Specs Protocol** in CLAUDE.md for the full protocol (when to generate, authorship rules, spec generation steps, content guidelines, and finalization).
+Verification specs are property-based tests workers must satisfy. They codify expert verificationProperties as executable tests without constraining implementation.
+
+**When to generate**: Goal has 2+ roles with testable properties AND expert artifacts contain verificationProperties AND stack supports tests (context.testCommand/buildCommand exists). Skip for trivial goals or sparse properties.
+
+**Authorship**: Simple goals (1-3 roles) → lead writes from expert verificationProperties. Complex goals (4+ roles) → spawn spec-writer Task agent with `subagent_type: "general-purpose"` that reads expert artifacts + actual codebase, writes specs in `.design/specs/{role-name}.{ext}` using project's test framework or shell scripts, returns created paths.
+
+**Spec generation**:
+1. Read expert verificationProperties from all `.design/expert-*.json` files
+2. For each role, extract relevant properties (filter by scope/goal alignment)
+3. `mkdir -p .design/specs`
+4. Write spec files: native tests (`.design/specs/spec-{role-name}.test.{ext}` using bun test/pytest/jest/cargo test/etc with property-based frameworks like fast-check/hypothesis/proptest) OR shell scripts (`.design/specs/spec-{role-name}.sh` with exit 0 = pass)
+5. For each spec, add to plan.json's `verificationSpecs[]`: `{"role": "{role-name}", "path": ".design/specs/spec-{role}.{ext}", "runCommand": "{e.g., 'bun test .design/specs/spec-api.test.ts'}", "properties": ["brief descriptions"]}`
+
+**Spec content**: Test WHAT (external behavior), not HOW (implementation). Include positive AND negative cases. Use property-based testing where possible. Test cross-role contracts. Specs must be independently runnable.
+
+**Finalization**: `python3 $PLAN_CLI finalize .design/plan.json` validates structure, computes overlaps, computes SHA256 checksums for spec files (tamper detection).
 
 ### 5. Auxiliary Roles
 

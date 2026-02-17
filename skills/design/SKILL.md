@@ -14,7 +14,7 @@ Decompose a goal into `.design/plan.json` with role briefs — goal-directed sco
 
 **CRITICAL: Always use agent teams.** When spawning any expert via Task tool, you MUST include `team_name: $TEAM_NAME` and `name: "{role}"` parameters. Without these, agents are standalone and cannot coordinate.
 
-**Lead boundaries**: Use only `TeamCreate`, `TeamDelete`, `TaskCreate`, `TaskUpdate`, `TaskList`, `SendMessage`, `Task`, `AskUserQuestion`, and `Bash` (cleanup, verification, `python3 $PLAN_CLI` only). Project metadata (CLAUDE.md, package.json, README) allowed. Application source code prohibited. **Never use Read, Grep, Glob, Edit, Write, LSP, WebFetch, or WebSearch on project source files.** The lead orchestrates — agents think.
+**Lead boundaries**: Use only `TeamCreate`, `TeamDelete`, `TaskCreate`, `TaskUpdate`, `TaskList`, `SendMessage`, `Task`, `AskUserQuestion`, and `Bash` (for `python3 $PLAN_CLI`, cleanup, verification). Project metadata (CLAUDE.md, package.json, README) allowed via Bash. **Never use Read, Grep, Glob, Edit, Write, LSP, WebFetch, WebSearch, or MCP tools on project source files.** The lead orchestrates — agents think.
 
 **No polling**: Messages auto-deliver automatically. Never use `sleep`, loops, or Bash waits. When a teammate sends a message, it appears in your next turn.
 
@@ -104,7 +104,7 @@ Create the team and spawn experts in parallel.
 
 1. `TeamDelete(team_name: $TEAM_NAME)` (ignore errors), `TeamCreate(team_name: $TEAM_NAME)`. If TeamCreate fails, tell user Agent Teams is required and stop. If TeamDelete succeeds, a previous session's team was cleaned up.
 2. **TeamCreate health check**: Verify team is reachable. If verification fails, `TeamDelete`, then retry `TeamCreate` once. If retry fails, abort with clear error message.
-3. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "{goal}" --stack "{stack}"`. If `ok: false` or no memories returned, proceed without memory injection. Otherwise inject top 3-5 memories into expert prompts as a "Past Learnings" section (format: `- {category}: {summary} (from {created})`).
+3. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "{goal}" --stack "{stack}"`. If `ok: false` or no memories → proceed without injection. Otherwise inject top 3-5 into expert prompts as "Relevant past learnings: {bullet list, format: '- {category}: {summary}'}."
 4. `TaskCreate` for each expert.
 5. Spawn experts as teammates using the Task tool. For each expert:
    - Use Task with `team_name: $TEAM_NAME` and `name: "{expert-name}"`.
@@ -114,11 +114,11 @@ Create the team and spawn experts in parallel.
    - Instruct: "Then SendMessage to the lead with a summary."
 
    Expert artifacts flow directly to execution workers — they are structured JSON with sections that can be referenced selectively.
-6. **Expert liveness tracking**: After spawning N experts, maintain a completion checklist. Mark each expert complete when: (a) its SendMessage arrives AND (b) its artifact file exists (`ls .design/expert-{name}.json`). Only proceed to Step 3.5 when all N experts are complete.
-   - **Turn-based timeout**: If an expert has not completed after 2 turns of processing other experts, send: "Status check — artifact expected at `.design/expert-{name}.json`. Report completion or blockers."
-   - **Re-spawn after 1 more turn**: If still no completion after the status ping and 1 additional turn, re-spawn the expert with the same prompt (max 2 re-spawn attempts per expert).
-   - **Proceed with available data**: After 2 re-spawn attempts, if the expert still hasn't completed, log the failure and proceed to Step 3.5 with the artifacts from responsive experts.
-   - **Never write artifacts yourself** — the lead's interpretation is not a substitute for specialist analysis.
+6. **Expert liveness pipeline**: After spawning N experts, track completion. Mark each expert complete when: (a) SendMessage received AND (b) artifact file exists (`ls .design/expert-{name}.json`). Proceed when all complete.
+   - **Turn-based timeout**: Expert not complete after 2 turns → send: "Status check — artifact expected at `.design/expert-{name}.json`. Report completion or blockers."
+   - **Re-spawn ceiling**: No completion 1 turn after ping → re-spawn with same prompt (max 2 re-spawn attempts per expert).
+   - **Proceed with available**: After 2 re-spawn attempts → log failure, proceed with responsive experts' artifacts.
+   - **Never write artifacts yourself** — lead interpretation ≠ specialist analysis.
 
 ### 3.5. Interface Negotiation & Cross-Review
 
@@ -178,7 +178,22 @@ The lead collects expert findings and writes the plan.
 
 ### 4.5. Generate Verification Specs (OPTIONAL)
 
-See **Verification Specs Protocol** in CLAUDE.md for the full protocol (when to generate, authorship rules, spec generation steps, content guidelines, and finalization).
+Verification specs are property-based tests workers must satisfy. They codify expert verificationProperties as executable tests without constraining implementation.
+
+**When to generate**: Goal has 2+ roles with testable properties AND expert artifacts contain verificationProperties AND stack supports tests (context.testCommand/buildCommand exists). Skip for trivial goals or sparse properties.
+
+**Authorship**: Simple goals (1-3 roles) → lead writes from expert verificationProperties. Complex goals (4+ roles) → spawn spec-writer Task agent with `subagent_type: "general-purpose"` that reads expert artifacts + actual codebase, writes specs in `.design/specs/{role-name}.{ext}` using project's test framework or shell scripts, returns created paths.
+
+**Spec generation**:
+1. Read expert verificationProperties from all `.design/expert-*.json` files
+2. For each role, extract relevant properties (filter by scope/goal alignment)
+3. `mkdir -p .design/specs`
+4. Write spec files: native tests (`.design/specs/spec-{role-name}.test.{ext}` using bun test/pytest/jest/cargo test/etc with property-based frameworks like fast-check/hypothesis/proptest) OR shell scripts (`.design/specs/spec-{role-name}.sh` with exit 0 = pass)
+5. For each spec, add to plan.json's `verificationSpecs[]`: `{"role": "{role-name}", "path": ".design/specs/spec-{role}.{ext}", "runCommand": "{e.g., 'bun test .design/specs/spec-api.test.ts'}", "properties": ["brief descriptions"]}`
+
+**Spec content**: Test WHAT (external behavior), not HOW (implementation). Include positive AND negative cases. Use property-based testing where possible. Test cross-role contracts. Specs must be independently runnable.
+
+**Finalization**: `python3 $PLAN_CLI finalize .design/plan.json` validates structure, computes overlaps, computes SHA256 checksums for spec files (tamper detection).
 
 **Role brief principles**:
 - `goal`: Clear statement of what this role must achieve

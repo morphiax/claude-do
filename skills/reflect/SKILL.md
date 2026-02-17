@@ -12,7 +12,7 @@ Analyze `.design/reflection.jsonl` to identify what's actually working and what 
 
 **Do NOT use `EnterPlanMode`** — this skill IS the plan.
 
-**Lead boundaries**: Use only `TaskCreate`, `TaskUpdate`, `TaskList`, `Task`, `AskUserQuestion`, and `Bash` (cleanup, verification, `python3 $PLAN_CLI` only). Project metadata (CLAUDE.md, package.json, README) allowed. Never use Read, Grep, Glob, Edit, Write on application source code. Never use WebFetch or WebSearch. The lead orchestrates — analysts read source files.
+**Lead boundaries**: Use only `TaskCreate`, `TaskUpdate`, `TaskList`, `Task`, `AskUserQuestion`, and `Bash` (for `python3 $PLAN_CLI`, cleanup, verification). Project metadata (CLAUDE.md, package.json, README) allowed via Bash. **Never use Read, Grep, Glob, Edit, Write, LSP, WebFetch, WebSearch, or MCP tools on project source files.** The lead orchestrates — agents think.
 
 **No polling**: Messages auto-deliver. Never use sleep, loops, or Bash waits.
 
@@ -63,16 +63,8 @@ All script calls: `python3 $PLAN_CLI <command> [args]` via Bash. Output is JSON 
    ```
    If fewer than `min-runs` entries exist, tell user: "Need at least {min-runs} reflections to identify patterns. Run more design/execute cycles first." Stop.
 3. **Check existing plan**: `python3 $PLAN_CLI status .design/plan.json`. If `ok` and `isResume`: ask user "Existing plan found. Overwrite?" If declined, stop.
-4. **Archive stale artifacts**:
-   ```bash
-   mkdir -p .design/history
-   if [ "$(find .design -mindepth 1 -maxdepth 1 ! -name history ! -name memory.jsonl ! -name reflection.jsonl ! -name handoff.md | head -1)" ]; then
-     ARCHIVE_DIR=".design/history/$(date -u +%Y%m%dT%H%M%SZ)"
-     mkdir -p "$ARCHIVE_DIR"
-     find .design -mindepth 1 -maxdepth 1 ! -name history ! -name memory.jsonl ! -name reflection.jsonl ! -name handoff.md -exec mv {} "$ARCHIVE_DIR/" \;
-   fi
-   ```
-5. **Load context**: Read `.design/memory.jsonl` via `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "reflect on skill performance" --keywords "failure,pattern,improvement"` for relevant past learnings. If `ok: false` or no memories returned, proceed without memory injection.
+4. **Archive stale artifacts**: `python3 $PLAN_CLI archive .design`
+5. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "reflect on skill performance" --keywords "failure,pattern,improvement"`. If `ok: false` or no memories → proceed without injection. Otherwise inject top 3-5 into analyst prompt as "Relevant past learnings: {bullet list, format: '- {category}: {summary}'}."
 
 ### 2. Pattern Analysis
 
