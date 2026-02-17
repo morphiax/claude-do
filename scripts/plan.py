@@ -294,12 +294,15 @@ def cmd_overlap_matrix(args: argparse.Namespace) -> NoReturn:
         dirs.update(scope.get("patterns", []))
         role_dirs.append(dirs)
 
+    # Enforce j>i ordering to prevent bidirectional deadlocks.
+    # When roles i and j overlap, only the later role (j) blocks on the earlier (i).
+    # This creates a strict partial ordering and eliminates circular dependencies.
     matrix: dict[str, list[int]] = {}
     for i in range(len(roles)):
         overlaps: list[int] = []
         for j in range(len(roles)):
-            if i == j:
-                continue
+            if i == j or j <= i:
+                continue  # Skip self and enforce j>i rule
             # Check directory overlap (prefix match or exact match)
             if _dirs_overlap(role_dirs[i], role_dirs[j]):
                 # Only flag if no existing dependency ordering
