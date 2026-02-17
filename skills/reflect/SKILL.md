@@ -56,7 +56,7 @@ All script calls: `python3 $PLAN_CLI <command> [args]` via Bash. Output is JSON 
 
 ### 1. Pre-flight
 
-1. **Lifecycle context**: If `.design/handoff.md` exists, read it via Bash and display to user: "Previous session: {goal} — {outcome}." If `.design/memory.jsonl` exists, show: "Memory: {count} learnings stored."
+1. **Lifecycle context**: Run `python3 $PLAN_CLI plan-health-summary .design` and display to user: "Previous session: {handoff summary}. Recent runs: {reflection summaries}. {plan status}." Skip if all fields empty.
 2. **Parse arguments**: Extract optional `[skill-filter]` (design|execute|improve) and `[--min-runs N]` (default 2).
 3. **Load reflections**:
    ```bash

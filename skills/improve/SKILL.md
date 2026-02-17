@@ -67,7 +67,7 @@ TEAM_NAME = $(python3 $PLAN_CLI team-name improve).teamName
 
 ### 1. Pre-flight
 
-1. **Lifecycle context**: If `.design/handoff.md` exists, read it via Bash and display to user: "Previous session: {goal} — {outcome}." If `.design/reflection.jsonl` exists, show: "Past runs: {count} reflections available."
+1. **Lifecycle context**: Run `python3 $PLAN_CLI plan-health-summary .design` and display to user: "Previous session: {handoff summary}. Recent runs: {reflection summaries}. {plan status}." Skip if all fields empty.
 2. **Parse arguments**: Extract `<skill-path>` and optional `[focus-area]` from `$ARGUMENTS`.
    - If `skill-path` is a name (e.g., `design`), resolve to `skills/{name}/SKILL.md`.
    - If no path provided, ask user which skill to analyze.
