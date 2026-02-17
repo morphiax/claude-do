@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-`claude-do` is a Claude Code plugin providing four skills: `/do:design` (team-based goal decomposition into `.design/plan.json`), `/do:execute` (dependency-graph execution with worker teammates), `/do:improve` (static analysis of prompt quality across 7 dimensions), and `/do:reflect` (evidence-based improvement from execution reflections). It leverages Claude Code's native Agent Teams and Tasks features for multi-agent collaboration. All skills use the main conversation as team lead with teammates for analytical/execution work. Skills are implemented as SKILL.md prompts augmented with python3 helper scripts for deterministic operations.
+`claude-do` is a Claude Code plugin providing five skills: `/do:design` (team-based goal decomposition into `.design/plan.json`), `/do:execute` (dependency-graph execution with worker teammates), `/do:recon` (pre-design reconnaissance combining deep research with Meadows-style leverage analysis), `/do:improve` (static analysis of prompt quality across 7 dimensions), and `/do:reflect` (evidence-based improvement from execution reflections). It leverages Claude Code's native Agent Teams and Tasks features for multi-agent collaboration. All skills use the main conversation as team lead with teammates for analytical/execution work. Skills are implemented as SKILL.md prompts augmented with python3 helper scripts for deterministic operations.
 
 ## Testing
 
@@ -19,7 +19,7 @@ claude --plugin-dir /path/to/claude-do
 /do:execute
 ```
 
-All four skills must be tested end-to-end. Changes to design, execute, improve, or reflect may affect the others since they share the `.design/plan.json` contract and persistent files (`memory.jsonl`, `reflection.jsonl`, `handoff.md`).
+All five skills must be tested end-to-end. Changes to design, execute, recon, improve, or reflect may affect the others since they share the `.design/plan.json` contract (or `.design/recon.json` for recon) and persistent files (`memory.jsonl`, `reflection.jsonl`, `handoff.md`).
 
 ## Architecture
 
@@ -27,11 +27,13 @@ All four skills must be tested end-to-end. Changes to design, execute, improve, 
 
 - `.claude-plugin/plugin.json` — Plugin manifest (name, version, metadata)
 - `.claude-plugin/marketplace.json` — Marketplace distribution config
-- `scripts/plan.py` — Shared helper script (25 commands: 14 query, 5 mutation, 4 validation, 1 build, 1 test)
+- `scripts/plan.py` — Shared helper script (27 commands: 14 query, 5 mutation, 6 validation, 1 build, 1 test)
 - `skills/design/SKILL.md` — `/do:design` skill definition
 - `skills/design/scripts/plan.py` — Symlink → `../../../scripts/plan.py`
 - `skills/execute/SKILL.md` — `/do:execute` skill definition
 - `skills/execute/scripts/plan.py` — Symlink → `../../../scripts/plan.py`
+- `skills/recon/SKILL.md` — `/do:recon` skill definition
+- `skills/recon/scripts/plan.py` — Symlink → `../../../scripts/plan.py`
 - `skills/improve/SKILL.md` — `/do:improve` skill definition
 - `skills/improve/scripts/plan.py` — Symlink → `../../../scripts/plan.py`
 - `skills/reflect/SKILL.md` — `/do:reflect` skill definition
@@ -49,17 +51,21 @@ A single `scripts/plan.py` at the repo root provides all deterministic operation
 
 - **Query** (14 commands): team-name (generate project-unique team name from skill + cwd), status, summary, overlap-matrix, tasklist-data, worker-pool, retry-candidates, circuit-breaker, memory-search (keyword-based search in .design/memory.jsonl with recency weighting and importance scoring), reflection-search (filter past reflections by skill, sorted by recency), memory-review (list all memories in human-readable format with filtering), health-check (validate .design/ integrity), plan-diff (compare two plan.json files), plan-health-summary (lifecycle context from handoff and reflections)
 - **Mutation** (5 commands): update-status (atomically modify plan.json via temp file + rename with state machine validation), memory-add (append JSONL entry with UUID, importance 1-10, and dynamic boost/decay), reflection-add (append structured self-evaluation to reflection.jsonl, evaluation JSON via stdin), resume-reset (resets in_progress roles to pending, increments attempts), archive (archives stale .design/ artifacts to .design/history/{timestamp}/)
-- **Validation** (4 commands): expert-validate (schema validation for expert artifacts), reflection-validate (schema validation for reflection evaluations), memory-summary (format injection summary for display), validate-checks (syntax validation for acceptanceCriteria check commands — detects broken Python in `python3 -c` checks)
+- **Validation** (6 commands): expert-validate (schema validation for expert artifacts), reflection-validate (schema validation for reflection evaluations), memory-summary (format injection summary for display), validate-checks (syntax validation for acceptanceCriteria check commands — detects broken Python in `python3 -c` checks), recon-validate (schema validation for recon.json with leverage scoring), recon-summary (format recon output for display)
 - **Build** (1 command): finalize — validates role briefs, computes directory overlaps, validates state transitions, and computes SHA256 checksums for verification specs in one atomic operation
 - **Test** (1 command): self-test — exercises every command against synthetic fixtures in a temp directory, reports pass/fail per command as JSON
 
-Design uses query + finalize. Execute uses all commands. Improve uses query + finalize (same as design). `worker-pool` reads roles directly — one worker per role, named by role (e.g., `api-developer`, `test-writer`). Workers read `plan.json` directly — no per-worker task files needed.
+Design uses query + finalize. Execute uses all commands. Recon uses query + recon-validate + recon-summary. Improve uses query + finalize (same as design). `worker-pool` reads roles directly — one worker per role, named by role (e.g., `api-developer`, `test-writer`). Workers read `plan.json` directly — no per-worker task files needed.
 
 Scripts use python3 stdlib only (no dependencies), support Python 3.8+, and follow a consistent CLI pattern: `python3 plan.py <command> [plan_path] [options]`. All output is JSON to stdout with exit code 0 for success, 1 for errors.
 
-### Data Contract: .design/plan.json
+### Data Contracts: .design/plan.json and .design/recon.json
 
-The two skills communicate through `.design/plan.json` (schemaVersion 4) written to the `.design/` directory at runtime (gitignored). Key points:
+Skills communicate through structured JSON files in `.design/` (gitignored). Two primary contracts:
+
+**`.design/plan.json` (schemaVersion 4)** — used by design, execute, improve, and reflect for role-based execution:
+
+Key points:
 
 - `.design/plan.json` is the authoritative state; the TaskList is a derived view
 - Schema version 4 is required
@@ -108,6 +114,18 @@ The two skills communicate through `.design/plan.json` (schemaVersion 4) written
 
 **Auxiliary role fields**: name, type (pre-execution|post-execution), goal, model, trigger
 
+**`.design/recon.json` (schemaVersion 1)** — used by `/do:recon` for reconnaissance output:
+
+Recon produces a ranked list of high-leverage interventions rather than role briefs. Key points:
+
+- Uses 7-level Meadows leverage framework adapted for software (paradigm/goals/rules/information_flows/feedback_loops/structure/parameters)
+- Interventions ranked by tier-weighted scoring (leverageLevel weight × confidenceMultiplier ÷ effortMultiplier)
+- Output includes designGoal + constraints array (NOT suggestedRoles or implementation suggestions)
+- Schema fields: schemaVersion (1), goal, context {same as plan.json}, researchFindings[], interventions[], contradictions[]
+- **Intervention fields**: id, name, leverageLevel (1-7 int), leverageName (Meadows level name), leverageGroup (Abson 4-group: Parameters/Feedbacks/Design/Intent), score (computed), confidence (low/medium/high), effort (low/medium/high), designGoal (string), constraints (array), supportingFindings (array of finding IDs)
+- **Finding fields**: id, domain (codebase/literature/comparative/theoretical), source, summary, implications, relevantLeverageLevels
+- Depth tiers: shallow mode (max 3 interventions), deep mode (max 5 interventions) with additionalFindings count for transparency
+
 ### Verification Specs Protocol
 
 Verification specs are broad, property-based tests that workers must satisfy. They codify expert-provided properties as executable tests without constraining implementation creativity. Both `/do:design` and `/do:improve` can generate verification specs in their optional Step 4.5.
@@ -151,7 +169,7 @@ Run `python3 $PLAN_CLI finalize .design/plan.json` to validate structure, comput
 
 ### Execution Model
 
-All three skills use the **main conversation as team lead** with Agent Teams. Runtime behavior is defined in each SKILL.md file — this section covers structural facts only.
+All five skills use the **main conversation as team lead** with Agent Teams (or Task for single-agent skills). Runtime behavior is defined in each SKILL.md file — this section covers structural facts only.
 
 - **Lead** (main conversation): orchestration only via `TeamCreate`, `SendMessage`, `TaskCreate`/`TaskUpdate`/`TaskList`, `Bash` (scripts, git, verification), `AskUserQuestion`. Never reads project source files.
 - **Teammates**: specialist agents spawned into the team. Discover lead name via `~/.claude/teams/{team-name}/config.json`.
@@ -195,6 +213,24 @@ All three skills use the **main conversation as team lead** with Agent Teams. Ru
 - Self-reflection: both design and execute write structured self-evaluations to `.design/reflection.jsonl` at end of each run (episodic memory). Memory-curator reads reflections as primary signal
 - Session handoff: `.design/handoff.md` persists in `.design/` (not archived) for cross-session context recovery
 - End-of-run summary: displays roles completed/failed/skipped, files changed, acceptance criteria results, verification spec results, and memories curated
+
+**`/do:recon`** — team name: `do-recon-{project}-{hash}` (generated by `team-name` command)
+- Protocol guardrail: lead must follow the flow step-by-step (pre-flight, research spawning, synthesis, output finalization)
+- Phase announcements: lead announces each major phase (pre-flight, research spawning, synthesis, finalization) for user visibility
+- Lifecycle context: runs `plan-health-summary` to display previous session handoff and recent reflections at skill start
+- TeamCreate health check: verifies team is reachable, retries once on failure
+- Depth tiers: shallow mode (max 3 interventions, 2-3 researchers) or deep mode (max 5 interventions, 3-4 researchers). User selects via optional `--deep` flag
+- Memory injection: lead searches .design/memory.jsonl for relevant past learnings and injects top 3 into researcher prompts with transparency. Memory search failures gracefully fallback to empty results
+- Lead spawns researcher teammates (codebase-analyst, literature-researcher, comparative-analyst, theory-researcher) based on depth tier. Researcher prompts include behavioral trait instructions (e.g., "prefer empirical evidence", "ground in Meadows framework")
+- Researcher liveness pipeline: completion checklist tracking which researchers have reported, turn-based timeout (3 turns then re-spawn), re-spawn ceiling (max 2 attempts then proceed with available findings)
+- Synthesis: lead ranks findings by leverage level (1-7 using Meadows framework with software-adjusted weights), computes scores via tier-weight formula (leverageLevel weight × confidenceMultiplier ÷ effortMultiplier), detects contradictions
+- Synthesis delegation: lead synthesizes by default. For >15 findings across >3 domains, spawns single synthesis Task agent
+- Contradiction detection: lightweight scan for conflicting findings (e.g., TRIZ-style contradictions). Surfaces in contradictions[] array for user decision
+- `recon-validate` validates schema, computes leverage scores deterministically, outputs validation result
+- `recon-summary` formats ranked interventions for display with Abson 4-group mapping (Parameters/Feedbacks/Design/Intent)
+- Output: produces `.design/recon.json` (schemaVersion 1) with ranked interventions. Each intervention has designGoal + constraints, NOT suggestedRoles or implementation details
+- Self-reflection: writes structured self-evaluation to `.design/reflection.jsonl` at end of run using `reflection-add`
+- End-of-run summary: displays intervention count, top 3 leverage levels represented, contradiction count, and findings analyzed
 
 **`/do:improve`** — team name: `do-improve-{project}-{hash}` (generated by `team-name` command)
 - Protocol guardrail: lead must follow the flow step-by-step, starting with pre-flight (skill snapshot, archive check, circular improvement detection)

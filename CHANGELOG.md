@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.11.0] - 2026-02-17
+
+### Added
+
+- `/do:recon` skill — pre-design reconnaissance combining deep research with Meadows-style leverage analysis
+- `skills/recon/SKILL.md` — 7-level Meadows framework adapted for software (paradigm/goals/rules/information_flows/feedback_loops/structure/parameters)
+- `recon-validate` command in plan.py — schema validation for recon.json with deterministic leverage scoring (tier-weight formula)
+- `recon-summary` command in plan.py — format ranked interventions for display with Abson 4-group mapping
+- `.design/recon.json` contract (schemaVersion 1) — ranked interventions with designGoal + constraints (not implementation suggestions)
+- Depth tiers in recon — shallow mode (max 3 interventions), deep mode (max 5 interventions)
+- Contradiction detection in recon — lightweight scan for conflicting findings (TRIZ-style)
+- Recon added to valid skills whitelist in reflection-add command
+
+### Changed
+
+- Plugin description updated to include all 5 skills (recon and reflect were missing)
+- Command count updated to 27 (14 query, 5 mutation, 6 validation, 1 build, 1 test)
+
 ## [2.10.1] - 2026-02-17
 
 ### Fixed
