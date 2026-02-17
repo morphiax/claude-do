@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.12.0] - 2026-02-17
+
+### Added
+
+- Temporal resolution tracking in `/do:reflect` — 3-tier status (active/likely_resolved/confirmed_resolved) with 3-run recency window and memory.jsonl cross-referencing to prevent flagging already-fixed issues
+- Mandatory verification specs for complex goals in `/do:design` Step 4.5 — decision matrix distinguishes mandatory (4+ roles, new skills, API integration) from optional (1-3 roles, docs/config-only)
+- Measurable verificationProperties instruction in `/do:design` expert prompts — experts must ground estimates in actual code metrics (file counts, line counts, test coverage)
+- Shift-left acceptance criteria anti-pattern warnings in `/do:design` Step 3 expert prompts — prevents grep-only criteria from entering plans
+- F-string brace nesting depth tracking in `validate-checks` — detects backslash escapes inside f-string expression braces
+
+### Changed
+
+- `/do:reflect` migrated from Task-based analyst to direct Bash-based analysis (4 substeps: gather data, compute metrics, formulate hypotheses, write artifact) — eliminates hallucination risk from unreliable Task agents
+- Strengthened acceptance criteria anti-patterns in `/do:design` Step 4 — added `|| true` variant, expanded examples
+
+### Fixed
+
+- Bidirectional deadlock in overlap matrix — enforced strict j>i ordering in both `cmd_overlap_matrix` and `_compute_directory_overlaps` (finalize)
+
 ## [2.11.0] - 2026-02-17
 
 ### Added

@@ -3,7 +3,7 @@
 > Multi-agent planning with structured debate, self-verifying execution, and cross-session memory
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Version](https://img.shields.io/badge/version-2.11.0-green.svg)
+![Version](https://img.shields.io/badge/version-2.12.0-green.svg)
 ![Claude Code](https://img.shields.io/badge/Claude%20Code-2.1.32%2B-orange.svg)
 
 ## What's Novel
@@ -22,7 +22,7 @@
 
 **Execution reflections** — Skills self-evaluate after every run, storing structured assessments in episodic memory. `/do:reflect` analyzes these to identify recurring failures and generate evidence-based improvements (inspired by Reflexion and GEPA research).
 
-**Acceptance criteria validation** — Design-time syntax validation catches broken `python3 -c` checks before execution. Lead-side verification re-runs every criterion before marking roles complete (trust-but-verify). Surface-only checks (grep, file-existence) are flagged as anti-patterns.
+**Acceptance criteria validation** — Design-time syntax validation catches broken `python3 -c` checks (including f-string brace nesting errors) before execution. Shift-left anti-pattern warnings in expert prompts prevent grep-only criteria from entering plans. Lead-side verification re-runs every criterion before marking roles complete (trust-but-verify). Surface-only checks (grep, file-existence) are flagged as anti-patterns.
 
 **Automated self-test suite** — `plan.py self-test` exercises all 27 commands against synthetic fixtures in a temp directory, enabling CI-style validation of the helper script.
 
@@ -61,7 +61,7 @@
 
 **`/do:improve`** analyzes Claude Code skills using 7 quality dimensions (Protocol Clarity, Constraint Enforcement, Error Handling, Agent Coordination, Information Flow, Prompt Economy, Verifiability). For general analysis, spawns 2-3 experts; for targeted improvements, uses a single analyst. Produces testable hypotheses with predicted behavioral impacts. Always outputs `.design/plan.json` for `/do:execute` — never writes source files directly. Anti-pattern guards prevent token bloat, circular improvements, and regressions. Expert artifact schema validation. 3-turn liveness timeout. Compressed quality rubric (1/3/5 anchors). Behavioral trait instructions. Phase announcements and end-of-run summary.
 
-**`/do:reflect`** uses execution outcomes (from `.design/reflection.jsonl`) to identify what's actually working and what isn't. Analyzes recurring failures, unaddressed feedback, goal achievement rates, and trends across runs. Hypotheses are grounded in real evidence with confidence levels. Requires >=2 reflections to identify patterns. Complements `/do:improve` (static prompt quality) with dynamic functional optimization. Uses plan.py archive command for consistency. Reflection validation. Phase announcements and end-of-run summary.
+**`/do:reflect`** uses execution outcomes (from `.design/reflection.jsonl`) to identify what's actually working and what isn't. Direct Bash-based analysis (no Task agent) gathers data via plan.py commands, computes metrics, and formulates hypotheses — eliminating hallucination risk. Temporal resolution tracking classifies patterns as active/likely_resolved/confirmed_resolved using a 3-run recency window and memory.jsonl cross-referencing, preventing duplicate improvement work on already-fixed issues. Hypotheses are grounded in real evidence with confidence levels. Requires >=2 reflections to identify patterns. Complements `/do:improve` (static prompt quality) with dynamic functional optimization. Phase announcements and end-of-run summary.
 
 ## Requirements
 
