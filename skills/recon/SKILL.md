@@ -122,7 +122,7 @@ Create the team and spawn researchers in parallel.
 3. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "{area}" --keywords "{relevant keywords}"`. If `ok: false` or no memories, proceed without injection. Otherwise inject top 3-5 into researcher prompts. **Show user**: "Memory: injecting {count} past learnings — {keyword summaries}."
 4. `TaskCreate` for each researcher.
 5. Spawn researchers as teammates using the Task tool. For each researcher:
-   - Use Task with `team_name: $TEAM_NAME` and `name: "{researcher-name}"`.
+   - Use Task with `team_name: $TEAM_NAME`, `name: "{researcher-name}"`, and `model: "sonnet"` (researchers require Read/Grep/Glob/Bash for codebase analysis and WebSearch/WebFetch for literature research).
    - Include the leverage framework reference table so researchers can classify findings.
    - Include scope bounds: "Focus your investigation on {directories/areas}. Do not explore unrelated areas."
    - Inject relevant memories if available.
@@ -165,7 +165,7 @@ The lead combines researcher findings into leverage-ranked interventions.
 
 1. Collect all researcher findings from messages and `.design/expert-*.json` files via Bash (`python3 -c "import json; ..."`).
 2. **Contradiction detection**: Scan for findings from different researchers that recommend opposing actions on the same area. If found, add to `contradictions[]` in recon.json. Do NOT try to resolve via agent messaging — surface both positions for user decision.
-3. **Delegation check**: If researchers produced >15 total findings across >3 domains, spawn a single synthesis Task agent via `Task(subagent_type: "general-purpose")` to perform ranking. Otherwise, lead synthesizes directly.
+3. **Delegation check**: If researchers produced >15 total findings across >3 domains, spawn a single synthesis Task agent via `Task(subagent_type: "general-purpose", model: "sonnet")` to perform ranking. Otherwise, lead synthesizes directly.
 4. For each finding, assess:
    - Which of the 7 internal leverage levels (1-7)
    - Effort to implement (trivial/small/medium/large/transformative)

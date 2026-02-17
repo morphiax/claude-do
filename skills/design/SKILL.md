@@ -108,7 +108,7 @@ Create the team and spawn experts in parallel.
 3. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "{goal}" --stack "{stack}"`. If `ok: false` or no memories → proceed without injection. Otherwise inject top 3-5 into expert prompts. **Show user**: "Memory: injecting {count} past learnings — {keyword summaries}."
 4. `TaskCreate` for each expert.
 5. Spawn experts as teammates using the Task tool. For each expert:
-   - Use Task with `team_name: $TEAM_NAME` and `name: "{expert-name}"`.
+   - Use Task with `team_name: $TEAM_NAME`, `name: "{expert-name}"`, and `model: "sonnet"` (experts require Read/Grep/Glob/Bash for codebase analysis).
    - Write prompts appropriate to the goal and each expert's focus area. Ask them to score relevant dimensions and trace scenarios.
    - **Behavioral traits**: Include behavioral instructions — tell experts HOW to think, not WHO to be. Examples: "Question assumptions that feel obvious", "Reject solutions that add complexity without clear benefit", "Focus on failure modes before success paths", "Assume prior art exists — search before inventing." Tailor traits to the expert's focus (e.g., architect: "Prefer composable patterns over monolithic solutions"; security specialist: "Assume every input is hostile until validated").
    - **Measurable estimates**: Instruct experts: "Base verification properties and estimates on actual code metrics (file counts, line counts, test coverage, dependency depth) where possible. Read codebase samples to ground estimates. Avoid theoretical predictions — anchor to observable reality."
@@ -217,7 +217,7 @@ Verification specs are property-based tests workers must satisfy. They codify ex
 
 Additional requirements for all cases: expert artifacts contain verificationProperties AND stack supports tests (context.testCommand/buildCommand exists).
 
-**Authorship**: Simple goals (1-3 roles) → lead writes from expert verificationProperties. Complex goals (4+ roles) → spawn spec-writer Task agent with `subagent_type: "general-purpose"` that reads expert artifacts + actual codebase, writes specs in `.design/specs/{role-name}.{ext}` using project's test framework or shell scripts, returns created paths.
+**Authorship**: Simple goals (1-3 roles) → lead writes from expert verificationProperties. Complex goals (4+ roles) → spawn spec-writer Task agent with `Task(subagent_type: "general-purpose", model: "sonnet")` that reads expert artifacts + actual codebase, writes specs in `.design/specs/{role-name}.{ext}` using project's test framework or shell scripts, returns created paths.
 
 **Spec generation**:
 1. Read expert verificationProperties from all `.design/expert-*.json` files

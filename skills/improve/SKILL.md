@@ -107,7 +107,7 @@ The lead assesses the target skill and determines the analysis approach.
 
 #### Targeted Mode (single Task agent)
 
-Spawn a single analyst via `Task(subagent_type: "general-purpose")`:
+Spawn a single analyst via `Task(subagent_type: "general-purpose", model: "sonnet")` (analyst requires Read/Grep for skill files and historical artifacts):
 
 Prompt includes:
 - "Analyze `.design/skill-snapshot.md` for this specific improvement area: {focus-area}."
@@ -127,7 +127,7 @@ Proceed directly to Step 4 (Synthesize) after receiving the analyst's report.
 
 1. `TeamDelete(team_name: $TEAM_NAME)` (ignore errors), `TeamCreate(team_name: $TEAM_NAME)`. If TeamCreate fails, tell user Agent Teams is required and stop.
 2. **Team health check**: After spawning experts, verify team state by checking that all experts are reachable. If any expert is unreachable, delete the team and retry TeamCreate once. If retry fails, abort and tell user Agent Teams is unavailable.
-3. Spawn experts in parallel as teammates using the Task tool with `team_name: $TEAM_NAME`:
+3. Spawn experts in parallel as teammates using the Task tool with `team_name: $TEAM_NAME` and `model: "sonnet"` (experts require Read/Grep for skill files and historical artifacts):
 
 **Protocol Analyst** — evaluates clarity, completeness, flow gaps:
 - "Question every step that lacks explicit success/failure handling. Assume agents will take the most literal interpretation of ambiguous instructions. Trace through 2 representative execution scenarios looking for where agents could deviate."
@@ -211,7 +211,7 @@ Verification specs are property-based tests workers must satisfy. They codify ex
 
 **When to generate**: Goal has 2+ roles with testable properties AND expert artifacts contain verificationProperties AND stack supports tests (context.testCommand/buildCommand exists). Skip for trivial goals or sparse properties.
 
-**Authorship**: Simple goals (1-3 roles) → lead writes from expert verificationProperties. Complex goals (4+ roles) → spawn spec-writer Task agent with `subagent_type: "general-purpose"` that reads expert artifacts + actual codebase, writes specs in `.design/specs/{role-name}.{ext}` using project's test framework or shell scripts, returns created paths.
+**Authorship**: Simple goals (1-3 roles) → lead writes from expert verificationProperties. Complex goals (4+ roles) → spawn spec-writer Task agent with `Task(subagent_type: "general-purpose", model: "sonnet")` that reads expert artifacts + actual codebase, writes specs in `.design/specs/{role-name}.{ext}` using project's test framework or shell scripts, returns created paths.
 
 **Spec generation**:
 1. Read expert verificationProperties from all `.design/expert-*.json` files
