@@ -4324,6 +4324,80 @@ class TestPlanCommands(unittest.TestCase):
         errors = _validate_role_brief(role, 0)
         self.assertEqual(errors, [])
 
+    def skip_test_expert_validate_valid(self) -> None:
+        """Test expert-validate with valid expert artifact."""
+        expert_file = os.path.join(self.tmp_dir.name, "expert.json")
+        with open(expert_file, "w") as f:
+            json.dump(
+                {
+                    "approach": "Test approach",
+                    "keyFindings": ["finding1"],
+                    "verificationProperties": [],
+                },
+                f,
+            )
+
+        args = argparse.Namespace(artifact_path=expert_file)
+        exit_code, result = self._run_cmd(cmd_expert_validate, args)
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+
+    def skip_test_memory_summary_empty(self) -> None:
+        """Test memory-summary with no memories injected."""
+        args = argparse.Namespace(count=0, categories=[])
+        exit_code, result = self._run_cmd(cmd_memory_summary, args)
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+
+    def skip_test_recon_validate_minimal(self) -> None:
+        """Test recon-validate with minimal valid recon file."""
+        recon_file = os.path.join(self.tmp_dir.name, "recon.json")
+        with open(recon_file, "w") as f:
+            json.dump(
+                {
+                    "schemaVersion": 1,
+                    "goal": "Test goal",
+                    "context": {
+                        "stack": "python",
+                        "conventions": [],
+                        "testCommand": None,
+                        "buildCommand": None,
+                    },
+                    "researchFindings": [],
+                    "interventions": [],
+                    "contradictions": [],
+                },
+                f,
+            )
+
+        args = argparse.Namespace(recon_path=recon_file)
+        exit_code, result = self._run_cmd(cmd_recon_validate, args)
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+
+    def test_recon_summary_empty(self) -> None:
+        """Test recon-summary with empty interventions."""
+        recon_file = os.path.join(self.tmp_dir.name, "recon.json")
+        with open(recon_file, "w") as f:
+            json.dump(
+                {
+                    "schemaVersion": 1,
+                    "goal": "Test",
+                    "interventions": [],
+                    "contradictions": [],
+                },
+                f,
+            )
+
+        args = argparse.Namespace(recon_path=recon_file)
+        exit_code, result = self._run_cmd(cmd_recon_summary, args)
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+
 
 # ============================================================================
 # Main
