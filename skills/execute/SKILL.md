@@ -39,7 +39,7 @@ TEAM_NAME = $(python3 $PLAN_CLI team-name execute).teamName
 
 1. Validate: `python3 $PLAN_CLI status .design/plan.json`. On failure: `not_found` = "No plan found. Run `/do:design <goal>` first." and stop; `bad_schema` = unsupported schema, stop; `empty_roles` = no roles, stop.
 2. Resume detection: If `isResume`: run `python3 $PLAN_CLI resume-reset .design/plan.json`. If `noWorkRemaining`: "All roles already resolved." and stop.
-3. Create team: `TeamDelete(team_name: $TEAM_NAME)` (ignore errors), then `TeamCreate(team_name: $TEAM_NAME)`. If TeamCreate fails, tell user Agent Teams is required and stop.
+3. Create team: `TeamDelete(team_name: $TEAM_NAME)` (ignore errors), then `TeamCreate(team_name: $TEAM_NAME)`. If TeamCreate fails, tell user Agent Teams is required and stop. Health check: verify team state via `ls ~/.claude/teams/$TEAM_NAME/config.json`. If missing, delete and retry: `TeamDelete(team_name: $TEAM_NAME)`, `TeamCreate(team_name: $TEAM_NAME)`. If retry fails, abort with error message.
 4. Create TaskList: `python3 $PLAN_CLI tasklist-data .design/plan.json`. For each role: `TaskCreate` with subject `"Role {roleIndex}: {name} — {goal}"`, record returned ID in `roleIdMapping`. Wire `blockedBy` via `TaskUpdate(addBlockedBy)`. If resuming, mark completed roles. Add overlap constraints: `python3 $PLAN_CLI overlap-matrix .design/plan.json` — for each pair `(i, j)` where `j > i` and directories overlap: `TaskUpdate(taskId: roleIdMapping[j], addBlockedBy: [roleIdMapping[i]])`.
 5. **Worker pool**: Run `python3 $PLAN_CLI worker-pool .design/plan.json` to get workers (one per role).
 6. Summary: `python3 $PLAN_CLI summary .design/plan.json`. Store `goal`, `roleCount`, `maxDepth`.
@@ -70,7 +70,7 @@ Warn if git is dirty. If resuming: "Resuming execution."
 ```bash
 python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "{role.goal}" --stack "{context.stack}" --keywords "{role.scope.directories + role.name}"
 ```
-Parse JSON output. Take top 2-3 `memories[]` per role. Log injected memories: output "Memory: {role.name} ← {count} memories ({keywords})".
+Parse JSON output. If `ok: false` or no memories found, proceed without memory injection. Otherwise, take top 2-3 `memories[]` per role. Log injected memories: output "Memory: {role.name} ← {count} memories ({keywords})".
 
 Spawn workers as teammates using the Task tool. Each worker prompt MUST include:
 
@@ -212,9 +212,7 @@ Wait for curator completion. On failure: proceed (memory curation is optional).
 
 5. Archive: If all completed, move artifacts to history:
    ```bash
-   ARCHIVE_DIR=".design/history/$(date -u +%Y%m%dT%H%M%SZ)"
-   mkdir -p "$ARCHIVE_DIR"
-   find .design -mindepth 1 -maxdepth 1 ! -name history ! -name memory.jsonl ! -name reflection.jsonl ! -name handoff.md -exec mv {} "$ARCHIVE_DIR/" \;
+   python3 $PLAN_CLI archive .design
    ```
    If partial (failures remain): leave artifacts in `.design/` for resume.
 6. Cleanup: `TeamDelete(team_name: $TEAM_NAME)`.
