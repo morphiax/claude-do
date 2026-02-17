@@ -69,54 +69,128 @@ All script calls: `python3 $PLAN_CLI <command> [args]` via Bash. Output is JSON 
 
 ### 2. Pattern Analysis
 
-**Announce to user**: "Analyzing {count} reflections{skill filter if any}. Spawning analyst."
+**Announce to user**: "Analyzing {count} reflections{skill filter if any}. Running direct analysis."
 
-Spawn a single analyst via `Task(subagent_type: "general-purpose")`:
+Perform analysis directly via Bash commands — no Task agent. This eliminates hallucination risk from agents that may fail to read files.
 
-**Analyst prompt** includes:
+#### 2a. Gather data
 
-- "Read `.design/reflection.jsonl` — each line is a JSON object with: `skill`, `goal`, `outcome`, `goalAchieved`, `evaluation` (containing `whatWorked`, `whatFailed`, `doNextTime`, and skill-specific fields), `timestamp`."
-- "Read `.design/memory.jsonl` (if exists) — cross-reference with existing learnings to avoid duplicate findings."
-- "Read the SKILL.md files for the relevant skills: `skills/design/SKILL.md`, `skills/execute/SKILL.md`, `skills/improve/SKILL.md`. Understand what each skill is supposed to do."
-- If `handoff.md` exists: "Read `.design/handoff.md` for additional context from the most recent run."
+1. **Reflections** (already loaded in Step 1.3):
+   ```bash
+   python3 $PLAN_CLI reflection-search .design/reflection.jsonl --skill {filter} --limit 20
+   ```
+   Store the JSON output as `$REFLECTIONS`.
 
-**Analysis tasks** (structured output required):
+2. **Existing memories** (already loaded in Step 1.6):
+   Use the memory-search output from pre-flight. Store as `$MEMORIES`.
 
-1. **Goal achievement**: What percentage of runs achieved their goal? Break down by skill.
-2. **Recurring failures**: Group `whatFailed` items across runs. Items appearing in >=2 runs are patterns, not incidents. For each pattern: which skill, what fails, how often, severity.
-3. **Unaddressed feedback**: Compare `doNextTime` items against subsequent reflections. Did the improvement happen? Flag items that appear in `doNextTime` but recur in later `whatFailed`.
-4. **Trend analysis**: Are outcomes improving or degrading over time? Any skill getting worse?
-5. **Root cause mapping**: For each recurring failure pattern, trace to the specific SKILL.md section that governs that behavior. Quote the relevant instruction. Explain why the current instruction produces the observed failure.
-6. **Improvement hypotheses**: For each root cause, propose a specific change to the SKILL.md with:
-   - `skillFile`: which SKILL.md to modify
-   - `section`: which section/step to change
-   - `currentBehavior`: what the instruction currently produces (from reflection evidence)
-   - `proposedChange`: what to change and why
-   - `predictedEffect`: what should improve (be specific and testable)
-   - `evidence`: which reflection entries support this (by ID or timestamp)
-   - `confidence`: high (>=3 reflections show pattern) | medium (2 reflections) | low (1 reflection but strong signal)
+3. **Handoff context** (if exists):
+   ```bash
+   test -f .design/handoff.md && cat .design/handoff.md
+   ```
 
-"Save findings to `.design/expert-reflection-analyst.json` with structure:
-```json
-{
-  "reflectionsAnalyzed": N,
-  "skillFilter": "all|design|execute|improve",
-  "goalAchievementRate": {"overall": 0.X, "bySkill": {"design": 0.X, ...}},
-  "recurringFailures": [{"pattern": "...", "skill": "...", "occurrences": N, "severity": "high|medium|low", "reflectionIds": ["..."]}],
-  "unaddressedFeedback": [{"item": "...", "firstSeen": "timestamp", "stillRecurring": true}],
-  "trends": {"overall": "improving|stable|degrading", "bySkill": {}},
-  "hypotheses": [{"skillFile": "...", "section": "...", "currentBehavior": "...", "proposedChange": "...", "predictedEffect": "...", "evidence": ["..."], "confidence": "high|medium|low"}],
-  "summary": "..."
+#### 2b. Compute analysis metrics
+
+Run a single `python3 -c` script via Bash that reads the reflection-search JSON output and computes all analysis metrics. Pass `$REFLECTIONS` via stdin or as a file argument.
+
+```bash
+python3 -c "
+import json, sys, collections
+
+reflections = json.loads('''$REFLECTIONS''')['entries']
+N = len(reflections)
+
+# 1. Goal achievement by skill
+by_skill = collections.defaultdict(lambda: {'total':0,'achieved':0})
+for r in reflections:
+    s = r.get('skill','unknown')
+    by_skill[s]['total'] += 1
+    if r.get('goalAchieved'): by_skill[s]['achieved'] += 1
+overall = sum(v['achieved'] for v in by_skill.values()) / max(N,1)
+achievement = {s: v['achieved']/max(v['total'],1) for s,v in by_skill.items()}
+
+# 2. Recurring failures (items in whatFailed appearing >=2 times)
+fail_counts = collections.Counter()
+fail_skills = collections.defaultdict(set)
+fail_ids = collections.defaultdict(list)
+for r in reflections:
+    ev = r.get('evaluation',{})
+    for item in ev.get('whatFailed',[]):
+        fail_counts[item] += 1
+        fail_skills[item].add(r.get('skill','unknown'))
+        fail_ids[item].append(r.get('id',''))
+recurring = [{'pattern':p,'skill':list(fail_skills[p]),'occurrences':c,'reflectionIds':fail_ids[p]}
+             for p,c in fail_counts.items() if c >= 2]
+
+# 3. Unaddressed feedback (doNextTime items that recur in later whatFailed)
+all_do = set()
+all_fail = set()
+for r in reflections:
+    ev = r.get('evaluation',{})
+    all_do.update(ev.get('doNextTime',[]))
+    all_fail.update(ev.get('whatFailed',[]))
+unaddressed = [{'item':d,'stillRecurring':True} for d in all_do if d in all_fail]
+
+# 4. Trend (compare first half vs second half goal achievement)
+half = N // 2
+first = reflections[:half] if half > 0 else []
+second = reflections[half:] if half > 0 else reflections
+r1 = sum(1 for r in first if r.get('goalAchieved')) / max(len(first),1)
+r2 = sum(1 for r in second if r.get('goalAchieved')) / max(len(second),1)
+trend = 'improving' if r2 > r1 + 0.1 else ('degrading' if r1 > r2 + 0.1 else 'stable')
+
+result = {
+    'reflectionsAnalyzed': N,
+    'goalAchievementRate': {'overall': round(overall,2), 'bySkill': {s:round(v,2) for s,v in achievement.items()}},
+    'recurringFailures': recurring,
+    'unaddressedFeedback': unaddressed,
+    'trends': {'overall': trend, 'bySkill': {s: 'stable' for s in achievement}},
 }
+json.dump(result, sys.stdout, indent=2)
+"
 ```
-Return a summary."
+
+Store the output as `$METRICS`.
+
+#### 2c. Generate hypotheses
+
+For each recurring failure pattern in `$METRICS`, the lead formulates improvement hypotheses. This is the lead's analytical work — use the recurring failures, unaddressed feedback, and trends to identify root causes and propose changes.
+
+For each recurring failure, determine:
+- `skillFile`: which SKILL.md likely governs the behavior (map skill name to `skills/{skill}/SKILL.md`)
+- `section`: which section/step to change (infer from the failure pattern description)
+- `currentBehavior`: what the instruction currently produces (from reflection evidence)
+- `proposedChange`: what to change and why
+- `predictedEffect`: what should improve (be specific and testable)
+- `evidence`: which reflection entry IDs support this
+- `confidence`: high (>=3 reflections show pattern) | medium (2 reflections) | low (1 strong signal)
+
+#### 2d. Write analyst artifact
+
+Write the complete analysis to `.design/expert-reflection-analyst.json` via Bash (`python3 -c` or `cat > file`):
+
+```bash
+python3 -c "
+import json
+metrics = json.loads('''$METRICS''')
+hypotheses = [...]  # constructed by lead from analysis above
+metrics['hypotheses'] = hypotheses
+metrics['summary'] = '...'
+metrics['skillFilter'] = '{filter or all}'
+with open('.design/expert-reflection-analyst.json', 'w') as f:
+    json.dump(metrics, f, indent=2)
+print(json.dumps({'ok': True}))
+"
+```
+
+Verify the artifact was created: `ls .design/expert-reflection-analyst.json`. If missing, re-run the write command. If still missing after retry, abort with clear error to user.
 
 ### 3. Synthesize into Improvement Plan
 
-After the analyst reports:
+After Step 2 completes:
 
-1. **Verify artifact**: `ls .design/expert-reflection-analyst.json`. If missing, retry Task once with the same prompt. If still missing after retry, abort with clear error message to user: "Analyst failed to produce findings after retry. Cannot proceed."
-2. Read the analyst's findings.
+1. **Verify artifact**: `ls .design/expert-reflection-analyst.json`. If missing, the write in Step 2d failed — re-run it. If still missing after retry, abort with clear error to user: "Analysis artifact missing after retry. Cannot proceed."
+2. Read the analyst's findings (already in `$METRICS` + hypotheses from Step 2c-2d).
 3. **Prioritize hypotheses**: Rank by `confidence * severity`. High-confidence, high-severity patterns first.
 4. Present top findings to user:
 
