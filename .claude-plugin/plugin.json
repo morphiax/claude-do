@@ -1,6 +1,6 @@
 {
   "name": "do",
-  "version": "2.9.0",
+  "version": "2.10.1",
   "description": "Structured planning, dependency-graph execution, and scientific skill improvement for Claude Code — /do:design, /do:execute, and /do:improve",
   "author": {
     "name": "morphiax",

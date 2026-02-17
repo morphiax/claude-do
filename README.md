@@ -3,7 +3,7 @@
 > Multi-agent planning with structured debate, self-verifying execution, and cross-session memory
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Version](https://img.shields.io/badge/version-2.9.0-green.svg)
+![Version](https://img.shields.io/badge/version-2.10.1-green.svg)
 ![Claude Code](https://img.shields.io/badge/Claude%20Code-2.1.32%2B-orange.svg)
 
 ## What's Novel
@@ -18,9 +18,13 @@
 
 **Importance-scored memory** — Cross-session learnings rated 1-10, retrieved with keyword matching + recency decay + importance weighting (`score = keyword_match * recency_factor * importance/10`).
 
-**Scout auxiliaries** — Pre-execution agents read the actual codebase to verify expert assumptions match reality (when the goal touches code).
+**Scout auxiliaries** — Pre-execution agents read the actual codebase to verify expert assumptions match reality. High-impact discrepancies are injected as role constraints before worker spawning.
 
 **Execution reflections** — Skills self-evaluate after every run, storing structured assessments in episodic memory. `/do:reflect` analyzes these to identify recurring failures and generate evidence-based improvements (inspired by Reflexion and GEPA research).
+
+**Acceptance criteria validation** — Design-time syntax validation catches broken `python3 -c` checks before execution. Lead-side verification re-runs every criterion before marking roles complete (trust-but-verify). Surface-only checks (grep, file-existence) are flagged as anti-patterns.
+
+**Automated self-test suite** — `plan.py self-test` exercises all 25 commands against synthetic fixtures in a temp directory, enabling CI-style validation of the helper script.
 
 ## Usage
 

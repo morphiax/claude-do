@@ -1041,6 +1041,31 @@ def _compute_spec_checksums(plan: dict[str, Any]) -> None:
                 continue
 
 
+def _validate_check_commands(plan: dict[str, Any]) -> list[str]:
+    """Validate acceptance criteria check commands. Returns list of warnings."""
+    warnings = []
+    roles = plan.get("roles", [])
+
+    for role_idx, role in enumerate(roles):
+        role_name = role.get("name", f"role-{role_idx}")
+        criteria = role.get("acceptanceCriteria", [])
+
+        for crit_idx, criterion_obj in enumerate(criteria):
+            check = criterion_obj.get("check", "")
+            if not check:
+                warnings.append(
+                    f"{role_name} criterion {crit_idx}: empty check command"
+                )
+                continue
+
+            # Validate Python checks
+            valid, error = _validate_python_check(check)
+            if not valid:
+                warnings.append(f"{role_name} criterion {crit_idx}: {error}")
+
+    return warnings
+
+
 def cmd_finalize(args: argparse.Namespace) -> NoReturn:
     """Validate role brief structure and compute directory overlaps."""
     plan_path = args.plan_path
@@ -1061,6 +1086,9 @@ def cmd_finalize(args: argparse.Namespace) -> NoReturn:
     # Step 2.5: Compute SHA256 checksums for verification specs (if present)
     _compute_spec_checksums(plan)
 
+    # Step 2.6: Validate acceptance criteria check commands (non-blocking warning)
+    check_warnings = _validate_check_commands(plan)
+
     # Step 3: Initialize role statuses
     for role in plan.get("roles", []):
         if "status" not in role:
@@ -1077,15 +1105,154 @@ def cmd_finalize(args: argparse.Namespace) -> NoReturn:
     # Single atomic write
     atomic_write(plan_path, plan)
 
-    output_json(
-        {
-            "ok": True,
-            "validated": True,
-            "computedOverlaps": computed,
-            "roleCount": len(plan.get("roles", [])),
-            "auxiliaryCount": len(plan.get("auxiliaryRoles", [])),
-        }
-    )
+    result = {
+        "ok": True,
+        "validated": True,
+        "computedOverlaps": computed,
+        "roleCount": len(plan.get("roles", [])),
+        "auxiliaryCount": len(plan.get("auxiliaryRoles", [])),
+    }
+    if check_warnings:
+        result["checkWarnings"] = check_warnings
+
+    output_json(result)
+
+
+# ============================================================================
+# Validate Checks Command
+# ============================================================================
+
+
+def _find_closing_quote(check: str, start_pos: int, quote_char: str) -> int:
+    """Find matching closing quote. Returns index or -1 if not found."""
+    end_pos = start_pos + 1
+    if quote_char == "'":
+        # Single quotes: find next single quote
+        while end_pos < len(check):
+            if check[end_pos] == "'":
+                return end_pos
+            end_pos += 1
+    else:
+        # Double quotes: find next unescaped double quote
+        while end_pos < len(check):
+            if check[end_pos] == "\\" and end_pos + 1 < len(check):
+                end_pos += 2  # Skip escaped character
+                continue
+            if check[end_pos] == '"':
+                return end_pos
+            end_pos += 1
+    return -1
+
+
+def _extract_python_from_check(check: str) -> str | None:
+    """Extract Python code from 'python3 -c ...' command.
+
+    Returns the Python string if found, None otherwise.
+    Simple heuristic: find 'python3 -c ' then extract until matching quote.
+    """
+    if "python3 -c" not in check:
+        return None
+
+    # Find the -c flag position
+    c_flag_pos = check.find("-c")
+    if c_flag_pos == -1:
+        return None
+
+    # Skip past '-c ' to find the quote
+    start_pos = c_flag_pos + 2
+    while start_pos < len(check) and check[start_pos] in (" ", "\t"):
+        start_pos += 1
+
+    if start_pos >= len(check):
+        return None
+
+    # Detect quote type
+    quote_char = check[start_pos]
+    if quote_char not in ("'", '"'):
+        return None
+
+    # Find matching closing quote
+    end_pos = _find_closing_quote(check, start_pos, quote_char)
+    if end_pos == -1:
+        return None
+
+    return check[start_pos + 1 : end_pos]
+
+
+def _validate_python_check(check: str) -> tuple[bool, str | None]:
+    """Validate Python inline check syntax.
+
+    Returns (valid, error_message).
+    """
+    python_code = _extract_python_from_check(check)
+    if python_code is None:
+        return (True, None)  # Not a Python check, skip validation
+
+    try:
+        compile(python_code, "<check>", "exec")
+        return (True, None)
+    except SyntaxError as e:
+        return (False, f"SyntaxError: {e.msg} at line {e.lineno}")
+    except Exception as e:  # noqa: BLE001
+        return (False, f"Compilation error: {e}")
+
+
+def cmd_validate_checks(args: argparse.Namespace) -> NoReturn:
+    """Validate acceptance criteria check commands.
+
+    Extracts each acceptanceCriteria[].check, detects Python inline checks
+    (python3 -c '...'), validates their syntax with compile(), and reports
+    errors per role/criterion.
+
+    JSON output: {ok: true/false, results: [{roleIndex, roleName, criterionIndex,
+                 criterion, valid, error}]}
+    """
+    plan_path = args.plan_path
+    plan = load_plan(plan_path)
+
+    roles = plan.get("roles", [])
+    results = []
+    all_valid = True
+
+    for role_idx, role in enumerate(roles):
+        role_name = role.get("name", f"role-{role_idx}")
+        criteria = role.get("acceptanceCriteria", [])
+
+        for crit_idx, criterion_obj in enumerate(criteria):
+            criterion = criterion_obj.get("criterion", "")
+            check = criterion_obj.get("check", "")
+
+            if not check:
+                # Empty check is invalid
+                results.append(
+                    {
+                        "roleIndex": role_idx,
+                        "roleName": role_name,
+                        "criterionIndex": crit_idx,
+                        "criterion": criterion,
+                        "valid": False,
+                        "error": "Empty check command",
+                    }
+                )
+                all_valid = False
+                continue
+
+            # Validate Python checks
+            valid, error = _validate_python_check(check)
+            results.append(
+                {
+                    "roleIndex": role_idx,
+                    "roleName": role_name,
+                    "criterionIndex": crit_idx,
+                    "criterion": criterion,
+                    "valid": valid,
+                    "error": error,
+                }
+            )
+            if not valid:
+                all_valid = False
+
+    output_json({"ok": all_valid, "results": results})
 
 
 # ============================================================================
@@ -2229,6 +2396,18 @@ def cmd_self_test(args: argparse.Namespace) -> NoReturn:
             ),
             ("reflection-validate", lambda: _test_reflection_validate(script_path)),
             (
+                "validate-checks (valid)",
+                lambda: _test_validate_checks_valid(
+                    script_path, fixtures["minimal_plan"]
+                ),
+            ),
+            (
+                "validate-checks (invalid)",
+                lambda: _test_validate_checks_invalid(
+                    script_path, fixtures["bad_check_plan"]
+                ),
+            ),
+            (
                 "expert-validate",
                 lambda: _test_expert_validate(script_path, fixtures["expert_artifact"]),
             ),
@@ -2529,12 +2708,48 @@ def _create_fixtures(tmp_dir: str) -> dict[str, str]:
     # Add persistent files that should NOT be archived
     shutil.copy(memory_file_path, os.path.join(archive_dir, "memory.jsonl"))
 
+    # Plan with bad Python check syntax
+    bad_check_plan = {
+        "schemaVersion": 4,
+        "goal": "Test bad checks",
+        "context": {"stack": "python"},
+        "expertArtifacts": [],
+        "designDecisions": [],
+        "verificationSpecs": [],
+        "roles": [
+            {
+                "name": "bad-role",
+                "goal": "Test",
+                "model": "sonnet",
+                "scope": {"directories": [], "patterns": [], "dependencies": []},
+                "constraints": [],
+                "acceptanceCriteria": [
+                    {
+                        "criterion": "Broken Python",
+                        "check": 'python3 -c "print(f\'bad {d["x"]}\')"',
+                    }
+                ],
+                "assumptions": [],
+                "rollbackTriggers": [],
+                "expertContext": [],
+                "fallback": None,
+            }
+        ],
+        "auxiliaryRoles": [],
+        "progress": {"completedRoles": []},
+    }
+
+    bad_check_plan_path = os.path.join(tmp_dir, "bad_check_plan.json")
+    with open(bad_check_plan_path, "w") as f:
+        json.dump(bad_check_plan, f)
+
     return {
         "minimal_plan": minimal_plan_path,
         "failed_plan": failed_plan_path,
         "in_progress_plan": in_progress_plan_path,
         "unfin_plan": unfin_plan_path,
         "modified_plan": modified_plan_path,
+        "bad_check_plan": bad_check_plan_path,
         "memory_file": memory_file_path,
         "reflection_file": reflection_file_path,
         "expert_artifact": expert_artifact_path,
@@ -2785,6 +3000,25 @@ def _test_reflection_validate(script_path: str) -> None:
     assert output.get("ok") is False, "reflection-validate should reject invalid input"
 
 
+def _test_validate_checks_valid(script_path: str, plan_path: str) -> None:
+    """Test validate-checks command with valid plan."""
+    output = _run_command(script_path, ["validate-checks", plan_path])
+    assert output.get("ok") is True, f"validate-checks failed on valid plan: {output}"
+    assert "results" in output, "validate-checks missing results field"
+
+
+def _test_validate_checks_invalid(script_path: str, plan_path: str) -> None:
+    """Test validate-checks command with invalid Python syntax."""
+    output = _run_command(script_path, ["validate-checks", plan_path])
+    assert output.get("ok") is False, (
+        "validate-checks should fail on plan with bad syntax"
+    )
+    assert "results" in output, "validate-checks missing results field"
+    # Should find at least one invalid check
+    invalid_checks = [r for r in output["results"] if not r.get("valid")]
+    assert len(invalid_checks) > 0, "Should detect at least one invalid check"
+
+
 def _test_expert_validate(script_path: str, artifact_path: str) -> None:
     """Test expert-validate command."""
     output = _run_command(script_path, ["expert-validate", artifact_path])
@@ -3001,6 +3235,12 @@ def main() -> None:
     p.set_defaults(func=cmd_reflection_search)
 
     # Validation commands
+    p = subparsers.add_parser(
+        "validate-checks", help="Validate acceptance criteria check commands"
+    )
+    p.add_argument("plan_path", nargs="?", default=".design/plan.json")
+    p.set_defaults(func=cmd_validate_checks)
+
     p = subparsers.add_parser(
         "expert-validate", help="Validate expert artifact JSON schema"
     )
