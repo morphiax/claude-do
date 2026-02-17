@@ -1313,6 +1313,64 @@ def cmd_reflection_search(args: argparse.Namespace) -> NoReturn:
 
 
 # ============================================================================
+# Archive Command
+# ============================================================================
+
+
+def cmd_archive(args: argparse.Namespace) -> NoReturn:
+    """Archive .design/ directory to history/{timestamp}/.
+
+    Preserves persistent files: memory.jsonl, reflection.jsonl, handoff.md, history/
+    Moves all other files to .design/history/{UTC timestamp}/
+    """
+    design_dir = args.design_dir.rstrip("/")
+
+    # Check if design directory exists
+    if not os.path.exists(design_dir):
+        output_json({"ok": True, "message": "nothing to archive"})
+
+    if not os.path.isdir(design_dir):
+        error_exit(f"{design_dir} is not a directory")
+
+    # Create timestamp for archive directory
+    timestamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    history_dir = os.path.join(design_dir, "history")
+    archive_dir = os.path.join(history_dir, timestamp)
+
+    # Persistent files to preserve (not archive)
+    persistent = {"memory.jsonl", "reflection.jsonl", "handoff.md", "history"}
+
+    # List all items in design directory
+    try:
+        items = os.listdir(design_dir)
+    except OSError as e:
+        error_exit(f"Error reading {design_dir}: {e}")
+
+    # Filter out persistent files
+    to_archive = [item for item in items if item not in persistent]
+
+    if not to_archive:
+        output_json({"ok": True, "message": "nothing to archive"})
+
+    # Create archive directory
+    try:
+        os.makedirs(archive_dir, exist_ok=True)
+    except OSError as e:
+        error_exit(f"Error creating archive directory: {e}")
+
+    # Move files to archive
+    try:
+        for item in to_archive:
+            src = os.path.join(design_dir, item)
+            dst = os.path.join(archive_dir, item)
+            os.rename(src, dst)
+    except OSError as e:
+        error_exit(f"Error archiving files: {e}")
+
+    output_json({"ok": True, "archivedTo": archive_dir})
+
+
+# ============================================================================
 # Main
 # ============================================================================
 
@@ -1422,6 +1480,12 @@ def main() -> None:
     p.add_argument("--skill", type=str, help="Filter by skill name")
     p.add_argument("--limit", type=int, default=5, help="Max results to return")
     p.set_defaults(func=cmd_reflection_search)
+
+    p = subparsers.add_parser(
+        "archive", help="Archive .design/ to history/{timestamp}/"
+    )
+    p.add_argument("design_dir", help="Design directory to archive (e.g., .design)")
+    p.set_defaults(func=cmd_archive)
 
     # Build commands
     p = subparsers.add_parser(
