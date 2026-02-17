@@ -12,7 +12,9 @@ Analyze `.design/reflection.jsonl` to identify what's actually working and what 
 
 **Do NOT use `EnterPlanMode`** — this skill IS the plan.
 
-**Lead boundaries**: Use only `TaskCreate`, `TaskUpdate`, `TaskList`, `Task`, `AskUserQuestion`, and `Bash` (cleanup, verification, `python3 $PLAN_CLI` only). Project metadata (CLAUDE.md, package.json, README) allowed. Application source code prohibited — analysts read source files. The lead orchestrates — agents think.
+**Lead boundaries**: Use only `TaskCreate`, `TaskUpdate`, `TaskList`, `Task`, `AskUserQuestion`, and `Bash` (cleanup, verification, `python3 $PLAN_CLI` only). Project metadata (CLAUDE.md, package.json, README) allowed. Never use Read, Grep, Glob, Edit, Write on application source code. Never use WebFetch or WebSearch. The lead orchestrates — analysts read source files.
+
+**No polling**: Messages auto-deliver. Never use sleep, loops, or Bash waits.
 
 **Output contract**: Reflect ALWAYS produces `.design/plan.json` (schemaVersion 4) for `/do:execute`. Reflect never writes skill source files directly.
 
@@ -70,7 +72,7 @@ All script calls: `python3 $PLAN_CLI <command> [args]` via Bash. Output is JSON 
      find .design -mindepth 1 -maxdepth 1 ! -name history ! -name memory.jsonl ! -name reflection.jsonl ! -name handoff.md -exec mv {} "$ARCHIVE_DIR/" \;
    fi
    ```
-5. **Load context**: Read `.design/memory.jsonl` via `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "reflect on skill performance" --keywords "failure,pattern,improvement"` for relevant past learnings.
+5. **Load context**: Read `.design/memory.jsonl` via `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "reflect on skill performance" --keywords "failure,pattern,improvement"` for relevant past learnings. If `ok: false` or no memories returned, proceed without memory injection.
 
 ### 2. Pattern Analysis
 
@@ -118,7 +120,7 @@ Return a summary."
 
 After the analyst reports:
 
-1. Verify artifact: `ls .design/expert-reflection-analyst.json`. If missing, ask analyst to save.
+1. **Verify artifact**: `ls .design/expert-reflection-analyst.json`. If missing, retry Task once with the same prompt. If still missing after retry, abort with clear error message to user: "Analyst failed to produce findings after retry. Cannot proceed."
 2. Read the analyst's findings.
 3. **Prioritize hypotheses**: Rank by `confidence * severity`. High-confidence, high-severity patterns first.
 4. Present top findings to user:
