@@ -111,7 +111,7 @@ Create the team and spawn experts in parallel.
    - Use Task with `team_name: $TEAM_NAME` and `name: "{expert-name}"`.
    - Write prompts appropriate to the goal and each expert's focus area. Ask them to score relevant dimensions and trace scenarios.
    - **Behavioral traits**: Include behavioral instructions — tell experts HOW to think, not WHO to be. Examples: "Question assumptions that feel obvious", "Reject solutions that add complexity without clear benefit", "Focus on failure modes before success paths", "Assume prior art exists — search before inventing." Tailor traits to the expert's focus (e.g., architect: "Prefer composable patterns over monolithic solutions"; security specialist: "Assume every input is hostile until validated").
-   - Every expert prompt MUST end with: "In your findings JSON, include a `verificationProperties` section: an array of properties that should hold regardless of implementation (behavioral invariants, boundary conditions, cross-role contracts). Format: `[{\"property\": \"...\", \"category\": \"invariant|boundary|integration\", \"testableVia\": \"how to test this with concrete commands/endpoints\"}]`. Provide concrete, externally observable properties that can be tested without reading source code."
+   - Every expert prompt MUST end with: "In your findings JSON, include a `verificationProperties` section: an array of properties that should hold regardless of implementation (behavioral invariants, boundary conditions, cross-role contracts). Format: `[{\"property\": \"...\", \"category\": \"invariant|boundary|integration\", \"testableVia\": \"how to test this with concrete commands/endpoints\"}]`. Provide concrete, externally observable properties that can be tested without reading source code. When suggesting testableVia commands, avoid anti-patterns: grep-only checks (verifies text exists, not that feature works), `test -f` as sole check (file exists but may contain errors), `wc -l` counts (size not correctness), `|| echo` or `|| true` fallbacks (always exits 0), pipe chains without exit-code handling (may mask failures)."
    - Instruct: "Save your complete findings to `.design/expert-{name}.json` as structured JSON."
    - Instruct: "Then SendMessage to the lead with a summary."
 
@@ -182,7 +182,7 @@ The lead collects expert findings and writes the plan.
    - `grep -q "pattern" file` — anti-pattern: verifies text exists, not that feature works
    - `test -f output.json` — anti-pattern: file exists but may contain errors
    - `wc -l file` — anti-pattern: verifies size, not correctness
-   - `cmd || echo "fallback"` — anti-pattern: always exits 0, masks failures completely
+   - `cmd || echo "fallback"` or `cmd || true` — anti-pattern: always exits 0, masks failures completely
    - `cmd 2>&1 | tail -N` — anti-pattern: pipe may mask exit code unless `set -o pipefail` is used
 
 7. Add `auxiliaryRoles[]` (see Auxiliary Roles section).
