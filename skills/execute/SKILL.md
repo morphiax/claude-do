@@ -51,9 +51,9 @@ Check `auxiliaryRoles[]` in plan.json for `type: "pre-execution"` roles. Run the
 
 Auxiliaries are standalone Task tool calls (no `team_name`) — they don't need team coordination. The Task tool returns their result directly. Do not use `SendMessage` or `TaskOutput` for auxiliaries.
 
-**Challenger**: Spawn via `Task(subagent_type: "general-purpose")`. Prompt includes: "Read `.design/plan.json` and all `.design/expert-*.json` artifacts. Challenge assumptions, find gaps, identify risks. Save findings to `.design/challenger-report.json` with this structure: `{\"issues\": [{\"category\": \"scope-gap|overlap|invalid-assumption|missing-dependency|criteria-gap|constraint-conflict\", \"severity\": \"blocking|high-risk|low-risk\", \"description\": \"...\", \"affectedRoles\": [...], \"recommendation\": \"...\"}], \"summary\": \"...\"}`. Return a summary with count of blocking/high-risk/low-risk issues found." **Blocking issues are mandatory gates**: for each blocking issue, the lead MUST either (a) modify plan.json to address it (update acceptance criteria, add constraints, adjust scope), or (b) ask the user whether to accept the risk. Do not proceed to worker spawning with unresolved blocking issues. High-risk issues should be noted as additional constraints on affected roles.
+**Challenger**: Spawn via `Task(subagent_type: "general-purpose")`. Prompt includes: "Assume the plan is wrong until proven right. Question every assumption — especially ones that feel obvious. Prioritize finding problems over confirming correctness. Read `.design/plan.json` and all `.design/expert-*.json` artifacts. Challenge assumptions, find gaps, identify risks. Save findings to `.design/challenger-report.json` with this structure: `{\"issues\": [{\"category\": \"scope-gap|overlap|invalid-assumption|missing-dependency|criteria-gap|constraint-conflict\", \"severity\": \"blocking|high-risk|low-risk\", \"description\": \"...\", \"affectedRoles\": [...], \"recommendation\": \"...\"}], \"summary\": \"...\"}`. Return a summary with count of blocking/high-risk/low-risk issues found." **Blocking issues are mandatory gates**: for each blocking issue, the lead MUST either (a) modify plan.json to address it (update acceptance criteria, add constraints, adjust scope), or (b) ask the user whether to accept the risk. Do not proceed to worker spawning with unresolved blocking issues. High-risk issues should be noted as additional constraints on affected roles.
 
-**Scout**: Spawn via `Task(subagent_type: "general-purpose")`. Prompt includes: "Read actual codebase in scope directories from plan.json roles. Map patterns, conventions, integration points. **Verify that referenced dependencies actually resolve**: check that HTML classes have corresponding CSS definitions, imports point to existing modules, type references exist, API endpoints match route definitions, etc. Flag any orphaned references (classes, imports, types used but never defined) as discrepancies — especially layout-critical ones (display, positioning, sizing, visibility). Flag discrepancies with expert assumptions. **If plan.json contains verificationSpecs[]**: verify each spec file exists at its path and that the runCommand references valid tools/paths (e.g., 'bun test' requires bun, paths in commands must exist). Check if spec file is executable for shell scripts. Save report to `.design/scout-report.json` with this structure: `{\"scopeAreas\": [{\"directory\": \"...\", \"affectedRoles\": [...], \"actualStructure\": {\"files\": [...], \"patterns\": [...], \"conventions\": [...]}, \"expertAssumptions\": [{\"expert\": \"...\", \"assumption\": \"...\", \"verified\": true|false, \"actualReality\": \"...\"}], \"integrationPoints\": [{\"type\": \"import|export|shared-type\", \"description\": \"...\"}]}], \"verificationSpecs\": [{\"role\": \"...\", \"path\": \"...\", \"exists\": true|false, \"runCommandValid\": true|false, \"issues\": \"...\"}] (if applicable), \"discrepancies\": [{\"area\": \"...\", \"expected\": \"...\", \"actual\": \"...\", \"impact\": \"high|medium|low\", \"recommendation\": \"...\"}], \"summary\": \"...\"}`. Return a summary with count of discrepancies found." If discrepancies found, update role briefs in plan.json or note for workers.
+**Scout**: Spawn via `Task(subagent_type: "general-purpose")`. Prompt includes: "Verify everything — assume expert assumptions are stale until confirmed by actual code. Focus on what exists in the codebase right now, not what should exist. Read actual codebase in scope directories from plan.json roles. Map patterns, conventions, integration points. **Verify that referenced dependencies actually resolve**: check that HTML classes have corresponding CSS definitions, imports point to existing modules, type references exist, API endpoints match route definitions, etc. Flag any orphaned references (classes, imports, types used but never defined) as discrepancies — especially layout-critical ones (display, positioning, sizing, visibility). Flag discrepancies with expert assumptions. **If plan.json contains verificationSpecs[]**: verify each spec file exists at its path and that the runCommand references valid tools/paths (e.g., 'bun test' requires bun, paths in commands must exist). Check if spec file is executable for shell scripts. Save report to `.design/scout-report.json` with this structure: `{\"scopeAreas\": [{\"directory\": \"...\", \"affectedRoles\": [...], \"actualStructure\": {\"files\": [...], \"patterns\": [...], \"conventions\": [...]}, \"expertAssumptions\": [{\"expert\": \"...\", \"assumption\": \"...\", \"verified\": true|false, \"actualReality\": \"...\"}], \"integrationPoints\": [{\"type\": \"import|export|shared-type\", \"description\": \"...\"}]}], \"verificationSpecs\": [{\"role\": \"...\", \"path\": \"...\", \"exists\": true|false, \"runCommandValid\": true|false, \"issues\": \"...\"}] (if applicable), \"discrepancies\": [{\"area\": \"...\", \"expected\": \"...\", \"actual\": \"...\", \"impact\": \"high|medium|low\", \"recommendation\": \"...\"}], \"summary\": \"...\"}`. Return a summary with count of discrepancies found." If discrepancies found, update role briefs in plan.json or note for workers.
 
 ### 3. Report and Spawn Workers
 
@@ -74,22 +74,31 @@ If `ok: false` or no memories → proceed without injection. Otherwise take top 
 
 Spawn workers as teammates using the Task tool. Each worker prompt MUST include:
 
+**Role-specific context** (customize per worker):
+
 1. **Identity**: "You are a specialist: {role.name}. Your goal: {role.goal}"
 2. **Brief location**: "Read your full role brief from `.design/plan.json` at `roles[{roleIndex}]`."
 3. **Expert context**: "Read these expert artifacts for context: {expertContext entries with artifact paths and relevance notes}." If a scout report exists: "Also read `.design/scout-report.json` for codebase reality check."
 4. **Past learnings** (if memories found): "Relevant past learnings: {bullet list of memories with format: '- {category}: {summary} (from {created})'}"
 5. **Process**: "Explore your scope directories ({scope.directories}). Plan your own approach based on what you find in the actual codebase. Implement, test, verify against your acceptance criteria."
-6. **Task discovery**: "Check TaskList for your pending unblocked task. Claim by setting status to in_progress."
-7. **Constraints**: "{constraints from role brief}"
-8. **Done when**: "{acceptanceCriteria from role brief}"
-9. **Pre-completion verification (MANDATORY)**: "Before reporting done, you MUST run every acceptance criterion's `check` command as a separate shell invocation. This is non-negotiable — do not skip any check, do not assume one passing check implies another passes. For EACH criterion: (a) run the exact shell command from the `check` field, (b) capture its exit code and output, (c) record pass/fail with the actual output as evidence. If ANY check fails, you are NOT done — fix the issue and re-run ALL checks. Do not report completion until every check command exits 0. Common mistake: assuming 'tests pass' means 'build succeeds' — these are independent checks."
-10. **Verification specs** (if applicable): "Check plan.json verificationSpecs[] for an entry with your role name. If found, run the spec via its runCommand AFTER all acceptance criteria pass: `{runCommand from verificationSpecs entry}`. Spec files in `.design/specs/` are IMMUTABLE — if the spec fails, fix your implementation code, never modify the spec file. Specs test broad behavioral properties. Spec failures are blocking — do not report completion until the spec passes."
-11. **Committing**: "git add specific files + git commit with conventional commit message (feat:/fix:/refactor: etc). Never git add -A."
-12. **Completion reporting**: "When done, SendMessage to lead with this JSON structure: `{\"role\": \"{name}\", \"achieved\": true, \"filesChanged\": [\"path1\", \"path2\"], \"acceptanceCriteria\": [{\"criterion\": \"...\", \"passed\": true|false, \"evidence\": \"exit code and output\"}]}`."
-13. **Tool boundaries**: "You may use Read, Grep, Glob, Edit, Write, Bash (for tests/build/git), LSP. Do NOT use WebFetch, WebSearch, MCP tools, or Task (no sub-spawning)."
-14. **Failure handling**: "If you cannot complete your goal, SendMessage to lead with: role name, what failed, why, what you tried, suggested alternative. If rollback triggers fire ({rollbackTriggers}), stop immediately and report."
-15. **Fallback**: If role has a fallback: "If your primary approach fails: {fallback}"
-16. **Scope boundaries**: "Stay within your scope directories. Do not modify files outside your scope unless absolutely necessary for integration."
+6. **Constraints**: "Constraints from role brief — read them from plan.json roles[{roleIndex}].constraints."
+7. **Done when**: "Done when — read acceptance criteria from plan.json roles[{roleIndex}].acceptanceCriteria."
+8. **Fallback**: If role has a fallback: "If your primary approach fails: {fallback}"
+
+**Pre-completion verification (MANDATORY)**: "Before reporting done, you MUST run every acceptance criterion's `check` command as a separate shell invocation. This is non-negotiable — do not skip any check, do not assume one passing check implies another passes. For EACH criterion: (a) run the exact shell command from the `check` field, (b) capture its exit code and output, (c) record pass/fail with the actual output as evidence. If ANY check fails, you are NOT done — fix the issue and re-run ALL checks. Do not report completion until every check command exits 0."
+
+**Verification specs** (if applicable): "Check plan.json verificationSpecs[] for an entry with your role name. If found, run the spec via its runCommand AFTER all acceptance criteria pass. Spec files in `.design/specs/` are IMMUTABLE — fix code, never modify specs. Spec failures are blocking."
+
+**Universal worker rules** (include verbatim in every worker prompt):
+
+| Rule | Instruction |
+|---|---|
+| Task discovery | Check TaskList for your pending unblocked task. Claim by setting status to in_progress. |
+| Committing | git add specific files + git commit with conventional commit message (feat:/fix:/refactor: etc). Never git add -A. |
+| Completion reporting | When done, SendMessage to lead with this JSON structure: `{"role": "{name}", "achieved": true, "filesChanged": ["path1", "path2"], "acceptanceCriteria": [{"criterion": "...", "passed": true\|false, "evidence": "exit code and output"}]}`. |
+| Tool boundaries | You may use Read, Grep, Glob, Edit, Write, Bash (for tests/build/git), LSP. Do NOT use WebFetch, WebSearch, MCP tools, or Task (no sub-spawning). |
+| Failure handling | If you cannot complete your goal, SendMessage to lead with: role name, what failed, why, what you tried, suggested alternative. If rollback triggers fire ({rollbackTriggers}), stop immediately and report. |
+| Scope boundaries | Stay within your scope directories. Do not modify files outside your scope unless absolutely necessary for integration. |
 
 ```
 Task(subagent_type: "general-purpose", team_name: $TEAM_NAME, name: "{worker-name}", model: "{model}", prompt: <role-specific prompt with all above>)
@@ -137,7 +146,8 @@ Check `auxiliaryRoles[]` for `type: "post-execution"` roles. **Progress update**
 
 Post-execution auxiliaries are standalone Task tool calls (no `team_name`), same as pre-execution auxiliaries.
 
-**Integration Verifier**: Spawn via `Task(subagent_type: "general-purpose")`. Prompt includes:
+**Integration Verifier** (integration-verifier): Spawn via `Task(subagent_type: "general-purpose")`. Prompt includes:
+- "Reject assumptions — verify everything by running actual commands. Skip nothing; report only what you can prove with evidence. If you cannot test something, say so explicitly rather than guessing."
 - "Verify all completed roles' work integrates correctly."
 - Completed roles: subjects, files changed (from worker reports)
 - Test command from `plan.json context.testCommand`
@@ -185,6 +195,7 @@ If gaps are found: spawn a targeted worker to address them.
 4. **Memory curation** — Spawn memory-curator via `Task(subagent_type: "general-purpose")`:
 
 Prompt includes:
+- "Reject aggressively — only store what a future engineer would find surprising and useful. If in doubt, reject. Prioritize unexpected findings over routine successes. Two high-quality entries are worth more than ten mediocre ones."
 - "Read all artifacts: `.design/handoff.md`, `.design/plan.json` (all roles including completed, failed, skipped, in_progress, pending — read result field for each), `.design/reflection.jsonl` (most recent entry — the self-evaluation for this run), `.design/challenger-report.json` (if exists), `.design/scout-report.json` (if exists), `.design/integration-verifier-report.json` (if exists)."
 - "Read existing memories: `.design/memory.jsonl` (if exists). Note what is already recorded to avoid duplicates."
 - "The reflection entry contains the lead's honest self-evaluation of what worked and what didn't. Use it as a primary signal for what to record — reflections that identify surprising failures or unexpected successes are high-value memory candidates."

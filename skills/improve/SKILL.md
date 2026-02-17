@@ -34,12 +34,7 @@ The 7 dimensions used to evaluate skill quality. Experts score each 1-5 with evi
 | **Prompt Economy** | Minimal tokens for maximum behavioral effect. | Tables over prose, structured templates, term reuse |
 | **Verifiability** | Can behavior be validated? Are outputs checkable? | Structured outputs, validation commands, audit trails |
 
-Scoring rubric (per dimension):
-- **5**: Exemplary — no gaps, could serve as a reference implementation
-- **4**: Strong — minor improvements possible, no behavioral risk
-- **3**: Adequate — works but has identifiable gaps or ambiguities
-- **2**: Weak — likely to cause agent deviation or failure in some scenarios
-- **1**: Missing/broken — dimension not addressed or fundamentally flawed
+Scoring anchors: **5** = exemplary, no gaps, reference-quality | **3** = adequate, works but has identifiable gaps | **1** = missing or broken, causes agent deviation
 
 ---
 
@@ -116,7 +111,7 @@ Spawn a single analyst via `Task(subagent_type: "general-purpose")`:
 Prompt includes:
 - "Analyze `.design/skill-snapshot.md` for this specific improvement area: {focus-area}."
 - "Read the actual skill at `{skill-path}` and the project architecture in `CLAUDE.md`."
-- "Score the relevant quality dimensions (1-5) using the rubric from this protocol."
+- "Score the relevant dimensions (1-5) using the scoring anchors from this protocol."
 - If historical evidence exists: "Read past execution artifacts at {paths} for evidence of actual behavior."
 - If no historical evidence: "Perform behavioral simulation: trace through 2 representative scenarios step-by-step. Flag where agent behavior might diverge from intent. **Note: this is lower-confidence than execution evidence.**"
 - "For each finding, form a **testable hypothesis**: what to change, predicted behavioral impact, and how to verify."
@@ -134,14 +129,17 @@ Proceed directly to Step 4 (Synthesize) after receiving the analyst's report.
 3. Spawn experts in parallel as teammates using the Task tool with `team_name: $TEAM_NAME`:
 
 **Protocol Analyst** — evaluates clarity, completeness, flow gaps:
+- "Question every step that lacks explicit success/failure handling. Assume agents will take the most literal interpretation of ambiguous instructions. Trace through 2 representative execution scenarios looking for where agents could deviate."
 - "Read `.design/skill-snapshot.md`. Score Protocol Clarity, Error Handling, and Verifiability (1-5 each with evidence)."
-- "Trace through 2 representative execution scenarios. Identify ambiguous steps, missing error paths, unverifiable outcomes."
+- "Identify ambiguous steps, missing error paths, unverifiable outcomes."
 
 **Prompt Engineer** — evaluates instruction density, constraint enforcement, economy:
+- "Reject any instruction that adds tokens without changing behavior. Focus on finding dead rules that can never trigger and constraints that are stated but unenforceable."
 - "Read `.design/skill-snapshot.md`. Score Constraint Enforcement, Prompt Economy, and Information Flow (1-5 each with evidence)."
-- "Identify prompt bloat (sections that can be compressed without behavioral loss), dead rules (constraints that can never trigger), and missing constraints (behaviors that should be governed but aren't)."
+- "Identify prompt bloat, dead rules, and missing constraints."
 
 **Coordination Analyst** (only for skills with multi-agent patterns) — evaluates agent coordination:
+- "Assume agents will race, deadlock, or lose messages unless the protocol explicitly prevents it. Verify every coordination point."
 - "Read `.design/skill-snapshot.md`. Score Agent Coordination (1-5 with evidence)."
 - "Analyze team lifecycle, message patterns, shared state management. Identify race conditions, deadlock risks, information silos."
 

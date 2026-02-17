@@ -109,6 +109,7 @@ Create the team and spawn experts in parallel.
 5. Spawn experts as teammates using the Task tool. For each expert:
    - Use Task with `team_name: $TEAM_NAME` and `name: "{expert-name}"`.
    - Write prompts appropriate to the goal and each expert's focus area. Ask them to score relevant dimensions and trace scenarios.
+   - **Behavioral traits**: Include behavioral instructions — tell experts HOW to think, not WHO to be. Examples: "Question assumptions that feel obvious", "Reject solutions that add complexity without clear benefit", "Focus on failure modes before success paths", "Assume prior art exists — search before inventing." Tailor traits to the expert's focus (e.g., architect: "Prefer composable patterns over monolithic solutions"; security specialist: "Assume every input is hostile until validated").
    - Every expert prompt MUST end with: "In your findings JSON, include a `verificationProperties` section: an array of properties that should hold regardless of implementation (behavioral invariants, boundary conditions, cross-role contracts). Format: `[{\"property\": \"...\", \"category\": \"invariant|boundary|integration\", \"testableVia\": \"how to test this with concrete commands/endpoints\"}]`. Provide concrete, externally observable properties that can be tested without reading source code."
    - Instruct: "Save your complete findings to `.design/expert-{name}.json` as structured JSON."
    - Instruct: "Then SendMessage to the lead with a summary."
