@@ -33,6 +33,46 @@ TEAM_NAME = $(python3 $PLAN_CLI team-name execute).teamName
 
 ---
 
+## Worker Protocol
+
+This section defines the shared worker protocol content that the lead writes to `.design/worker-protocol.md` before spawning workers. All workers reference this file instead of receiving inlined copies of these instructions.
+
+**Content for `.design/worker-protocol.md`:**
+
+````markdown
+# Worker Protocol
+
+## Pre-Completion Verification (MANDATORY)
+
+Before reporting done, you MUST run every acceptance criterion's `check` command as a separate shell invocation. This is non-negotiable — do not skip any check, do not assume one passing check implies another passes.
+
+For EACH criterion:
+1. Run the exact shell command from the `check` field
+2. Capture its exit code and output
+3. Record pass/fail with the actual output as evidence
+
+If ANY check fails, you are NOT done — fix the issue and re-run ALL checks. Do not report completion until every check command exits 0.
+
+## Verification Specs
+
+Check plan.json verificationSpecs[] for an entry with your role name. If found, run the spec via its runCommand AFTER all acceptance criteria pass.
+
+Spec files in `.design/specs/` are IMMUTABLE — fix code, never modify specs. Spec failures are blocking.
+
+## Universal Worker Rules
+
+| Rule | Instruction |
+|---|---|
+| Task discovery | Check TaskList for your pending unblocked task. Claim by setting status to in_progress. |
+| Committing | git add specific files + git commit with conventional commit message (feat:/fix:/refactor: etc). Never git add -A. |
+| Completion reporting | When done, SendMessage to lead with this JSON structure: `{"role": "{name}", "achieved": true, "filesChanged": ["path1", "path2"], "acceptanceCriteria": [{"criterion": "...", "passed": true\|false, "evidence": "exit code and output"}], "keyDecisions": ["brief decision and why"], "contextForDependents": "one paragraph summarizing what downstream roles need to know"}`. |
+| Tool boundaries | You may use Read, Grep, Glob, Edit, Write, Bash (for tests/build/git), LSP. Do NOT use WebFetch, WebSearch, MCP tools, or Task (no sub-spawning). |
+| Failure handling | If you cannot complete your goal, SendMessage to lead with: role name, what failed, why, what you tried, suggested alternative. If rollback triggers fire, stop immediately and report. |
+| Scope boundaries | Stay within your scope directories. Do not modify files outside your scope unless absolutely necessary for integration. |
+````
+
+---
+
 ## Flow
 
 ### 1. Setup
@@ -73,6 +113,8 @@ python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "{role.goal}" --stac
 ```
 If `ok: false` or no memories → proceed without injection. Otherwise take top 2-3. **Show user**: "Memory: {role.name} ← {count} learnings ({keyword summaries})."
 
+**Worker protocol setup** — Before spawning workers, write the shared worker protocol to `.design/worker-protocol.md`. Use Write tool with this exact content (see Worker Protocol section below). This file is written ONCE and referenced by all workers.
+
 Spawn workers as teammates using the Task tool. Each worker prompt MUST include:
 
 **Role-specific context** (customize per worker):
@@ -85,21 +127,7 @@ Spawn workers as teammates using the Task tool. Each worker prompt MUST include:
 6. **Constraints**: "Constraints from role brief — read them from plan.json roles[{roleIndex}].constraints."
 7. **Done when**: "Done when — read acceptance criteria from plan.json roles[{roleIndex}].acceptanceCriteria."
 8. **Fallback**: If role has a fallback: "If your primary approach fails: {fallback}"
-
-**Pre-completion verification (MANDATORY)**: "Before reporting done, you MUST run every acceptance criterion's `check` command as a separate shell invocation. This is non-negotiable — do not skip any check, do not assume one passing check implies another passes. For EACH criterion: (a) run the exact shell command from the `check` field, (b) capture its exit code and output, (c) record pass/fail with the actual output as evidence. If ANY check fails, you are NOT done — fix the issue and re-run ALL checks. Do not report completion until every check command exits 0."
-
-**Verification specs** (if applicable): "Check plan.json verificationSpecs[] for an entry with your role name. If found, run the spec via its runCommand AFTER all acceptance criteria pass. Spec files in `.design/specs/` are IMMUTABLE — fix code, never modify specs. Spec failures are blocking."
-
-**Universal worker rules** (include verbatim in every worker prompt):
-
-| Rule | Instruction |
-|---|---|
-| Task discovery | Check TaskList for your pending unblocked task. Claim by setting status to in_progress. |
-| Committing | git add specific files + git commit with conventional commit message (feat:/fix:/refactor: etc). Never git add -A. |
-| Completion reporting | When done, SendMessage to lead with this JSON structure: `{"role": "{name}", "achieved": true, "filesChanged": ["path1", "path2"], "acceptanceCriteria": [{"criterion": "...", "passed": true\|false, "evidence": "exit code and output"}], "keyDecisions": ["brief decision and why"], "contextForDependents": "one paragraph summarizing what downstream roles need to know"}`. |
-| Tool boundaries | You may use Read, Grep, Glob, Edit, Write, Bash (for tests/build/git), LSP. Do NOT use WebFetch, WebSearch, MCP tools, or Task (no sub-spawning). |
-| Failure handling | If you cannot complete your goal, SendMessage to lead with: role name, what failed, why, what you tried, suggested alternative. If rollback triggers fire ({rollbackTriggers}), stop immediately and report. |
-| Scope boundaries | Stay within your scope directories. Do not modify files outside your scope unless absolutely necessary for integration. |
+9. **Working protocol**: "Read `.design/worker-protocol.md` for your working protocol (task claiming, verification requirements, completion reporting, tool boundaries, failure handling, scope rules)."
 
 ```
 Task(subagent_type: "general-purpose", team_name: $TEAM_NAME, name: "{worker-name}", model: "{model}", prompt: <role-specific prompt with all above>)
