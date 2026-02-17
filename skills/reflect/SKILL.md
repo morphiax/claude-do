@@ -56,17 +56,20 @@ All script calls: `python3 $PLAN_CLI <command> [args]` via Bash. Output is JSON 
 
 ### 1. Pre-flight
 
-1. **Parse arguments**: Extract optional `[skill-filter]` (design|execute|improve) and `[--min-runs N]` (default 2).
-2. **Load reflections**:
+1. **Lifecycle context**: If `.design/handoff.md` exists, read it via Bash and display to user: "Previous session: {goal} — {outcome}." If `.design/memory.jsonl` exists, show: "Memory: {count} learnings stored."
+2. **Parse arguments**: Extract optional `[skill-filter]` (design|execute|improve) and `[--min-runs N]` (default 2).
+3. **Load reflections**:
    ```bash
    python3 $PLAN_CLI reflection-search .design/reflection.jsonl --skill {filter} --limit 20
    ```
    If fewer than `min-runs` entries exist, tell user: "Need at least {min-runs} reflections to identify patterns. Run more design/execute cycles first." Stop.
-3. **Check existing plan**: `python3 $PLAN_CLI status .design/plan.json`. If `ok` and `isResume`: ask user "Existing plan found. Overwrite?" If declined, stop.
-4. **Archive stale artifacts**: `python3 $PLAN_CLI archive .design`
-5. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "reflect on skill performance" --keywords "failure,pattern,improvement"`. If `ok: false` or no memories → proceed without injection. Otherwise inject top 3-5 into analyst prompt as "Relevant past learnings: {bullet list, format: '- {category}: {summary}'}."
+4. **Check existing plan**: `python3 $PLAN_CLI status .design/plan.json`. If `ok` and `isResume`: ask user "Existing plan found. Overwrite?" If declined, stop.
+5. **Archive stale artifacts**: `python3 $PLAN_CLI archive .design`
+6. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "reflect on skill performance" --keywords "failure,pattern,improvement"`. If `ok: false` or no memories → proceed without injection. Otherwise inject top 3-5 into analyst prompt. **Show user**: "Memory: injecting {count} past learnings — {keyword summaries}."
 
 ### 2. Pattern Analysis
+
+**Announce to user**: "Analyzing {count} reflections{skill filter if any}. Spawning analyst."
 
 Spawn a single analyst via `Task(subagent_type: "general-purpose")`:
 
@@ -189,18 +192,22 @@ Add to `auxiliaryRoles[]`. Challenger always runs. Regression-checker and integr
 
 1. Validate: `python3 $PLAN_CLI status .design/plan.json`. Stop if `ok: false`.
 2. Clean up TaskList (delete analysis tasks so `/do:execute` starts clean).
-3. Summary: `python3 $PLAN_CLI summary .design/plan.json`. Display:
+3. Summary: `python3 $PLAN_CLI summary .design/plan.json`. Display a rich end-of-run summary:
 
 ```
 Reflection Plan: {goal}
-Evidence: {N} reflections analyzed, {M} patterns found
-Roles: {roleCount}
+Evidence: {N} reflections analyzed ({time span}), {M} patterns found
 
-Improvements:
+Achievement trend: {overall trend indicator, e.g., "improving: 60% → 80% over last 5 runs"}
+Recurring failures: {count} patterns ({top pattern names})
+Unaddressed feedback: {count} items still recurring
+
+Improvements ({roleCount} roles):
 - Role 0: {name} — {hypothesis summary} [{confidence}]
 - Role 1: {name} — {hypothesis summary} [{confidence}]
 
 Auxiliary: {auxiliaryRoles}
+Memories applied: {count or "none"}
 
 Run /do:execute to apply improvements.
 ```

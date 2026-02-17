@@ -37,13 +37,14 @@ TEAM_NAME = $(python3 $PLAN_CLI team-name execute).teamName
 
 ### 1. Setup
 
-1. Validate: `python3 $PLAN_CLI status .design/plan.json`. On failure: `not_found` = "No plan found. Run `/do:design <goal>` first." and stop; `bad_schema` = unsupported schema, stop; `empty_roles` = no roles, stop.
-2. Resume detection: If `isResume`: run `python3 $PLAN_CLI resume-reset .design/plan.json`. If `noWorkRemaining`: "All roles already resolved." and stop.
-3. Create team: `TeamDelete(team_name: $TEAM_NAME)` (ignore errors), then `TeamCreate(team_name: $TEAM_NAME)`. If TeamCreate fails, tell user Agent Teams is required and stop. Health check: verify team state via `ls ~/.claude/teams/$TEAM_NAME/config.json`. If missing, delete and retry: `TeamDelete(team_name: $TEAM_NAME)`, `TeamCreate(team_name: $TEAM_NAME)`. If retry fails, abort with error message.
-4. Create TaskList: `python3 $PLAN_CLI tasklist-data .design/plan.json`. For each role: `TaskCreate` with subject `"Role {roleIndex}: {name} — {goal}"`, record returned ID in `roleIdMapping`. Wire `blockedBy` via `TaskUpdate(addBlockedBy)`. If resuming, mark completed roles. Add overlap constraints: `python3 $PLAN_CLI overlap-matrix .design/plan.json` — for each pair `(i, j)` where `j > i` and directories overlap: `TaskUpdate(taskId: roleIdMapping[j], addBlockedBy: [roleIdMapping[i]])`.
-5. **Worker pool**: Run `python3 $PLAN_CLI worker-pool .design/plan.json` to get workers (one per role).
-6. Summary: `python3 $PLAN_CLI summary .design/plan.json`. Store `goal`, `roleCount`, `maxDepth`.
-7. Pre-flight: Build a Bash script that checks `git status --porcelain` and runs any blocking checks.
+1. **Lifecycle context**: If `.design/handoff.md` exists, read it via Bash and display to user: "Previous session: {goal} — {outcome}. {key notes}." If `.design/reflection.jsonl` exists, show: "Past runs: {count} reflections available."
+2. Validate: `python3 $PLAN_CLI status .design/plan.json`. On failure: `not_found` = "No plan found. Run `/do:design <goal>` first." and stop; `bad_schema` = unsupported schema, stop; `empty_roles` = no roles, stop.
+3. Resume detection: If `isResume`: run `python3 $PLAN_CLI resume-reset .design/plan.json`. If `noWorkRemaining`: "All roles already resolved." and stop.
+4. Create team: `TeamDelete(team_name: $TEAM_NAME)` (ignore errors), then `TeamCreate(team_name: $TEAM_NAME)`. If TeamCreate fails, tell user Agent Teams is required and stop. Health check: verify team state via `ls ~/.claude/teams/$TEAM_NAME/config.json`. If missing, delete and retry: `TeamDelete(team_name: $TEAM_NAME)`, `TeamCreate(team_name: $TEAM_NAME)`. If retry fails, abort with error message.
+5. Create TaskList: `python3 $PLAN_CLI tasklist-data .design/plan.json`. For each role: `TaskCreate` with subject `"Role {roleIndex}: {name} — {goal}"`, record returned ID in `roleIdMapping`. Wire `blockedBy` via `TaskUpdate(addBlockedBy)`. If resuming, mark completed roles. Add overlap constraints: `python3 $PLAN_CLI overlap-matrix .design/plan.json` — for each pair `(i, j)` where `j > i` and directories overlap: `TaskUpdate(taskId: roleIdMapping[j], addBlockedBy: [roleIdMapping[i]])`.
+6. **Worker pool**: Run `python3 $PLAN_CLI worker-pool .design/plan.json` to get workers (one per role).
+7. Summary: `python3 $PLAN_CLI summary .design/plan.json`. Store `goal`, `roleCount`, `maxDepth`.
+8. Pre-flight: Build a Bash script that checks `git status --porcelain` and runs any blocking checks.
 
 ### 2. Pre-Execution Auxiliaries
 
@@ -51,9 +52,9 @@ Check `auxiliaryRoles[]` in plan.json for `type: "pre-execution"` roles. Run the
 
 Auxiliaries are standalone Task tool calls (no `team_name`) — they don't need team coordination. The Task tool returns their result directly. Do not use `SendMessage` or `TaskOutput` for auxiliaries.
 
-**Challenger**: Spawn via `Task(subagent_type: "general-purpose")`. Prompt includes: "Assume the plan is wrong until proven right. Question every assumption — especially ones that feel obvious. Prioritize finding problems over confirming correctness. Read `.design/plan.json` and all `.design/expert-*.json` artifacts. Challenge assumptions, find gaps, identify risks. Save findings to `.design/challenger-report.json` with this structure: `{\"issues\": [{\"category\": \"scope-gap|overlap|invalid-assumption|missing-dependency|criteria-gap|constraint-conflict\", \"severity\": \"blocking|high-risk|low-risk\", \"description\": \"...\", \"affectedRoles\": [...], \"recommendation\": \"...\"}], \"summary\": \"...\"}`. Return a summary with count of blocking/high-risk/low-risk issues found." **Blocking issues are mandatory gates**: for each blocking issue, the lead MUST either (a) modify plan.json to address it (update acceptance criteria, add constraints, adjust scope), or (b) ask the user whether to accept the risk. Do not proceed to worker spawning with unresolved blocking issues. High-risk issues should be noted as additional constraints on affected roles.
+**Challenger**: Spawn via `Task(subagent_type: "general-purpose")`. Prompt includes: "Assume the plan is wrong until proven right. Question every assumption — especially ones that feel obvious. Prioritize finding problems over confirming correctness. Read `.design/plan.json` and all `.design/expert-*.json` artifacts. Challenge assumptions, find gaps, identify risks. Save findings to `.design/challenger-report.json` with this structure: `{\"issues\": [{\"category\": \"scope-gap|overlap|invalid-assumption|missing-dependency|criteria-gap|constraint-conflict\", \"severity\": \"blocking|high-risk|low-risk\", \"description\": \"...\", \"affectedRoles\": [...], \"recommendation\": \"...\"}], \"summary\": \"...\"}`. Return a summary with count of blocking/high-risk/low-risk issues found." **Blocking issues are mandatory gates**: for each blocking issue, the lead MUST either (a) modify plan.json to address it (update acceptance criteria, add constraints, adjust scope), or (b) ask the user whether to accept the risk. Do not proceed to worker spawning with unresolved blocking issues. High-risk issues should be noted as additional constraints on affected roles. **Show user**: "Challenger: {blocking count} blocking, {high-risk count} high-risk, {low-risk count} low-risk issues." Display each blocking issue description.
 
-**Scout**: Spawn via `Task(subagent_type: "general-purpose")`. Prompt includes: "Verify everything — assume expert assumptions are stale until confirmed by actual code. Focus on what exists in the codebase right now, not what should exist. Read actual codebase in scope directories from plan.json roles. Map patterns, conventions, integration points. **Verify that referenced dependencies actually resolve**: check that HTML classes have corresponding CSS definitions, imports point to existing modules, type references exist, API endpoints match route definitions, etc. Flag any orphaned references (classes, imports, types used but never defined) as discrepancies — especially layout-critical ones (display, positioning, sizing, visibility). Flag discrepancies with expert assumptions. **If plan.json contains verificationSpecs[]**: verify each spec file exists at its path and that the runCommand references valid tools/paths (e.g., 'bun test' requires bun, paths in commands must exist). Check if spec file is executable for shell scripts. Save report to `.design/scout-report.json` with this structure: `{\"scopeAreas\": [{\"directory\": \"...\", \"affectedRoles\": [...], \"actualStructure\": {\"files\": [...], \"patterns\": [...], \"conventions\": [...]}, \"expertAssumptions\": [{\"expert\": \"...\", \"assumption\": \"...\", \"verified\": true|false, \"actualReality\": \"...\"}], \"integrationPoints\": [{\"type\": \"import|export|shared-type\", \"description\": \"...\"}]}], \"verificationSpecs\": [{\"role\": \"...\", \"path\": \"...\", \"exists\": true|false, \"runCommandValid\": true|false, \"issues\": \"...\"}] (if applicable), \"discrepancies\": [{\"area\": \"...\", \"expected\": \"...\", \"actual\": \"...\", \"impact\": \"high|medium|low\", \"recommendation\": \"...\"}], \"summary\": \"...\"}`. Return a summary with count of discrepancies found." If discrepancies found, update role briefs in plan.json or note for workers.
+**Scout**: Spawn via `Task(subagent_type: "general-purpose")`. Prompt includes: "Verify everything — assume expert assumptions are stale until confirmed by actual code. Focus on what exists in the codebase right now, not what should exist. Read actual codebase in scope directories from plan.json roles. Map patterns, conventions, integration points. **Verify that referenced dependencies actually resolve**: check that HTML classes have corresponding CSS definitions, imports point to existing modules, type references exist, API endpoints match route definitions, etc. Flag any orphaned references (classes, imports, types used but never defined) as discrepancies — especially layout-critical ones (display, positioning, sizing, visibility). Flag discrepancies with expert assumptions. **If plan.json contains verificationSpecs[]**: verify each spec file exists at its path and that the runCommand references valid tools/paths (e.g., 'bun test' requires bun, paths in commands must exist). Check if spec file is executable for shell scripts. Save report to `.design/scout-report.json` with this structure: `{\"scopeAreas\": [{\"directory\": \"...\", \"affectedRoles\": [...], \"actualStructure\": {\"files\": [...], \"patterns\": [...], \"conventions\": [...]}, \"expertAssumptions\": [{\"expert\": \"...\", \"assumption\": \"...\", \"verified\": true|false, \"actualReality\": \"...\"}], \"integrationPoints\": [{\"type\": \"import|export|shared-type\", \"description\": \"...\"}]}], \"verificationSpecs\": [{\"role\": \"...\", \"path\": \"...\", \"exists\": true|false, \"runCommandValid\": true|false, \"issues\": \"...\"}] (if applicable), \"discrepancies\": [{\"area\": \"...\", \"expected\": \"...\", \"actual\": \"...\", \"impact\": \"high|medium|low\", \"recommendation\": \"...\"}], \"summary\": \"...\"}`. Return a summary with count of discrepancies found." **Show user**: "Scout: {discrepancy count} discrepancies found." Display high-impact discrepancies. If discrepancies found, update role briefs in plan.json or note for workers.
 
 ### 3. Report and Spawn Workers
 
@@ -70,7 +71,7 @@ Warn if git is dirty. If resuming: "Resuming execution."
 ```bash
 python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "{role.goal}" --stack "{context.stack}" --keywords "{role.scope.directories + role.name}"
 ```
-If `ok: false` or no memories → proceed without injection. Otherwise take top 2-3, log "Memory: {role.name} ← {count} memories."
+If `ok: false` or no memories → proceed without injection. Otherwise take top 2-3. **Show user**: "Memory: {role.name} ← {count} learnings ({keyword summaries})."
 
 Spawn workers as teammates using the Task tool. Each worker prompt MUST include:
 
@@ -174,7 +175,23 @@ If gaps are found: spawn a targeted worker to address them.
 
 ### 7. Complete
 
-1. Summary: `python3 $PLAN_CLI status .design/plan.json`. Display completed/failed/blocked/skipped counts with names. Recommend follow-ups for failures.
+1. Summary: `python3 $PLAN_CLI status .design/plan.json`. Display a rich end-of-run summary:
+
+```
+Execution Complete: {goal}
+Result: {goal achieved? yes/partial/no}
+
+Roles: {completed}/{total} completed, {failed} failed, {skipped} skipped
+{for each completed role: "  ✓ {name} — {one-line result}"}
+{for each failed role: "  ✗ {name} — {failure reason}"}
+
+Files Changed: {deduplicated list from worker reports, grouped by role}
+Acceptance Results: {per-role: criterion → pass/fail}
+Integration: {PASS|FAIL|SKIPPED — with details}
+
+{if failures: "Recommended: /do:execute to retry failed roles, or /do:design to redesign."}
+{if all passed: "Run /do:reflect to analyze patterns across runs."}
+```
 2. **Session handoff** — Write `.design/handoff.md` with sections: goal + date, completed roles (name + one-line result), failed roles (name + reason), integration status (PASS/FAIL/SKIPPED), decisions (deviations/retries/workarounds), files changed (deduplicated list), known gaps (missing coverage/TODOs/skipped roles), next steps (concrete actions).
 
 3. **Self-reflection** — Evaluate this run against the goal. Write a structured reflection entry:
@@ -219,7 +236,7 @@ Prompt includes:
 Task(subagent_type: "general-purpose", team_name: $TEAM_NAME, name: "memory-curator", model: "haiku", prompt: <above>)
 ```
 
-Wait for curator completion. On failure: proceed (memory curation is optional).
+Wait for curator completion. **Show user**: "Memory curation: {count} learnings stored, {rejected} rejected." On failure: proceed (memory curation is optional).
 
 5. Archive: If all completed, move artifacts to history:
    ```bash

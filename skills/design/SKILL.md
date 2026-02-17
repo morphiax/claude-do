@@ -50,10 +50,11 @@ TEAM_NAME = $(python3 $PLAN_CLI team-name design).teamName
 
 ### 1. Pre-flight
 
-1. **Check for ambiguity**: If the goal has multiple valid interpretations per the Clarification Protocol, use `AskUserQuestion` before proceeding.
-2. If >5 roles likely needed, suggest phases. Design only phase 1.
-3. Check existing plan: `python3 $PLAN_CLI status .design/plan.json`. If `ok` and `isResume`: ask user "Existing plan has {counts} roles. Overwrite?" If declined, stop.
-4. Archive stale artifacts: `python3 $PLAN_CLI archive .design`
+1. **Lifecycle context**: If `.design/handoff.md` exists, read it via Bash and display a brief summary to user: "Previous session: {goal} — {outcome}. {key notes}." If `.design/reflection.jsonl` exists, show: "Past runs: {count} reflections available."
+2. **Check for ambiguity**: If the goal has multiple valid interpretations per the Clarification Protocol, use `AskUserQuestion` before proceeding.
+3. If >5 roles likely needed, suggest phases. Design only phase 1.
+4. Check existing plan: `python3 $PLAN_CLI status .design/plan.json`. If `ok` and `isResume`: ask user "Existing plan has {counts} roles. Overwrite?" If declined, stop.
+5. Archive stale artifacts: `python3 $PLAN_CLI archive .design`
 
 ### 2. Lead Research
 
@@ -71,7 +72,7 @@ The lead directly assesses the goal to determine needed perspectives.
 | High-stakes (production, security, data) | 3-8 |
 
 4. Select auxiliary roles. Challenger and integration-verifier always run. Scout runs when the goal touches code (implementation, refactoring, bug fixes — not pure docs/research/config).
-5. Report the planned team composition and auxiliaries to the user.
+5. **Announce to user**: Display planned team composition, complexity tier, and auxiliaries: "Design: {complexity tier}, spawning {N} experts ({names}). Auxiliaries: {list}."
 
 **Expert Selection**
 
@@ -104,7 +105,7 @@ Create the team and spawn experts in parallel.
 
 1. `TeamDelete(team_name: $TEAM_NAME)` (ignore errors), `TeamCreate(team_name: $TEAM_NAME)`. If TeamCreate fails, tell user Agent Teams is required and stop. If TeamDelete succeeds, a previous session's team was cleaned up.
 2. **TeamCreate health check**: Verify team is reachable. If verification fails, `TeamDelete`, then retry `TeamCreate` once. If retry fails, abort with clear error message.
-3. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "{goal}" --stack "{stack}"`. If `ok: false` or no memories → proceed without injection. Otherwise inject top 3-5 into expert prompts as "Relevant past learnings: {bullet list, format: '- {category}: {summary}'}."
+3. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "{goal}" --stack "{stack}"`. If `ok: false` or no memories → proceed without injection. Otherwise inject top 3-5 into expert prompts. **Show user**: "Memory: injecting {count} past learnings — {keyword summaries}."
 4. `TaskCreate` for each expert.
 5. Spawn experts as teammates using the Task tool. For each expert:
    - Use Task with `team_name: $TEAM_NAME` and `name: "{expert-name}"`.
@@ -115,9 +116,9 @@ Create the team and spawn experts in parallel.
    - Instruct: "Then SendMessage to the lead with a summary."
 
    Expert artifacts flow directly to execution workers — they are structured JSON with sections that can be referenced selectively.
-6. **Expert liveness pipeline**: After spawning N experts, track completion. Mark each expert complete when: (a) SendMessage received AND (b) artifact file exists (`ls .design/expert-{name}.json`). Proceed when all complete.
+6. **Expert liveness pipeline**: After spawning N experts, track completion. Mark each expert complete when: (a) SendMessage received AND (b) artifact file exists (`ls .design/expert-{name}.json`). **Show user status as experts complete**: "Expert progress: {name} done ({M}/{N} complete)." Proceed when all complete.
    - **Turn-based timeout**: Expert not complete after 2 turns → send: "Status check — artifact expected at `.design/expert-{name}.json`. Report completion or blockers."
-   - **Re-spawn ceiling**: No completion 1 turn after ping → re-spawn with same prompt (max 2 re-spawn attempts per expert).
+   - **Re-spawn ceiling**: No completion 1 turn after ping → re-spawn with same prompt (max 2 re-spawn attempts per expert). **Show user**: "Re-spawning {name} (timeout)."
    - **Proceed with available**: After 2 re-spawn attempts → log failure, proceed with responsive experts' artifacts.
    - **Never write artifacts yourself** — lead interpretation ≠ specialist analysis.
 
@@ -133,7 +134,7 @@ Expert coordination prevents **integration failures** (domains don't fit togethe
 | **B: Perspective reconciliation** | >=2 experts analyzed same domain from different angles, OR >=3 experts in complex/high-stakes tier | Resolve conflicting recommendations about the same thing |
 | **C: Cross-domain challenge** | Complex/high-stakes tier with >=3 experts | Catch cross-domain assumptions neither A nor B would surface |
 
-**Decision matrix**: If condition matches → phase is **mandatory**. If <2 experts or trivial tier → skip all phases.
+**Decision matrix**: If condition matches → phase is **mandatory**. If <2 experts or trivial tier → skip all phases. **Announce to user** which phases will run: "Cross-review: running {phases} — {brief reason}."
 
 #### Phase Execution Pattern
 
@@ -162,10 +163,12 @@ All phases follow: **maximum 2 rounds** of negotiation per conflict. If no conve
 
 ### 4. Synthesize into Role Briefs
 
+**Announce to user**: "Synthesizing expert findings into role briefs."
+
 The lead collects expert findings and writes the plan.
 
 1. Collect all expert findings (messages and `.design/expert-*.json` files).
-2. **Resolve conflicts from cross-review** (if debate occurred): For each challenge, evaluate trade-offs and decide. Document resolution in plan.json under `designDecisions[]` (schema: {conflict, experts, decision, reasoning}).
+2. **Resolve conflicts from cross-review** (if debate occurred): For each challenge, evaluate trade-offs and decide. Document resolution in plan.json under `designDecisions[]` (schema: {conflict, experts, decision, reasoning}). **Show user each decision**: "Decision: {conflict} → {chosen approach} ({one-line reasoning})."
 2b. **Incorporate interface contracts**: If `.design/interfaces.json` was produced in Step 3.5, add each interface as a constraint on the relevant producer and consumer roles. Interface contracts are binding — workers must implement the agreed interface shape.
 3. Identify the specialist roles needed to execute this goal:
    - Each role scopes a **coherent problem domain** for one worker
@@ -176,6 +179,15 @@ The lead collects expert findings and writes the plan.
 6. Write criteria-based `acceptanceCriteria` — define WHAT should work, not WHICH files should exist. Workers verify against criteria, not file lists. **Every criterion MUST have a `check` that is a concrete, independently runnable shell command** (e.g., `"bun run build 2>&1 | tail -5"`, `"bun test --run 2>&1 | tail -10"`). Never leave checks as prose descriptions — workers execute these literally. If a role touches compiled code, include BOTH a build check AND a test check as separate criteria. **Checks must verify functional correctness, not just pattern existence.** A grep confirming a CSS rule exists is insufficient — the check must verify the rule actually takes effect (e.g., start a dev server and curl the page, or verify that referenced classes/imports resolve to definitions). At least one criterion per role should test end-to-end behavior, not just file contents.
 7. Add `auxiliaryRoles[]` (see Auxiliary Roles section).
 8. Write to `.design/plan.json` (do NOT run finalize yet — that happens in Step 4.5).
+9. **Draft plan review** (complex/high-stakes tier only): Display the draft plan to the user before finalization:
+   ```
+   Draft Plan ({roleCount} roles):
+   - Role 0: {name} — {goal one-line} [{model}]
+   - Role 1: {name} — {goal one-line} [{model}] [after: {dependencies}]
+   ...
+   Design decisions: {count}
+   ```
+   This is non-blocking — continue to finalization. If the user objects, adjust before finalizing. For trivial/standard tiers, skip this review.
 
 ### 4.5. Generate Verification Specs (OPTIONAL)
 
@@ -284,21 +296,26 @@ Add auxiliary roles to `auxiliaryRoles[]` in plan.json. Challenger and integrati
 1. Validate: `python3 $PLAN_CLI status .design/plan.json`. Stop if `ok: false`.
 2. Shut down teammates, delete team.
 3. Clean up TaskList (delete all planning tasks so `/do:execute` starts clean).
-4. Summary: `python3 $PLAN_CLI summary .design/plan.json`. Display:
+4. Summary: `python3 $PLAN_CLI summary .design/plan.json`. Display a rich end-of-run summary:
 
 ```
-Plan: {goal}
-Roles: {roleCount}, max depth {maxDepth}
-Auxiliary: {auxiliaryRoles}
+Design Complete: {goal}
 
-Depth 1:
-- Role 0: {name} ({model})
+Roles ({roleCount}, max depth {maxDepth}):
+  Depth 1:
+  - Role 0: {name} ({model}) — {goal one-line}
+  Depth 2:
+  - Role 2: {name} ({model}) [after: role-a] — {goal one-line}
 
-Depth 2:
-- Role 2: {name} ({model}) [after: role-a, role-b]
+Design Decisions:
+- {conflict} → {decision} ({one-line reasoning})
 
-Context: {stack}
-Test: {testCommand}
+Expert Highlights:
+- {expert-name}: {key finding one-liner}
+
+Verification: {spec count if any, acceptance criteria count per role}
+Context: {stack}, Test: {testCommand}
+Memories applied: {count or "none"}
 
 Run /do:execute to begin.
 ```

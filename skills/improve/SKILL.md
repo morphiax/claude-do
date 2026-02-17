@@ -67,19 +67,20 @@ TEAM_NAME = $(python3 $PLAN_CLI team-name improve).teamName
 
 ### 1. Pre-flight
 
-1. **Parse arguments**: Extract `<skill-path>` and optional `[focus-area]` from `$ARGUMENTS`.
+1. **Lifecycle context**: If `.design/handoff.md` exists, read it via Bash and display to user: "Previous session: {goal} — {outcome}." If `.design/reflection.jsonl` exists, show: "Past runs: {count} reflections available."
+2. **Parse arguments**: Extract `<skill-path>` and optional `[focus-area]` from `$ARGUMENTS`.
    - If `skill-path` is a name (e.g., `design`), resolve to `skills/{name}/SKILL.md`.
    - If no path provided, ask user which skill to analyze.
-2. **Validate target**: Confirm the SKILL.md file exists via Bash (`test -f {skill-path}`). If not found, report and stop.
-3. **Snapshot**: Copy target SKILL.md to `.design/skill-snapshot.md` via Bash. This is the baseline for regression comparison.
-4. **Circular improvement detection**: Check `.design/history/` for recent improve runs targeting the same skill:
+3. **Validate target**: Confirm the SKILL.md file exists via Bash (`test -f {skill-path}`). If not found, report and stop.
+4. **Snapshot**: Copy target SKILL.md to `.design/skill-snapshot.md` via Bash. This is the baseline for regression comparison.
+5. **Circular improvement detection**: Check `.design/history/` for recent improve runs targeting the same skill:
    ```bash
    ls .design/history/*/skill-snapshot.md 2>/dev/null | head -5
    ```
    If found, warn user: "Previous improvement runs detected. Review history to avoid circular changes."
-5. **Check existing plan**: `python3 $PLAN_CLI status .design/plan.json`. If `ok` and `isResume`: ask user "Existing plan found. Overwrite?" If declined, stop.
-6. **Archive stale artifacts**: `python3 $PLAN_CLI archive .design`
-7. **Re-snapshot** (archive may have moved it): Copy target SKILL.md to `.design/skill-snapshot.md` again.
+6. **Check existing plan**: `python3 $PLAN_CLI status .design/plan.json`. If `ok` and `isResume`: ask user "Existing plan found. Overwrite?" If declined, stop.
+7. **Archive stale artifacts**: `python3 $PLAN_CLI archive .design`
+8. **Re-snapshot** (archive may have moved it): Copy target SKILL.md to `.design/skill-snapshot.md` again.
 
 ### 2. Lead Research
 
@@ -94,13 +95,13 @@ The lead assesses the target skill and determines the analysis approach.
 | **General** | No focus area — full quality analysis | Team `$TEAM_NAME` | 2-3 experts |
 | **Cross-skill** | Path is `--all` or multiple paths | Team `$TEAM_NAME` | 2-3 experts + cross-review |
 
-3. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "improve {skill-name}" --stack "SKILL.md prompt engineering"`. If `ok: false` or no memories → proceed without injection. Otherwise inject top 3-5 into expert prompts as "Relevant past learnings: {bullet list, format: '- {category}: {summary}'}."
+3. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "improve {skill-name}" --stack "SKILL.md prompt engineering"`. If `ok: false` or no memories → proceed without injection. Otherwise inject top 3-5 into expert prompts. **Show user**: "Memory: injecting {count} past learnings — {keyword summaries}."
 4. **Historical evidence**: Check for past execution artifacts:
    ```bash
    ls .design/history/*/handoff.md 2>/dev/null | head -5
    ```
    If found, note paths for experts — execution evidence is higher-confidence than behavioral simulation.
-5. Report the planned analysis approach and expert composition to the user.
+5. **Announce to user**: "Analyzing {skill-name}: {analysis mode} mode, {N} experts ({names}). {historical evidence status}."
 
 ### 3. Analyze Skill
 
@@ -145,7 +146,7 @@ Proceed directly to Step 4 (Synthesize) after receiving the analyst's report.
 
 Every expert prompt MUST end with: "In your findings JSON, include a `verificationProperties` section: an array of properties that should hold regardless of implementation (behavioral invariants, boundary conditions, cross-role contracts). Format: `[{\"property\": \"...\", \"category\": \"invariant|boundary|integration\", \"testableVia\": \"how to test this with concrete commands/endpoints\"}]`. Provide concrete, externally observable properties that can be tested without reading source code. Save your complete findings to `.design/expert-{name}.json` as structured JSON. Then SendMessage to the lead with a summary." Include past learnings and historical evidence paths if available.
 
-4. **Expert liveness pipeline**: After spawning N experts, track completion. Mark each expert complete when: (a) SendMessage received AND (b) artifact file exists (`ls .design/expert-{name}.json`). Proceed when all complete.
+4. **Expert liveness pipeline**: After spawning N experts, track completion. Mark each expert complete when: (a) SendMessage received AND (b) artifact file exists (`ls .design/expert-{name}.json`). **Show user status as experts complete**: "Expert progress: {name} done ({M}/{N} complete)." Proceed when all complete.
    - **Turn-based timeout**: Expert not complete after 2 turns → send: "Status check — artifact expected at `.design/expert-{name}.json`. Report completion or blockers."
    - **Re-spawn ceiling**: No completion 1 turn after ping → re-spawn with same prompt (max 2 re-spawn attempts per expert).
    - **Proceed with available**: After 2 re-spawn attempts → log failure, proceed with responsive experts' artifacts.
@@ -239,20 +240,25 @@ Add to `auxiliaryRoles[]` in plan.json. Challenger always runs. Regression-check
 1. Validate: `python3 $PLAN_CLI status .design/plan.json`. Stop if `ok: false`.
 2. If team was created: shut down teammates, `TeamDelete(team_name: $TEAM_NAME)`.
 3. Clean up TaskList (delete all analysis tasks so `/do:execute` starts clean).
-4. Summary: `python3 $PLAN_CLI summary .design/plan.json`. Display:
+4. Summary: `python3 $PLAN_CLI summary .design/plan.json`. Display a rich end-of-run summary:
 
 ```
 Improvement Plan: {goal}
 Target: {skill-path}
 Baseline: .design/skill-snapshot.md
-Roles: {roleCount}
-Quality Scores: {dimension}: {score}/5, ...
 
-Improvements:
-- Role 0: {name} — {hypothesis summary}
-- Role 1: {name} — {hypothesis summary}
+Quality Scores:
+  {dimension}: {score}/5 {delta if previous scores available}
+  ...
 
+Improvements ({roleCount} roles):
+- Role 0: {name} — {hypothesis summary} [impact: {high/medium/low}]
+- Role 1: {name} — {hypothesis summary} [impact: {high/medium/low}]
+
+Evidence: {percentage historical vs simulated}
+Regression risks: {any flagged dimensions}
 Auxiliary: {auxiliaryRoles}
+Memories applied: {count or "none"}
 
 Run /do:execute to apply improvements.
 ```
