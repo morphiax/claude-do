@@ -222,6 +222,7 @@ All five skills use the **main conversation as team lead** with Agent Teams (or 
 - Always spawns full research team (codebase-analyst, external-researcher, domain-specialist) — recon is inherently exploratory, external research is always valuable
 - Memory injection: lead searches .design/memory.jsonl for relevant past learnings and injects top 3 into researcher prompts with transparency. Memory search failures gracefully fallback to empty results
 - Researcher prompts include behavioral trait instructions (e.g., "prefer empirical evidence", "ground in Meadows framework")
+- Researcher quality calibration: behavioral sharpeners per researcher type (codebase-analyst, external-researcher, domain-specialist), DO/DON'T guardrail table with dual-scan posture (seek failure signals AND working constraints), source hierarchy tiers for external-researcher, invisible curriculum elicitation for codebase-analyst and domain-specialist
 - Researcher liveness pipeline: completion checklist tracking which researchers have reported, turn-based timeout (3 turns then re-spawn), re-spawn ceiling (max 2 attempts then proceed with available findings)
 - Synthesis: lead ranks findings by leverage level (1-7 using Meadows framework with software-adjusted weights), computes scores via tier-weight formula (leverageLevel weight × confidenceMultiplier ÷ effortMultiplier), detects contradictions
 - Synthesis delegation: lead synthesizes by default. For >15 findings across >3 domains, spawns single synthesis Task agent

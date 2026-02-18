@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Trace emission instrumentation in all 5 SKILL.md files at lifecycle points with graceful || true degradation
 - `trace.jsonl` persisted during archive (treated as cross-session observability data like memory.jsonl and reflection.jsonl)
 - Health-check validation for `trace.jsonl` integrity
+- Research quality calibration in `/do:recon` — behavioral sharpeners per researcher type, DO/DON'T guardrail table with dual-scan posture, source hierarchy tiers for external-researcher, invisible curriculum elicitation for codebase-analyst and domain-specialist
 
 ## [2.14.0] - 2026-02-18
 

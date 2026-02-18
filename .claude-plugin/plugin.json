@@ -1,6 +1,6 @@
 {
   "name": "do",
-  "version": "2.15.0",
+  "version": "2.15.1",
   "description": "Structured planning, dependency-graph execution, pre-design reconnaissance, evidence-based skill improvement, and reflection-driven optimization for Claude Code — /do:design, /do:execute, /do:recon, /do:improve, and /do:reflect",
   "author": {
     "name": "morphiax",
