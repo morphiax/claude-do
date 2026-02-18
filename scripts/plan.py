@@ -2652,11 +2652,36 @@ def _validate_research_recommendation(rec: dict[str, Any], index: int) -> None:
         )
 
 
+def _validate_research_design_handoff(handoff: list[dict[str, Any]]) -> None:
+    """Validate designHandoff array entries."""
+    required_fields = ["source", "element", "material", "usage"]
+    valid_sources = {
+        "reference-material",
+        "codebase-analysis",
+        "expert-finding",
+        "literature",
+    }
+    for i, block in enumerate(handoff):
+        if not isinstance(block, dict):
+            error_exit(f"designHandoff[{i}]: must be an object")
+        missing = [f for f in required_fields if f not in block]
+        if missing:
+            error_exit(f"designHandoff[{i}]: missing fields {', '.join(missing)}")
+        source = block.get("source")
+        if source not in valid_sources:
+            error_exit(
+                f"designHandoff[{i}]: invalid source '{source}'. "
+                f"Must be one of: {', '.join(sorted(valid_sources))}"
+            )
+        if not isinstance(block.get("material"), (str, list, dict)):
+            error_exit(f"designHandoff[{i}]: material must be string, array, or object")
+
+
 def cmd_research_validate(args: argparse.Namespace) -> NoReturn:
     """Validate research.json schema.
 
-    Validates schemaVersion, required fields, recommendations structure.
-    Checks action enum, confidence/effort values, and designGoal requirement.
+    Validates schemaVersion, required fields, recommendations structure,
+    and optional designHandoff array.
     """
     data = _load_and_validate_research_structure(args.research_path)
 
@@ -2664,11 +2689,20 @@ def cmd_research_validate(args: argparse.Namespace) -> NoReturn:
     for i, rec in enumerate(recommendations):
         _validate_research_recommendation(rec, i)
 
+    handoff = data.get("designHandoff")
+    handoff_count = 0
+    if handoff is not None:
+        if not isinstance(handoff, list):
+            error_exit("designHandoff must be an array")
+        _validate_research_design_handoff(handoff)
+        handoff_count = len(handoff)
+
     output_json(
         {
             "ok": True,
             "recommendationCount": len(recommendations),
             "sectionCount": len(data.get("sections", {})),
+            "designHandoffCount": handoff_count,
             "validated": True,
         }
     )
@@ -2704,6 +2738,7 @@ def cmd_research_summary(args: argparse.Namespace) -> NoReturn:
     sections = data.get("sections", {})
     contradictions = data.get("contradictions", [])
     research_gaps = data.get("researchGaps", [])
+    design_handoff = data.get("designHandoff", [])
 
     sorted_recs = sorted(
         recommendations,
@@ -2729,6 +2764,7 @@ def cmd_research_summary(args: argparse.Namespace) -> NoReturn:
             "sectionCount": len(sections),
             "contradictionCount": len(contradictions),
             "researchGapCount": len(research_gaps),
+            "designHandoffCount": len(design_handoff),
         }
     )
 
@@ -3127,7 +3163,14 @@ def _get_shared_block_patterns() -> dict[str, dict[str, Any]]:
 
 def _load_skill_paths(skills_dir: str) -> dict[str, str]:
     """Load and validate SKILL.md paths for all expected skills."""
-    expected_skills = ["design", "execute", "improve", "research", "reflect"]
+    expected_skills = [
+        "design",
+        "execute",
+        "improve",
+        "research",
+        "reflect",
+        "simplify",
+    ]
     skill_paths = {}
 
     for skill in expected_skills:
@@ -3878,6 +3921,14 @@ def _create_fixtures(tmp_dir: str) -> dict[str, str]:
         ],
         "contradictions": [],
         "researchGaps": [],
+        "designHandoff": [
+            {
+                "source": "reference-material",
+                "element": "Test building block",
+                "material": "Concrete content for design",
+                "usage": "Use as expert prompt template",
+            }
+        ],
         "timestamp": "2026-01-01T00:00:00Z",
     }
 
@@ -3910,7 +3961,7 @@ TEAM_NAME=$(python3 $PLAN_CLI team-name {SKILL}).teamName
 1. Fix validation errors and re-run finalize.
 2. If structure is fundamentally broken: rebuild plan inline."""
 
-    for skill in ["design", "execute", "improve", "research", "reflect"]:
+    for skill in ["design", "execute", "improve", "research", "reflect", "simplify"]:
         skill_dir = os.path.join(skills_dir, skill)
         os.makedirs(skill_dir, exist_ok=True)
         skill_md = os.path.join(skill_dir, "SKILL.md")

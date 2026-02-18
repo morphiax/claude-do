@@ -172,7 +172,7 @@ Run `python3 $PLAN_CLI finalize .design/plan.json` to validate structure, comput
 
 ### Execution Model
 
-All five skills use the **main conversation as team lead** with Agent Teams (or Task for single-agent skills). Runtime behavior is defined in each SKILL.md file — this section covers structural facts only.
+All six skills use the **main conversation as team lead** with Agent Teams (or Task for single-agent skills). Runtime behavior is defined in each SKILL.md file — this section covers structural facts only.
 
 - **Lead** (main conversation): orchestration only via `TeamCreate`, `SendMessage`, `TaskCreate`/`TaskUpdate`/`TaskList`, `Bash` (scripts, git, verification), `AskUserQuestion`. Never reads project source files.
 - **Teammates**: specialist agents spawned into the team. Discover lead name via `~/.claude/teams/{team-name}/config.json`.
