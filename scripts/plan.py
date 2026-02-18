@@ -2979,111 +2979,28 @@ def cmd_memory_review(args: argparse.Namespace) -> NoReturn:
 # ============================================================================
 
 
-def _get_shared_block_patterns() -> dict[str, dict[str, Any]]:
-    """Return shared block patterns with extractors and normalizers."""
+_SKILL_NAMES_PATTERN = "design|execute|improve|research|reflect|simplify"
 
-    def normalize_script_setup(s: str) -> str:
-        """Normalize script setup by replacing skill-specific values."""
-        # Replace skill names in paths
-        s = re.sub(
-            r"skills/(design|execute|improve|research|reflect)", "skills/{SKILL}", s
-        )
-        # Replace skill names in team-name calls
-        s = re.sub(
-            r"team-name (design|execute|improve|research|reflect)",
-            "team-name {SKILL}",
-            s,
-        )
-        # Remove optional TEAM_NAME line (reflect doesn't have it)
-        s = re.sub(
-            r"TEAM_NAME=\$\(python3 \$PLAN_CLI team-name \{SKILL\}\)\.teamName\s*",
-            "",
-            s,
-        )
-        # Normalize whitespace
-        s = re.sub(r"\s+", " ", s).strip()
-        return s
+# Shared block patterns: section name → regex to extract the block content.
+# Content is normalized by _normalize_block before fingerprinting.
+_SHARED_BLOCK_PATTERNS: dict[str, str] = {
+    "Script Setup": r"### Script Setup\n\n.*?```bash\n(.*?)```",
+    "Liveness Pipeline Table": r"\| Rule \| Action \|\n\|---\|---\|\n((?:\|.*?\|\n)+)",
+    "Finalize Fallback": r"\*\*Fallback\*\* \(if finalize fails\):?\n((?:[\d]+\. .*?\n)+)",
+}
 
-    def normalize_liveness_table(s: str) -> str:
-        """Normalize liveness pipeline table by extracting core structure."""
-        # Extract only the TRULY COMMON rows that ALL skills have:
-        # - Turn timeout (with turn count) → action
-        # - Proceed with available → action after retries
-        # Ignore all other rows (Re-spawn ceiling, Never write artifacts, etc.)
 
-        lines = s.strip().split("\n")
-        turn_timeout_row = None
-        proceed_row = None
-
-        for line in lines:
-            # Extract Turn timeout row (ONLY if line STARTS with "| Turn timeout")
-            if line.strip().startswith("| Turn timeout"):
-                # Normalize to a fixed template
-                turn_timeout_row = "| Turn timeout (N turns) | ACTION |"
-            # Extract Proceed with available row (ONLY if line STARTS with "| Proceed")
-            elif line.strip().startswith("| Proceed with available"):
-                # Normalize to a fixed template
-                proceed_row = "| Proceed with available | After N attempts → proceed with artifacts |"
-
-        # Combine only the two common rows
-        result = []
-        if turn_timeout_row:
-            result.append(turn_timeout_row)
-        if proceed_row:
-            result.append(proceed_row)
-
-        s = " ".join(result)
-        s = re.sub(r"\s+", " ", s).strip()
-        return s
-
-    def normalize_fallback(s: str) -> str:
-        """Normalize fallback section by extracting core two-step pattern."""
-        # ALL skills follow: Step 1: fix errors + re-run, Step 2: rebuild if broken
-        # Normalize to fixed templates regardless of verbosity differences
-
-        lines = s.strip().split("\n")
-        if len(lines) < 2:
-            return s
-
-        # Extract first 2 steps only (improve has 4 but we only care about the pattern)
-        step1 = lines[0] if len(lines) > 0 else ""
-        step2 = lines[1] if len(lines) > 1 else ""
-
-        # Normalize step 1: all variants mean "fix errors and re-run"
-        if "error" in step1.lower() and (
-            "fix" in step1.lower() or "read" in step1.lower()
-        ):
-            step1_norm = "N. Fix validation errors and re-run finalize."
-        else:
-            step1_norm = step1
-
-        # Normalize step 2: all variants mean "if broken, rebuild"
-        if "broken" in step2.lower() or "error" in step2.lower():
-            step2_norm = "N. If structure broken: rebuild."
-        else:
-            step2_norm = step2
-
-        # Combine normalized steps
-        s = f"{step1_norm} {step2_norm}"
-        # Normalize whitespace and punctuation
-        s = re.sub(r"\s+", " ", s).strip()
-        s = re.sub(r"[,;:]+", ",", s)
-        return s
-
-    return {
-        "Script Setup": {
-            "pattern": r"### Script Setup\n\n.*?```bash\n(.*?)```",
-            "normalize": normalize_script_setup,
-        },
-        "Liveness Pipeline Table": {
-            "pattern": r"\| Rule \| Action \|\n\|---\|---\|\n((?:\|.*?\|\n)+)",
-            "normalize": normalize_liveness_table,
-        },
-        "Finalize Fallback": {
-            "pattern": r"\*\*Fallback\*\* \(if finalize fails\):?\n((?:[\d]+\. .*?\n)+)",
-            "normalize": normalize_fallback,
-        },
-    }
+def _normalize_block(text: str) -> str:
+    """Normalize a block for fingerprinting: replace skill names, collapse whitespace."""
+    # Replace skill names in paths and identifiers with a placeholder
+    text = re.sub(rf"\b({_SKILL_NAMES_PATTERN})\b", "{{SKILL}}", text)
+    # Remove optional TEAM_NAME line (reflect doesn't have it, causing false drift)
+    text = re.sub(
+        r"TEAM_NAME=\$\(python3 \$PLAN_CLI team-name \{SKILL\}\)\.teamName\s*\n?",
+        "",
+        text,
+    )
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def _load_skill_paths(skills_dir: str) -> dict[str, str]:
@@ -3107,18 +3024,18 @@ def _load_skill_paths(skills_dir: str) -> dict[str, str]:
     return skill_paths
 
 
-def _extract_block_from_content(content: str, spec: dict[str, Any]) -> str | None:
+def _extract_block_from_content(content: str, pattern: str) -> str | None:
     """Extract and normalize a block from skill content."""
-    match = re.search(spec["pattern"], content, re.DOTALL)
+    match = re.search(pattern, content, re.DOTALL)
     if not match:
         return None
 
     extracted = match.group(1) if match.lastindex else match.group(0)
-    return spec["normalize"](extracted)
+    return _normalize_block(extracted)
 
 
 def _extract_skill_blocks(
-    skill_paths: dict[str, str], shared_blocks: dict[str, dict[str, Any]]
+    skill_paths: dict[str, str],
 ) -> dict[str, dict[str, str | None]]:
     """Extract shared blocks from each skill file."""
     skill_blocks: dict[str, dict[str, str | None]] = {}
@@ -3128,8 +3045,8 @@ def _extract_skill_blocks(
             content = f.read()
 
         skill_blocks[skill] = {
-            block_name: _extract_block_from_content(content, spec)
-            for block_name, spec in shared_blocks.items()
+            block_name: _extract_block_from_content(content, pattern)
+            for block_name, pattern in _SHARED_BLOCK_PATTERNS.items()
         }
 
     return skill_blocks
@@ -3192,13 +3109,12 @@ def cmd_sync_check(args: argparse.Namespace) -> NoReturn:
         error_exit(f"Skills directory not found: {skills_dir}")
 
     skill_paths = _load_skill_paths(skills_dir)
-    shared_blocks = _get_shared_block_patterns()
-    skill_blocks = _extract_skill_blocks(skill_paths, shared_blocks)
+    skill_blocks = _extract_skill_blocks(skill_paths)
 
     synced = []
     drifted = []
 
-    for block_name in shared_blocks:
+    for block_name in _SHARED_BLOCK_PATTERNS:
         status, data = _analyze_block_sync(
             block_name, skill_blocks, list(skill_paths.keys())
         )
