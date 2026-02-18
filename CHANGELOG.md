@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.18.1] - 2026-02-18
+
+### Changed
+
+- Extracted `_read_jsonl(path, filter_fn)` shared utility — 5 JSONL reading sites unified
+- Unified duplicate memory loaders (`_load_memories` + `_load_memory_entries`) into single `_load_memory_entries`
+- Unified duplicate memory scorers (`_score_memory` + inline closure) into single `_score_memory` with proper tokenization (fixes naive substring scoring bug)
+- Replaced `_get_shared_block_patterns` (~105 lines of normalize closures) with `_SHARED_BLOCK_PATTERNS` constant + `_normalize_block` function (19 lines)
+- Extracted shared `_compute_overlaps` utility — both `cmd_overlap_matrix` and `_compute_directory_overlaps` now call it
+- CLAUDE.md command count corrected from 32 to 35
+
+### Fixed
+
+- Added 'simplify' to `_VALID_TRACE_SKILLS` — `trace-add --skill simplify` now works correctly
+
+### Removed
+
+- 7 `skip_test_` methods and 5 inline commented test bodies (~140 lines dead code)
+- `_compute_intervention_score` function and its test (unused)
+
 ## [2.18.0] - 2026-02-18
 
 ### Added

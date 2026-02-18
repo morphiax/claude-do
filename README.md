@@ -3,7 +3,7 @@
 > Multi-agent planning with structured debate, self-verifying execution, and cross-session memory
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Version](https://img.shields.io/badge/version-2.18.0-green.svg)
+![Version](https://img.shields.io/badge/version-2.18.1-green.svg)
 ![Claude Code](https://img.shields.io/badge/Claude%20Code-2.1.32%2B-orange.svg)
 
 ## What's Novel
@@ -26,7 +26,7 @@
 
 **Execution observability via trace.jsonl** — Append-only event log capturing agent lifecycle events (spawn, completion, failure, respawn) with timestamps and session grouping. `trace-search` and `trace-summary` commands enable post-execution analysis for `/do:reflect` and debugging.
 
-**Automated self-test suite** — `plan.py self-test` exercises all 32 commands against synthetic fixtures in a temp directory, enabling CI-style validation of the helper script.
+**Automated self-test suite** — `plan.py self-test` exercises all 35 commands against synthetic fixtures in a temp directory, enabling CI-style validation of the helper script.
 
 **Comprehensive knowledge research** — `/do:research` gathers and structures knowledge across 5 sections (prerequisites, mental models, usage patterns, failure patterns, production readiness). Spawns researchers to map findings across codebase, external sources, and domain expertise. Minimum research thresholds enforce quality floors (>=3 post-mortems, >=5 beginner mistakes, quantitative performance claims). Concept dependency graphs order learning paths. Evolution paths capture pattern progression at scale. Team adoption factors assess learning timeline, documentation quality, and community support. Decision framework (bestFit/wrongFit scenarios) makes recommendations actionable. Design handoff preserves concrete building blocks for `/do:design`.
 
