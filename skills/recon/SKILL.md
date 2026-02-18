@@ -134,20 +134,37 @@ Create the team and spawn researchers in parallel.
 - **Tools denied**: Edit, Write (researchers report findings, never modify code).
 - Focus: hotspot analysis (git churn x complexity), change coupling, dependency analysis, architectural patterns, technical debt indicators.
 - Git hotspot heuristic: `git log --format=format: --name-only --since=12.month | sort | uniq -c | sort -nr | head -20`
-- Report what EXISTS, not what SHOULD exist.
+- Report what EXISTS — seek both failure signals AND working constraints. What breaks? What does the team NOT violate by convention?
+- Describe root causes, not symptoms — "file X is slow" is a symptom; "file X is slow because it has no index" is a cause.
+- **Invisible curriculum**: Surface tacit constraints you can infer from code evidence — patterns that appear consistently with no doc explanation, anti-patterns conspicuously absent, dependencies avoided despite obvious utility. Map these to `knowledgeGaps[]` in your findings. Do NOT speculate about team knowledge not evidenced in the codebase.
 
 **External Researcher** — Literature, frameworks, best practices, prior art, ecosystem solutions.
 - **Tools granted**: WebSearch, WebFetch, Read (for project context files only).
 - **Tools denied**: Edit, Write, Grep, Glob (no codebase exploration — that is the analyst's job).
 - Focus: prior art for the problem area, proven patterns from literature, ecosystem solutions, relevant standards.
 - Cite sources with URLs. Note confidence and recency of sources.
+- **Source priority** (highest to lowest — prefer higher tiers but don't discard high-quality lower-tier sources): (1) Production post-mortems and incident reports. (2) GitHub issues, RFCs, migration guides with real adoption data. (3) Deep-dive engineering blogs with benchmarks. (4) Official documentation and tutorials. (5) Community Q&A and discussions. Always state the source tier and recency.
+- Cite specific precedent, not general best practice — name the exact source, version, and why it applies to this codebase, not just the recommendation.
+- **Do NOT claim tacit knowledge about this codebase**; if literature documents a common undocumented pitfall, report it as unconfirmed for this codebase and place in `knowledgeGaps[]`.
 
 **Domain Specialist** — Security, performance, UX, data, etc. (context-dependent).
 - **Tools granted**: Read, Grep, Glob, WebSearch, WebFetch, Bash (for running project commands).
 - **Tools denied**: Edit, Write (researchers report findings, never modify code).
 - Focus: domain-specific analysis of the area under investigation.
+- Apply your domain lens to THIS specific codebase, not in general — findings must reference concrete evidence from the code, not domain theory alone.
+- **Invisible curriculum**: Identify assumed-but-unstated prerequisites visible in the codebase — domain-specific patterns the code follows implicitly, or anti-patterns conspicuously absent. Map to `knowledgeGaps[]` if lacking documentation confirmation.
 
 **All researcher prompts MUST include**:
+
+**Research quality guardrails (all researchers):**
+
+| DO | DON'T |
+|---|---|
+| Seek failure signals AND working constraints | Report only failures or only successes |
+| Cite version numbers/dates for technical claims | Assert recency without evidence |
+| Label findings as proven vs inferred | Conflate hypothesis with observation |
+| Surface what experts know but docs omit | Repeat what official docs already say |
+
 - "Save your complete findings to `.design/expert-{name}.json` as structured JSON."
 - "Then SendMessage to the lead with a summary."
 - "For each finding include: area, observation, evidence, preliminary leverageLevel (1-7), leverageGroup (Intent/Design/Feedbacks/Parameters), effort estimate (trivial/small/medium/large/transformative), recommendation."
@@ -182,7 +199,7 @@ The lead combines researcher findings into leverage-ranked interventions.
    - `evidence[]` — references to researcher findings that support this.
 7. Rank interventions by composite score (computed by `recon-validate`).
 8. **Cap interventions**: Max 5 interventions. Record `additionalFindings` count for transparency.
-9. Add `knowledgeGaps[]` — areas where additional information would most improve the analysis.
+9. Add `knowledgeGaps[]` — areas where additional information would most improve the analysis. Tacit/inferred findings from codebase-analyst or domain-specialist that lack corroboration from a second researcher MUST go to `knowledgeGaps[]`, not `interventions[]`.
 10. **Validate**: Run `python3 $PLAN_CLI recon-validate .design/recon.json`. Fix any validation errors.
 
 ### 5. Output
