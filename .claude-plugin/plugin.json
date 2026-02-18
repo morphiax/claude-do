@@ -1,7 +1,7 @@
 {
   "name": "do",
-  "version": "2.15.1",
-  "description": "Structured planning, dependency-graph execution, pre-design reconnaissance, evidence-based skill improvement, and reflection-driven optimization for Claude Code — /do:design, /do:execute, /do:recon, /do:improve, and /do:reflect",
+  "version": "2.16.0",
+  "description": "Structured planning, dependency-graph execution, comprehensive knowledge research, evidence-based skill improvement, and reflection-driven optimization for Claude Code — /do:design, /do:execute, /do:research, /do:improve, and /do:reflect",
   "author": {
     "name": "morphiax",
     "url": "https://github.com/morphiax"

@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.16.0] - 2026-02-18
+
+### Changed
+
+- **BREAKING**: `/do:recon` replaced with `/do:research` — new skill produces structured knowledge across 5 sections (prerequisites, mentalModels, usagePatterns, failurePatterns, productionReadiness) with recommendations array instead of Meadows-ranked interventions
+- `.design/recon.json` contract replaced with `.design/research.json` (schemaVersion 1) with recommendations including confidence, effort, and prerequisites for adoption planning
+- `recon-validate` and `recon-summary` commands replaced with `research-validate` and `research-summary` in plan.py
+- CLAUDE.md updated: Data Contracts section documents new research.json schema; Execution Model `/do:research` section describes new workflow
+- README.md updated: skill descriptions and usage examples reflect research output format
+- Version bumped to 2.16.0 (minor version bump for feature replacement)
+
 ## [2.15.0] - 2026-02-18
 
 ### Added

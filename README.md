@@ -3,7 +3,7 @@
 > Multi-agent planning with structured debate, self-verifying execution, and cross-session memory
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Version](https://img.shields.io/badge/version-2.15.1-green.svg)
+![Version](https://img.shields.io/badge/version-2.16.0-green.svg)
 ![Claude Code](https://img.shields.io/badge/Claude%20Code-2.1.32%2B-orange.svg)
 
 ## What's Novel
@@ -28,7 +28,7 @@
 
 **Automated self-test suite** — `plan.py self-test` exercises all 32 commands against synthetic fixtures in a temp directory, enabling CI-style validation of the helper script.
 
-**Meadows-based reconnaissance** — `/do:recon` analyzes goals through systems thinking before design. Spawns researchers to map leverage points (paradigm shifts, goal alignment, feedback loops, structure, parameters). Ranks interventions by impact using Meadows framework adapted for software. Outputs ranked designGoals + constraints (not implementation suggestions) to `.design/recon.json`.
+**Comprehensive knowledge research** — `/do:research` gathers and structures knowledge across 5 sections (prerequisites, mental models, usage patterns, failure patterns, production readiness). Spawns researchers to map findings across codebase, external sources, and domain expertise. Produces recommendations with confidence and effort estimates for adoption planning, stored in `.design/research.json`.
 
 ## Usage
 
@@ -36,8 +36,8 @@
 /plugin marketplace add morphiax/claude-do
 /plugin install do@do
 
-# Reconnaissance: identify high-leverage interventions
-/do:recon improve observability in our microservices
+# Research: gather structured knowledge before planning
+/do:research how do we implement OAuth 2.0 authentication
 
 # Plan and execute a goal
 /do:design implement user authentication with JWT tokens
@@ -54,7 +54,7 @@
 
 ## How It Works
 
-**`/do:recon`** always spawns full research team (codebase analyst, external researcher, domain specialist) — recon is inherently exploratory, so external research is always included. Researchers gather findings across multiple domains. Lead synthesizes findings using 7-level Meadows framework (paradigm/goals/rules/information_flows/feedback_loops/structure/parameters) with software-adjusted weights. Ranks interventions by tier-weight formula (leverageLevel × confidence ÷ effort). Outputs to `.design/recon.json` with designGoal + constraints per intervention (NOT implementation suggestions). Max 5 interventions. Detects contradictions. Memory injection with transparency. 3-turn liveness timeout. End-of-run summary shows top leverage levels and findings analyzed.
+**`/do:research`** always spawns full research team (codebase analyst, external researcher, domain specialist) — research is inherently exploratory, so external sources are always included. Researchers gather findings across codebase, literature, and comparative/theoretical domains. Lead synthesizes findings into 5 knowledge sections (prerequisites, mentalModels, usagePatterns, failurePatterns, productionReadiness) and ranks recommendations by confidence and effort. Outputs to `.design/research.json` with recommendations including confidence, effort, and prerequisites for adoption planning. Memory injection with transparency. 3-turn liveness timeout. End-of-run summary shows recommendation count and research gaps identified.
 
 **`/do:design`** spawns experts (architects, researchers, domain specialists) based on goal type. For complex goals, experts debate via structured challenges/defenses. The lead synthesizes findings into role briefs with acceptance criteria. Scout auxiliaries verify expert assumptions against the real codebase. Phase announcements show progress. Draft plan review checkpoint for complex goals. Memory injection with transparency. Behavioral trait instructions for experts and auxiliaries. 3-turn liveness timeout (simplified from 5+7). End-of-run summary with metrics.
 

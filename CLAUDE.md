@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-`claude-do` is a Claude Code plugin providing five skills: `/do:design` (team-based goal decomposition into `.design/plan.json`), `/do:execute` (dependency-graph execution with worker teammates), `/do:recon` (pre-design reconnaissance combining deep research with Meadows-style leverage analysis), `/do:improve` (static analysis of prompt quality across 7 dimensions), and `/do:reflect` (evidence-based improvement from execution reflections). It leverages Claude Code's native Agent Teams and Tasks features for multi-agent collaboration. All skills use the main conversation as team lead with teammates for analytical/execution work. Skills are implemented as SKILL.md prompts augmented with python3 helper scripts for deterministic operations.
+`claude-do` is a Claude Code plugin providing five skills: `/do:design` (team-based goal decomposition into `.design/plan.json`), `/do:execute` (dependency-graph execution with worker teammates), `/do:research` (comprehensive knowledge research producing actionable research.json with recommendations), `/do:improve` (static analysis of prompt quality across 7 dimensions), and `/do:reflect` (evidence-based improvement from execution reflections). It leverages Claude Code's native Agent Teams and Tasks features for multi-agent collaboration. All skills use the main conversation as team lead with teammates for analytical/execution work. Skills are implemented as SKILL.md prompts augmented with python3 helper scripts for deterministic operations.
 
 ## Testing
 
@@ -19,7 +19,7 @@ claude --plugin-dir /path/to/claude-do
 /do:execute
 ```
 
-All five skills must be tested end-to-end. Changes to design, execute, recon, improve, or reflect may affect the others since they share the `.design/plan.json` contract (or `.design/recon.json` for recon) and persistent files (`memory.jsonl`, `reflection.jsonl`, `handoff.md`).
+All five skills must be tested end-to-end. Changes to design, execute, research, improve, or reflect may affect the others since they share the `.design/plan.json` contract (or `.design/research.json` for research) and persistent files (`memory.jsonl`, `reflection.jsonl`, `handoff.md`).
 
 ## Architecture
 
@@ -32,8 +32,8 @@ All five skills must be tested end-to-end. Changes to design, execute, recon, im
 - `skills/design/scripts/plan.py` — Symlink → `../../../scripts/plan.py`
 - `skills/execute/SKILL.md` — `/do:execute` skill definition
 - `skills/execute/scripts/plan.py` — Symlink → `../../../scripts/plan.py`
-- `skills/recon/SKILL.md` — `/do:recon` skill definition
-- `skills/recon/scripts/plan.py` — Symlink → `../../../scripts/plan.py`
+- `skills/research/SKILL.md` — `/do:research` skill definition
+- `skills/research/scripts/plan.py` — Symlink → `../../../scripts/plan.py`
 - `skills/improve/SKILL.md` — `/do:improve` skill definition
 - `skills/improve/scripts/plan.py` — Symlink → `../../../scripts/plan.py`
 - `skills/reflect/SKILL.md` — `/do:reflect` skill definition
@@ -51,15 +51,15 @@ A single `scripts/plan.py` at the repo root provides all deterministic operation
 
 - **Query** (17 commands): team-name (generate project-unique team name from skill + cwd), status, summary, overlap-matrix, tasklist-data, worker-pool, retry-candidates, circuit-breaker, memory-search (keyword-based search in .design/memory.jsonl with recency weighting and importance scoring), reflection-search (filter past reflections by skill, sorted by recency), memory-review (list all memories in human-readable format with filtering), health-check (validate .design/ integrity), plan-diff (compare two plan.json files), plan-health-summary (lifecycle context from handoff and reflections), sync-check (detect drift between shared protocol sections across SKILL.md files using structural fingerprints), trace-search (query trace events by session, skill, event type, or agent), trace-summary (format trace data for display with aggregate statistics)
 - **Mutation** (6 commands): update-status (atomically modify plan.json via temp file + rename with state machine validation), memory-add (append JSONL entry with UUID, importance 1-10, and dynamic boost/decay), reflection-add (append structured self-evaluation to reflection.jsonl, evaluation JSON via stdin), resume-reset (resets in_progress roles to pending, increments attempts), archive (archives stale .design/ artifacts to .design/history/{timestamp}/), trace-add (append agent lifecycle events to trace.jsonl with automatic ID/timestamp generation)
-- **Validation** (7 commands): expert-validate (schema validation for expert artifacts), reflection-validate (schema validation for reflection evaluations), memory-summary (format injection summary for display), validate-checks (syntax validation for acceptanceCriteria check commands — detects broken Python in `python3 -c` checks, including f-string brace nesting errors), recon-validate (schema validation for recon.json with leverage scoring), recon-summary (format recon output for display), trace-validate (schema validation for trace.jsonl with required field checks)
+- **Validation** (7 commands): expert-validate (schema validation for expert artifacts), reflection-validate (schema validation for reflection evaluations), memory-summary (format injection summary for display), validate-checks (syntax validation for acceptanceCriteria check commands — detects broken Python in `python3 -c` checks, including f-string brace nesting errors), research-validate (schema validation for research.json), research-summary (format research output for display), trace-validate (schema validation for trace.jsonl with required field checks)
 - **Build** (1 command): finalize — validates role briefs, computes directory overlaps, validates state transitions, and computes SHA256 checksums for verification specs in one atomic operation
 - **Test** (1 command): self-test — exercises every command against synthetic fixtures in a temp directory, reports pass/fail per command as JSON
 
-Design uses query + finalize. Execute uses all commands. Recon uses query + recon-validate + recon-summary. Improve uses query + finalize (same as design). `worker-pool` reads roles directly — one worker per role, named by role (e.g., `api-developer`, `test-writer`). Workers read `plan.json` directly — no per-worker task files needed.
+Design uses query + finalize. Execute uses all commands. Research uses query + research-validate + research-summary. Improve uses query + finalize (same as design). `worker-pool` reads roles directly — one worker per role, named by role (e.g., `api-developer`, `test-writer`). Workers read `plan.json` directly — no per-worker task files needed.
 
 Scripts use python3 stdlib only (no dependencies), support Python 3.8+, and follow a consistent CLI pattern: `python3 plan.py <command> [plan_path] [options]`. All output is JSON to stdout with exit code 0 for success, 1 for errors.
 
-### Data Contracts: .design/plan.json and .design/recon.json
+### Data Contracts: .design/plan.json and .design/research.json
 
 Skills communicate through structured JSON files in `.design/` (gitignored). Two primary contracts:
 
@@ -77,7 +77,7 @@ Key points:
 - Memory retrieval uses keyword matching with recency decay (10%/30 days) and importance weighting (score = keyword_match * recency_factor * importance/10). Dynamic importance tracking via --boost/--decay flags correlates outcomes with memory relevance
 - Reflection storage: `.design/reflection.jsonl` contains per-run episodic self-evaluations (JSONL format with UUID, skill, goal, outcome, goalAchieved, evaluation object, timestamp). Both design and execute append entries at end of each run. Memory-curator reads reflections as primary signal for what to record
 - Session handoff: `.design/handoff.md` persists across archives for cross-session context recovery. Written by execute at completion
-- **Persistent `.design/` files** (survive archiving): `memory.jsonl`, `reflection.jsonl`, `handoff.md`, `recon.json`, `trace.jsonl`. Everything else is archived to `.design/history/{timestamp}/`
+- **Persistent `.design/` files** (survive archiving): `memory.jsonl`, `reflection.jsonl`, `handoff.md`, `research.json`, `trace.jsonl`. Everything else is archived to `.design/history/{timestamp}/`
 - Plan history: completed runs are archived to `.design/history/{timestamp}/`; design pre-flight archives stale artifacts
 - Verification specs: optional schema layer for property-based testing. Lead writes spec files in `.design/specs/{role-name}.{ext}` (shell scripts or native test framework). Specs are immutable during execution; workers run them after acceptance criteria pass and report failures as blocking. `finalize` validates spec references and computes SHA256 checksums for tamper detection.
 
@@ -114,17 +114,16 @@ Key points:
 
 **Auxiliary role fields**: name, type (pre-execution|post-execution), goal, model, trigger
 
-**`.design/recon.json` (schemaVersion 1)** — used by `/do:recon` for reconnaissance output:
+**`.design/research.json` (schemaVersion 1)** — used by `/do:research` for comprehensive knowledge research output:
 
-Recon produces a ranked list of high-leverage interventions rather than role briefs. Key points:
+Research produces structured knowledge across 5 sections with ranked recommendations. Key points:
 
-- Uses 7-level Meadows leverage framework adapted for software (paradigm/goals/rules/information_flows/feedback_loops/structure/parameters)
-- Interventions ranked by tier-weighted scoring (leverageLevel weight × confidenceMultiplier ÷ effortMultiplier)
-- Output includes designGoal + constraints array (NOT suggestedRoles or implementation suggestions)
-- Schema fields: schemaVersion (1), goal, context {same as plan.json}, researchFindings[], interventions[], contradictions[]
-- **Intervention fields**: id, name, leverageLevel (1-7 int), leverageName (Meadows level name), leverageGroup (Abson 4-group: Parameters/Feedbacks/Design/Intent), score (computed), confidence (low/medium/high), effort (low/medium/high), designGoal (string), constraints (array), supportingFindings (array of finding IDs)
-- **Finding fields**: id, domain (codebase/literature/comparative/theoretical), source, summary, implications, relevantLeverageLevels
-- Max 5 interventions with additionalFindings count for transparency
+- Schema fields: schemaVersion (1), goal, context {same as plan.json}, sections {prerequisites, mentalModels, usagePatterns, failurePatterns, productionReadiness}, recommendations[], researchGaps []
+- **Section fields**: name (string), findings (array of finding objects), synthesis (string summary)
+- **Recommendation fields**: id, title, summary, confidence (low/medium/high), effort (low/medium/high), prerequisites (array), reasoning (string)
+- **Finding fields**: id, section, source, summary, domain (codebase/literature/comparative/theoretical)
+- Recommendations include confidence levels and effort estimates for adoption planning
+- Research gaps document areas needing additional investigation
 
 ### Verification Specs Protocol
 
@@ -182,7 +181,7 @@ All five skills use the **main conversation as team lead** with Agent Teams (or 
 - Memory injection: lead searches .design/memory.jsonl for relevant past learnings (using importance-weighted scoring) and injects top 3-5 into expert prompts with transparency (shows what was injected to user). Expert prompts request verificationProperties (behavioral invariants, boundary conditions, integration contracts) to inform spec generation. Expert prompts include anti-pattern warnings for acceptance criteria (shift-left prevention of grep-only checks). Memory search failures gracefully fallback to empty results
 - Lead spawns expert teammates (architect, researcher, domain-specialists) based on goal type awareness (implementation/meta/research). Expert prompts include behavioral trait instructions (e.g., "prefer composable patterns", "be skeptical of X") and require measurable verificationProperties based on actual code metrics (not theoretical estimates)
 - Expert liveness pipeline: completion checklist tracking which experts have reported, turn-based timeout (3 turns then re-spawn), re-spawn ceiling (max 2 attempts then proceed with available artifacts)
-- Cross-review: interface negotiation and perspective reconciliation via actual expert messaging (lead must not perform cross-review solo). Audit trail saved to `.design/cross-review.json`. Lead resolves unresolved conflicts in designDecisions[]
+- Cross-review: interface negotiation and perspective resolution via actual expert messaging (lead must not perform cross-review solo). Audit trail saved to `.design/cross-review.json`. Lead resolves unresolved conflicts in designDecisions[]
 - Draft plan review: for complex/high-stakes goals (based on complexity tier), lead displays draft plan.json to user for brief review before finalization
 - Auxiliary selection is independent of complexity tier: challenger (with adversarial behavioral traits) and integration-verifier always run. Scout runs when the goal touches code (implementation, refactoring, bug fixes). Memory-curator runs post-execution with strict quality persona
 - Lead synthesizes expert findings into role briefs in plan.json directly (no plan-writer delegate)
@@ -214,24 +213,23 @@ All five skills use the **main conversation as team lead** with Agent Teams (or 
 - Session handoff: `.design/handoff.md` persists in `.design/` (not archived) for cross-session context recovery
 - End-of-run summary: displays roles completed/failed/skipped, files changed, acceptance criteria results, verification spec results, and memories curated
 
-**`/do:recon`** — team name: `do-recon-{project}-{hash}` (generated by `team-name` command)
-- Protocol guardrail: lead must follow the flow step-by-step (pre-flight, research spawning, synthesis, output finalization)
-- Phase announcements: lead announces each major phase (pre-flight, research spawning, synthesis, finalization) for user visibility
+**`/do:research`** — team name: `do-research-{project}-{hash}` (generated by `team-name` command)
+- Protocol guardrail: lead must follow the flow step-by-step (pre-flight, researcher spawning, synthesis, output finalization)
+- Phase announcements: lead announces each major phase (pre-flight, researcher spawning, synthesis, finalization) for user visibility
 - Lifecycle context: runs `plan-health-summary` to display previous session handoff and recent reflections at skill start
 - TeamCreate health check: verifies team is reachable, retries once on failure
-- Always spawns full research team (codebase-analyst, external-researcher, domain-specialist) — recon is inherently exploratory, external research is always valuable
+- Always spawns full research team (codebase-analyst, external-researcher, domain-specialist) — research is inherently exploratory, external research is always valuable
 - Memory injection: lead searches .design/memory.jsonl for relevant past learnings and injects top 3 into researcher prompts with transparency. Memory search failures gracefully fallback to empty results
-- Researcher prompts include behavioral trait instructions (e.g., "prefer empirical evidence", "ground in Meadows framework")
+- Researcher prompts include behavioral trait instructions (e.g., "prefer empirical evidence", "ground research in concrete findings")
 - Researcher quality calibration: behavioral sharpeners per researcher type (codebase-analyst, external-researcher, domain-specialist), DO/DON'T guardrail table with dual-scan posture (seek failure signals AND working constraints), source hierarchy tiers for external-researcher, invisible curriculum elicitation for codebase-analyst and domain-specialist
 - Researcher liveness pipeline: completion checklist tracking which researchers have reported, turn-based timeout (3 turns then re-spawn), re-spawn ceiling (max 2 attempts then proceed with available findings)
-- Synthesis: lead ranks findings by leverage level (1-7 using Meadows framework with software-adjusted weights), computes scores via tier-weight formula (leverageLevel weight × confidenceMultiplier ÷ effortMultiplier), detects contradictions
+- Synthesis: lead organizes findings across 5 knowledge sections (prerequisites, mentalModels, usagePatterns, failurePatterns, productionReadiness), generates recommendations ranked by confidence and effort
 - Synthesis delegation: lead synthesizes by default. For >15 findings across >3 domains, spawns single synthesis Task agent
-- Contradiction detection: lightweight scan for conflicting findings (e.g., TRIZ-style contradictions). Surfaces in contradictions[] array for user decision
-- `recon-validate` validates schema, computes leverage scores deterministically, outputs validation result
-- `recon-summary` formats ranked interventions for display with Abson 4-group mapping (Parameters/Feedbacks/Design/Intent)
-- Output: produces `.design/recon.json` (schemaVersion 1) with ranked interventions. Each intervention has designGoal + constraints, NOT suggestedRoles or implementation details
+- `research-validate` validates schema, outputs validation result
+- `research-summary` formats findings and recommendations for display
+- Output: produces `.design/research.json` (schemaVersion 1) with knowledge sections and recommendations array. Recommendations include confidence, effort, and prerequisites for adoption planning
 - Self-reflection: writes structured self-evaluation to `.design/reflection.jsonl` at end of run using `reflection-add`
-- End-of-run summary: displays intervention count, top 3 leverage levels represented, contradiction count, and findings analyzed
+- End-of-run summary: displays recommendation count, knowledge sections completed, research gaps identified, and findings analyzed
 
 **`/do:improve`** — team name: `do-improve-{project}-{hash}` (generated by `team-name` command)
 - Protocol guardrail: lead must follow the flow step-by-step, starting with pre-flight (skill snapshot, archive check, circular improvement detection)
@@ -243,7 +241,7 @@ All five skills use the **main conversation as team lead** with Agent Teams (or 
 - Quality evaluation: experts score 7 dimensions (Protocol Clarity, Constraint Enforcement, Error Handling, Agent Coordination, Information Flow, Prompt Economy, Verifiability) on 1-5 scale with evidence. Scoring rubric uses anchor descriptions (1/3/5 only) for token efficiency
 - Evidence types: historical execution artifacts from `.design/history/` (high confidence) or behavioral simulation (lower confidence fallback)
 - Expert liveness pipeline: completion checklist tracking which experts have reported, turn-based timeout (3 turns then re-spawn), re-spawn ceiling (max 2 attempts then proceed with available artifacts)
-- Cross-review: perspective reconciliation when >=2 experts analyze the same skill, maximum 2 rounds. Lead must not perform cross-review solo — requires actual SendMessage calls to experts. Never writes expert artifacts directly
+- Cross-review: perspective resolution when >=2 experts analyze the same skill, maximum 2 rounds. Lead must not perform cross-review solo — requires actual SendMessage calls to experts. Never writes expert artifacts directly
 - Lead synthesizes findings into improvement roles with testable hypotheses (predicted behavioral impact + verification method)
 - Anti-pattern guards: CRITICAL enforcement (mandatory user gates before proceeding), token budget tracking, circular improvement detection, regression safety (no dimension may degrade). Guards run after role creation to ensure executability
 - Expert coordination: explicit completion tracking for all spawned experts, artifact validation via `expert-validate` command (existence + JSON schema) before cross-review
