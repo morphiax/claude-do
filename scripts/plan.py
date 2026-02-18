@@ -1967,7 +1967,9 @@ _VALID_TRACE_EVENT_TYPES = frozenset(
     {"spawn", "completion", "failure", "respawn", "skill-start", "skill-complete"}
 )
 _LEAD_LEVEL_EVENT_TYPES = frozenset({"skill-start", "skill-complete"})
-_VALID_TRACE_SKILLS = frozenset({"design", "execute", "research", "improve", "reflect"})
+_VALID_TRACE_SKILLS = frozenset(
+    {"design", "execute", "research", "improve", "reflect", "simplify"}
+)
 
 
 def _parse_trace_payload(payload_str: str | None) -> dict[str, Any]:
