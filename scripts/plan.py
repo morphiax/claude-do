@@ -307,13 +307,18 @@ def cmd_summary(args: argparse.Namespace) -> NoReturn:
     )
 
 
-def cmd_overlap_matrix(args: argparse.Namespace) -> NoReturn:
-    """Compute directory overlap matrix between roles."""
-    plan = load_plan(args.plan_path)
-    roles = plan.get("roles", [])
-    name_index = build_name_index(roles)
-    dep_indices = resolve_dependencies(roles, name_index)
+def _compute_overlaps(
+    roles: list[dict[str, Any]], dep_indices: list[list[int]]
+) -> dict[int, list[int]]:
+    """Compute directory overlaps for concurrent role pairs (j>i ordering).
 
+    Args:
+        roles: List of role dicts with scope containing directories/patterns.
+        dep_indices: Dependency indices from resolve_dependencies.
+
+    Returns:
+        Dictionary mapping role index i to list of overlapping role indices j (all j > i).
+    """
     # Collect directories + patterns per role
     role_dirs: list[set[str]] = []
     for role in roles:
@@ -324,22 +329,39 @@ def cmd_overlap_matrix(args: argparse.Namespace) -> NoReturn:
 
     # Enforce j>i ordering to prevent bidirectional deadlocks.
     # When roles i and j overlap, only the later role (j) blocks on the earlier (i).
-    # This creates a strict partial ordering and eliminates circular dependencies.
-    matrix: dict[str, list[int]] = {}
+    overlaps_by_role: dict[int, list[int]] = {}
     for i in range(len(roles)):
+        i_closure = set(_transitive_closure(dep_indices, i))
         overlaps: list[int] = []
         for j in range(len(roles)):
             if i == j or j <= i:
                 continue  # Skip self and enforce j>i rule
-            # Check directory overlap (prefix match or exact match)
-            if _dirs_overlap(role_dirs[i], role_dirs[j]):
-                # Only flag if no existing dependency ordering
-                i_deps = set(_transitive_closure(dep_indices, i))
-                j_deps = set(_transitive_closure(dep_indices, j))
-                if j not in i_deps and i not in j_deps:
-                    overlaps.append(j)
+            j_closure = set(_transitive_closure(dep_indices, j))
+            if (
+                j not in i_closure
+                and i not in j_closure
+                and _dirs_overlap(role_dirs[i], role_dirs[j])
+            ):
+                overlaps.append(j)
         if overlaps:
-            matrix[str(i)] = overlaps
+            overlaps_by_role[i] = overlaps
+
+    return overlaps_by_role
+
+
+def cmd_overlap_matrix(args: argparse.Namespace) -> NoReturn:
+    """Compute directory overlap matrix between roles."""
+    plan = load_plan(args.plan_path)
+    roles = plan.get("roles", [])
+    name_index = build_name_index(roles)
+    dep_indices = resolve_dependencies(roles, name_index)
+
+    overlaps_by_role = _compute_overlaps(roles, dep_indices)
+
+    # Convert to string-keyed matrix for JSON output
+    matrix: dict[str, list[int]] = {
+        str(i): overlaps for i, overlaps in overlaps_by_role.items()
+    }
 
     output_json({"ok": True, "matrix": matrix})
 
@@ -1040,29 +1062,11 @@ def _compute_directory_overlaps(plan: dict[str, Any]) -> int:
     name_index = build_name_index(roles)
     dep_indices = resolve_dependencies(roles, name_index)
 
-    role_dirs: list[set[str]] = []
-    for role in roles:
-        scope = role.get("scope", {})
-        dirs = set(scope.get("directories", []))
-        dirs.update(scope.get("patterns", []))
-        role_dirs.append(dirs)
+    overlaps_by_role = _compute_overlaps(roles, dep_indices)
 
-    # Enforce j>i ordering to prevent bidirectional deadlocks.
-    # When roles i and j overlap, only the later role (j) blocks on the earlier (i).
+    # Assign computed overlaps to each role
     for i, role in enumerate(roles):
-        overlaps: list[int] = []
-        i_closure = set(_transitive_closure(dep_indices, i))
-        for j in range(len(roles)):
-            if i == j or j <= i:
-                continue  # Skip self and enforce j>i rule
-            j_closure = set(_transitive_closure(dep_indices, j))
-            if (
-                j not in i_closure
-                and i not in j_closure
-                and _dirs_overlap(role_dirs[i], role_dirs[j])
-            ):
-                overlaps.append(j)
-        role["directoryOverlaps"] = overlaps
+        role["directoryOverlaps"] = overlaps_by_role.get(i, [])
 
     return len(roles)
 
