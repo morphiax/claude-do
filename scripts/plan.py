@@ -12,7 +12,8 @@ Mutation commands (modify plan.json):
   resume-reset, update-status, memory-add, reflection-add
 
 Build commands (validation & enrichment):
-  finalize, expert-validate, reflection-validate
+  finalize, expert-validate, reflection-validate, research-validate,
+  research-summary
 
 Archive command:
   archive
@@ -1875,9 +1876,9 @@ def cmd_reflection_add(args: argparse.Namespace) -> NoReturn:
     outcome = args.outcome
     goal_achieved = args.goal_achieved
 
-    if skill not in ("design", "execute", "improve", "reflect", "recon"):
+    if skill not in ("design", "execute", "improve", "reflect", "research"):
         error_exit(
-            f"Invalid skill '{skill}'. Must be one of: design, execute, improve, reflect, recon"
+            f"Invalid skill '{skill}'. Must be one of: design, execute, improve, reflect, research"
         )
 
     if outcome not in ("completed", "partial", "failed", "aborted"):
@@ -1966,7 +1967,7 @@ _VALID_TRACE_EVENT_TYPES = frozenset(
     {"spawn", "completion", "failure", "respawn", "skill-start", "skill-complete"}
 )
 _LEAD_LEVEL_EVENT_TYPES = frozenset({"skill-start", "skill-complete"})
-_VALID_TRACE_SKILLS = frozenset({"design", "execute", "recon", "improve", "reflect"})
+_VALID_TRACE_SKILLS = frozenset({"design", "execute", "research", "improve", "reflect"})
 
 
 def _parse_trace_payload(payload_str: str | None) -> dict[str, Any]:
@@ -2575,196 +2576,159 @@ def _compute_intervention_score(
     return tier_weight * confidence_mult / effort_mult
 
 
-def _check_recon_required_fields(intervention: dict[str, Any], index: int) -> None:
-    """Check required fields in intervention."""
-    required = [
-        "title",
-        "leverageLevel",
-        "leverageGroup",
-        "designGoal",
-        "confidence",
-        "effort",
-    ]
-    missing = [f for f in required if f not in intervention]
-    if missing:
-        error_exit(f"Intervention {index}: missing fields {', '.join(missing)}")
-
-
-def _check_recon_leverage_fields(
-    intervention: dict[str, Any], index: int
-) -> tuple[int, str, str]:
-    """Validate and return leverage level, confidence, and effort."""
-    level = intervention.get("leverageLevel")
-    if not isinstance(level, int) or not 1 <= level <= 7:
-        error_exit(
-            f"Intervention {index}: leverageLevel must be integer 1-7, got {level}"
-        )
-
-    group = intervention.get("leverageGroup")
-    if group not in {"Intent", "Design", "Feedbacks", "Parameters"}:
-        error_exit(f"Intervention {index}: invalid leverageGroup '{group}'")
-
-    if level <= 5 and not intervention.get("wrongDirection"):
-        error_exit(
-            f"Intervention {index}: wrongDirection required for leverageLevel {level}"
-        )
-
-    return level, str(intervention.get("confidence")), str(intervention.get("effort"))
-
-
-def _validate_recon_intervention(
-    intervention: dict[str, Any],
-    index: int,
-    tier_weights: dict[int, int],
-    confidence_multipliers: dict[str, float],
-    effort_multipliers: dict[str, float],
-) -> None:
-    """Validate a single intervention and compute its compositeScore."""
-    _check_recon_required_fields(intervention, index)
-    level, confidence, effort = _check_recon_leverage_fields(intervention, index)
-
-    if confidence not in confidence_multipliers:
-        error_exit(f"Intervention {index}: invalid confidence '{confidence}'")
-
-    if effort not in effort_multipliers:
-        error_exit(f"Intervention {index}: invalid effort '{effort}'")
-
-    score = _compute_intervention_score(
-        level,
-        confidence,
-        effort,
-        tier_weights,
-        confidence_multipliers,
-        effort_multipliers,
-    )
-    intervention["compositeScore"] = round(score, 2)
-
-
-def _load_and_validate_recon_structure(
-    recon_path: str,
-) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    """Load and validate recon.json top-level structure."""
-    if not os.path.exists(recon_path):
-        error_exit(f"Recon file not found: {recon_path}")
-
+def _load_research_json(research_path: str) -> dict[str, Any]:
+    """Load research.json from disk, exit on error."""
+    if not os.path.exists(research_path):
+        error_exit(f"Research file not found: {research_path}")
     try:
-        with open(recon_path) as f:
-            data = json.load(f)
+        with open(research_path) as f:
+            return json.load(f)  # type: ignore[return-value]
     except json.JSONDecodeError as e:
-        error_exit(f"Invalid JSON in recon file: {e}")
+        error_exit(f"Invalid JSON in research file: {e}")
     except OSError as e:
-        error_exit(f"Error reading recon file: {e}")
+        error_exit(f"Error reading research file: {e}")
+
+
+def _load_and_validate_research_structure(
+    research_path: str,
+) -> dict[str, Any]:
+    """Load and validate research.json top-level structure."""
+    data = _load_research_json(research_path)
 
     if data.get("schemaVersion") != 1:
         error_exit(
             f"Invalid schemaVersion: expected 1, got {data.get('schemaVersion')}"
         )
 
-    required = ["goal", "scope", "interventions", "contradictions"]
+    required = ["goal", "sections", "recommendations", "contradictions"]
     missing = [f for f in required if f not in data]
     if missing:
         error_exit(f"Missing required fields: {', '.join(missing)}")
 
-    interventions = data.get("interventions", [])
-    if not isinstance(interventions, list):
-        error_exit("interventions must be an array")
+    if not isinstance(data.get("sections", {}), dict):
+        error_exit("sections must be an object")
 
-    if len(interventions) > 5:
-        error_exit(f"Too many interventions: {len(interventions)} > 5")
+    if not isinstance(data.get("recommendations", []), list):
+        error_exit("recommendations must be an array")
 
-    return data, interventions
+    return data
 
 
-def cmd_recon_validate(args: argparse.Namespace) -> NoReturn:
-    """Validate recon.json schema and compute compositeScore for interventions.
+def _validate_research_recommendation(rec: dict[str, Any], index: int) -> None:
+    """Validate a single recommendation entry."""
+    valid_actions = {"adopt", "adapt", "investigate", "defer", "reject"}
+    valid_confidence = {"high", "medium", "low"}
+    valid_effort = {"trivial", "small", "medium", "large", "transformative"}
 
-    Validates schemaVersion, required fields, intervention structure.
-    Computes compositeScore = tier_weight * confidence_multiplier / effort_multiplier.
-    Enforces wrongDirection required for levels 1-5.
+    required = ["action", "scope", "reasoning", "confidence", "effort"]
+    missing = [f for f in required if f not in rec]
+    if missing:
+        error_exit(f"Recommendation {index}: missing fields {', '.join(missing)}")
+
+    action = rec.get("action")
+    if action not in valid_actions:
+        error_exit(
+            f"Recommendation {index}: invalid action '{action}'. "
+            f"Must be one of: {', '.join(sorted(valid_actions))}"
+        )
+
+    if action in ("adopt", "adapt") and not rec.get("designGoal"):
+        error_exit(
+            f"Recommendation {index}: designGoal is required when action is '{action}'"
+        )
+
+    confidence = rec.get("confidence")
+    if confidence not in valid_confidence:
+        error_exit(
+            f"Recommendation {index}: invalid confidence '{confidence}'. "
+            f"Must be one of: {', '.join(sorted(valid_confidence))}"
+        )
+
+    effort = rec.get("effort")
+    if effort not in valid_effort:
+        error_exit(
+            f"Recommendation {index}: invalid effort '{effort}'. "
+            f"Must be one of: {', '.join(sorted(valid_effort))}"
+        )
+
+
+def cmd_research_validate(args: argparse.Namespace) -> NoReturn:
+    """Validate research.json schema.
+
+    Validates schemaVersion, required fields, recommendations structure.
+    Checks action enum, confidence/effort values, and designGoal requirement.
     """
-    _, interventions = _load_and_validate_recon_structure(args.recon_path)
+    data = _load_and_validate_research_structure(args.research_path)
 
-    # Tier weights (software-adjusted)
-    tier_weights = {1: 5, 2: 4, 3: 6, 4: 5, 5: 6, 6: 7, 7: 1}
-
-    # Confidence multipliers
-    confidence_multipliers = {"high": 1.0, "medium": 0.7, "low": 0.4}
-
-    # Effort multipliers
-    effort_multipliers = {
-        "trivial": 0.5,
-        "small": 1.0,
-        "medium": 2.0,
-        "large": 4.0,
-        "transformative": 8.0,
-    }
-
-    # Validate and score each intervention
-    for i, intervention in enumerate(interventions):
-        _validate_recon_intervention(
-            intervention, i, tier_weights, confidence_multipliers, effort_multipliers
-        )
-
-    output_json({"ok": True, "interventions": interventions, "validated": True})
-
-
-def cmd_recon_summary(args: argparse.Namespace) -> NoReturn:
-    """Extract summary from recon.json for display.
-
-    Returns intervention count, depth tier, top interventions with designGoal.
-    """
-    recon_path = args.recon_path
-
-    if not os.path.exists(recon_path):
-        error_exit(f"Recon file not found: {recon_path}")
-
-    try:
-        with open(recon_path) as f:
-            data = json.load(f)
-    except json.JSONDecodeError as e:
-        error_exit(f"Invalid JSON in recon file: {e}")
-    except OSError as e:
-        error_exit(f"Error reading recon file: {e}")
-
-    interventions = data.get("interventions", [])
-    additional_findings = data.get("additionalFindings", 0)
-
-    # Extract top interventions
-    top_interventions = []
-    for intervention in interventions:
-        top_interventions.append(
-            {
-                "rank": intervention.get("rank", 0),
-                "title": intervention.get("title", ""),
-                "designGoal": intervention.get("designGoal", ""),
-                "leverageGroup": intervention.get("leverageGroup", ""),
-                "compositeScore": intervention.get("compositeScore", 0),
-            }
-        )
-
-    # Compute overall confidence (average)
-    if interventions:
-        confidence_map = {"high": 1.0, "medium": 0.7, "low": 0.4}
-        confidence_sum = sum(
-            confidence_map.get(i.get("confidence", "low"), 0.4) for i in interventions
-        )
-        avg_confidence = confidence_sum / len(interventions)
-        if avg_confidence >= 0.85:
-            confidence_overall = "high"
-        elif avg_confidence >= 0.55:
-            confidence_overall = "medium"
-        else:
-            confidence_overall = "low"
-    else:
-        confidence_overall = "unknown"
+    recommendations = data.get("recommendations", [])
+    for i, rec in enumerate(recommendations):
+        _validate_research_recommendation(rec, i)
 
     output_json(
         {
             "ok": True,
-            "interventionCount": len(interventions),
-            "topInterventions": top_interventions,
-            "additionalFindings": additional_findings,
-            "confidenceOverall": confidence_overall,
+            "recommendationCount": len(recommendations),
+            "sectionCount": len(data.get("sections", {})),
+            "validated": True,
+        }
+    )
+
+
+_ACTION_PRIORITY = {"adopt": 0, "adapt": 1, "investigate": 2, "defer": 3, "reject": 4}
+
+
+def _research_verdict(recommendations: list[dict[str, Any]]) -> str:
+    """Compute overall verdict from recommendation actions (priority order)."""
+    for action in ("adopt", "adapt", "investigate", "defer", "reject"):
+        if any(r.get("action") == action for r in recommendations):
+            return action
+    return "unknown"
+
+
+def _research_suggested_goal(sorted_recs: list[dict[str, Any]]) -> str | None:
+    """Return designGoal from first adopt/adapt recommendation, or None."""
+    for rec in sorted_recs:
+        if rec.get("action") in ("adopt", "adapt") and rec.get("designGoal"):
+            return rec["designGoal"]  # type: ignore[return-value]
+    return None
+
+
+def cmd_research_summary(args: argparse.Namespace) -> NoReturn:
+    """Extract summary from research.json for display.
+
+    Returns recommendation count, section count, top recommendations with designGoal.
+    """
+    data = _load_research_json(args.research_path)
+
+    recommendations = data.get("recommendations", [])
+    sections = data.get("sections", {})
+    contradictions = data.get("contradictions", [])
+    research_gaps = data.get("researchGaps", [])
+
+    sorted_recs = sorted(
+        recommendations,
+        key=lambda r: _ACTION_PRIORITY.get(r.get("action", "defer"), 99),
+    )
+    top_recommendations = [
+        {
+            "action": r.get("action", ""),
+            "scope": r.get("scope", ""),
+            "designGoal": r.get("designGoal", ""),
+            "confidence": r.get("confidence", ""),
+        }
+        for r in sorted_recs[:3]
+    ]
+
+    output_json(
+        {
+            "ok": True,
+            "verdict": _research_verdict(recommendations),
+            "suggestedDesignGoal": _research_suggested_goal(sorted_recs),
+            "recommendationCount": len(recommendations),
+            "topRecommendations": top_recommendations,
+            "sectionCount": len(sections),
+            "contradictionCount": len(contradictions),
+            "researchGapCount": len(research_gaps),
         }
     )
 
@@ -3061,11 +3025,13 @@ def _get_shared_block_patterns() -> dict[str, dict[str, Any]]:
         """Normalize script setup by replacing skill-specific values."""
         # Replace skill names in paths
         s = re.sub(
-            r"skills/(design|execute|improve|recon|reflect)", "skills/{SKILL}", s
+            r"skills/(design|execute|improve|research|reflect)", "skills/{SKILL}", s
         )
         # Replace skill names in team-name calls
         s = re.sub(
-            r"team-name (design|execute|improve|recon|reflect)", "team-name {SKILL}", s
+            r"team-name (design|execute|improve|research|reflect)",
+            "team-name {SKILL}",
+            s,
         )
         # Remove optional TEAM_NAME line (reflect doesn't have it)
         s = re.sub(
@@ -3161,7 +3127,7 @@ def _get_shared_block_patterns() -> dict[str, dict[str, Any]]:
 
 def _load_skill_paths(skills_dir: str) -> dict[str, str]:
     """Load and validate SKILL.md paths for all expected skills."""
-    expected_skills = ["design", "execute", "improve", "recon", "reflect"]
+    expected_skills = ["design", "execute", "improve", "research", "reflect"]
     skill_paths = {}
 
     for skill in expected_skills:
@@ -3286,7 +3252,7 @@ def cmd_sync_check(args: argparse.Namespace) -> NoReturn:
 def cmd_archive(args: argparse.Namespace) -> NoReturn:
     """Archive .design/ directory to history/{timestamp}/.
 
-    Preserves persistent files: memory.jsonl, reflection.jsonl, handoff.md, recon.json, history/
+    Preserves persistent files: memory.jsonl, reflection.jsonl, handoff.md, research.json, history/
     Moves all other files to .design/history/{UTC timestamp}/
     """
     design_dir = args.design_dir.rstrip("/")
@@ -3308,7 +3274,7 @@ def cmd_archive(args: argparse.Namespace) -> NoReturn:
         "memory.jsonl",
         "reflection.jsonl",
         "handoff.md",
-        "recon.json",
+        "research.json",
         "trace.jsonl",
         "history",
     }
@@ -3440,12 +3406,12 @@ def cmd_self_test(args: argparse.Namespace) -> NoReturn:
                 lambda: _test_worker_completion_validate(script_path),
             ),
             (
-                "recon-validate",
-                lambda: _test_recon_validate(script_path, fixtures["recon_file"]),
+                "research-validate",
+                lambda: _test_research_validate(script_path, fixtures["research_file"]),
             ),
             (
-                "recon-summary",
-                lambda: _test_recon_summary(script_path, fixtures["recon_file"]),
+                "research-summary",
+                lambda: _test_research_summary(script_path, fixtures["research_file"]),
             ),
             (
                 "validate-checks (valid)",
@@ -3830,7 +3796,7 @@ def _create_fixtures(tmp_dir: str) -> dict[str, str]:
 
     # Add persistent files that should NOT be archived
     shutil.copy(memory_file_path, os.path.join(archive_dir, "memory.jsonl"))
-    with open(os.path.join(archive_dir, "recon.json"), "w") as f:
+    with open(os.path.join(archive_dir, "research.json"), "w") as f:
         f.write('{"schemaVersion": 1, "goal": "test"}')
 
     # Plan with bad Python check syntax
@@ -3868,38 +3834,56 @@ def _create_fixtures(tmp_dir: str) -> dict[str, str]:
     with open(bad_check_plan_path, "w") as f:
         json.dump(bad_check_plan, f)
 
-    # Recon.json fixture
-    recon_data = {
+    # Research.json fixture
+    research_data = {
         "schemaVersion": 1,
-        "goal": "Test recon",
+        "goal": "Test research",
         "scope": "test area",
+        "researchDepth": "standard",
         "sources": [],
-        "interventions": [
+        "sections": {
+            "prerequisites": {
+                "summary": "test prerequisites",
+                "technical": [],
+                "organizational": [],
+                "invisibleCurriculum": [],
+            },
+            "mentalModels": {
+                "summary": "test mental models",
+                "keyPrinciples": [],
+                "tradeoffs": [],
+                "commonMisconceptions": [],
+            },
+            "usagePatterns": {"summary": "test usage", "patterns": []},
+            "failurePatterns": {"summary": "test failures", "patterns": []},
+            "productionReadiness": {
+                "summary": "test production",
+                "observability": [],
+                "operationalPatterns": [],
+                "scalingConsiderations": [],
+                "securityConsiderations": [],
+            },
+        },
+        "recommendations": [
             {
-                "rank": 1,
-                "title": "Test intervention",
-                "description": "Test description",
-                "leverageLevel": 6,
-                "leverageGroup": "Feedbacks",
-                "leverageName": "structure",
+                "action": "adopt",
+                "scope": "all",
                 "designGoal": "Test design goal",
-                "evidence": ["test evidence"],
-                "constraints": [],
-                "wrongDirection": "Test wrong direction",
+                "reasoning": "Test reasoning",
                 "confidence": "high",
                 "effort": "medium",
-                "risk": "low",
-                "authorityRequired": "developer",
+                "prerequisites": [],
+                "risks": [],
             }
         ],
         "contradictions": [],
-        "knowledgeGaps": [],
-        "additionalFindings": 0,
+        "researchGaps": [],
+        "timestamp": "2026-01-01T00:00:00Z",
     }
 
-    recon_file_path = os.path.join(tmp_dir, "recon.json")
-    with open(recon_file_path, "w") as f:
-        json.dump(recon_data, f)
+    research_file_path = os.path.join(tmp_dir, "research.json")
+    with open(research_file_path, "w") as f:
+        json.dump(research_data, f)
 
     # Create test skills directory for sync-check
     skills_dir = os.path.join(tmp_dir, "skills")
@@ -3926,7 +3910,7 @@ TEAM_NAME=$(python3 $PLAN_CLI team-name {SKILL}).teamName
 1. Fix validation errors and re-run finalize.
 2. If structure is fundamentally broken: rebuild plan inline."""
 
-    for skill in ["design", "execute", "improve", "recon", "reflect"]:
+    for skill in ["design", "execute", "improve", "research", "reflect"]:
         skill_dir = os.path.join(skills_dir, skill)
         os.makedirs(skill_dir, exist_ok=True)
         skill_md = os.path.join(skill_dir, "SKILL.md")
@@ -4025,7 +4009,7 @@ End of skill.
         "expert_artifact": expert_artifact_path,
         "design_dir": design_dir,
         "archive_dir": archive_dir,
-        "recon_file": recon_file_path,
+        "research_file": research_file_path,
         "skills_dir": skills_dir,
         "trace_file": trace_file_path,
         "trace_archive_dir": trace_archive_dir,
@@ -4275,29 +4259,27 @@ def _test_reflection_validate(script_path: str) -> None:
     assert output.get("ok") is False, "reflection-validate should reject invalid input"
 
 
-def _test_recon_validate(script_path: str, recon_path: str) -> None:
-    """Test recon-validate command."""
-    output = _run_command(script_path, ["recon-validate", recon_path])
-    assert output.get("ok") is True, f"recon-validate failed: {output}"
+def _test_research_validate(script_path: str, research_path: str) -> None:
+    """Test research-validate command."""
+    output = _run_command(script_path, ["research-validate", research_path])
+    assert output.get("ok") is True, f"research-validate failed: {output}"
     assert output.get("validated") is True, (
-        "recon-validate should report validated=True"
+        "research-validate should report validated=True"
     )
-    assert "interventions" in output, "recon-validate missing interventions field"
-    assert len(output["interventions"]) > 0, "Should have at least one intervention"
-    assert "compositeScore" in output["interventions"][0], (
-        "Interventions should have compositeScore"
+    assert "recommendationCount" in output, (
+        "research-validate missing recommendationCount field"
     )
 
 
-def _test_recon_summary(script_path: str, recon_path: str) -> None:
-    """Test recon-summary command."""
-    output = _run_command(script_path, ["recon-summary", recon_path])
-    assert output.get("ok") is True, f"recon-summary failed: {output}"
-    assert "topInterventions" in output, "recon-summary missing topInterventions field"
-    assert "interventionCount" in output, (
-        "recon-summary missing interventionCount field"
+def _test_research_summary(script_path: str, research_path: str) -> None:
+    """Test research-summary command."""
+    output = _run_command(script_path, ["research-summary", research_path])
+    assert output.get("ok") is True, f"research-summary failed: {output}"
+    assert "recommendationCount" in output, (
+        "research-summary missing recommendationCount field"
     )
-    assert "interventionCount" in output, "recon-summary missing interventionCount"
+    assert "sectionCount" in output, "research-summary missing sectionCount field"
+    assert "verdict" in output, "research-summary missing verdict field"
 
 
 def _test_validate_checks_valid(script_path: str, plan_path: str) -> None:
@@ -4512,8 +4494,8 @@ def _test_archive(script_path: str, archive_dir: str) -> None:
     assert os.path.exists(os.path.join(archive_dir, "memory.jsonl")), (
         "memory.jsonl should not be archived"
     )
-    assert os.path.exists(os.path.join(archive_dir, "recon.json")), (
-        "recon.json should not be archived"
+    assert os.path.exists(os.path.join(archive_dir, "research.json")), (
+        "research.json should not be archived"
     )
 
     # Verify non-persistent files were moved
@@ -5281,49 +5263,44 @@ class TestPlanCommands(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertTrue(result["ok"])
 
-    def skip_test_recon_validate_minimal(self) -> None:
-        """Test recon-validate with minimal valid recon file."""
-        recon_file = os.path.join(self.tmp_dir.name, "recon.json")
-        with open(recon_file, "w") as f:
+    def skip_test_research_validate_minimal(self) -> None:
+        """Test research-validate with minimal valid research file."""
+        research_file = os.path.join(self.tmp_dir.name, "research.json")
+        with open(research_file, "w") as f:
             json.dump(
                 {
                     "schemaVersion": 1,
                     "goal": "Test goal",
-                    "context": {
-                        "stack": "python",
-                        "conventions": [],
-                        "testCommand": None,
-                        "buildCommand": None,
-                    },
-                    "researchFindings": [],
-                    "interventions": [],
+                    "sections": {},
+                    "recommendations": [],
                     "contradictions": [],
                 },
                 f,
             )
 
-        args = argparse.Namespace(recon_path=recon_file)
-        exit_code, result = self._run_cmd(cmd_recon_validate, args)
+        args = argparse.Namespace(research_path=research_file)
+        exit_code, result = self._run_cmd(cmd_research_validate, args)
 
         self.assertEqual(exit_code, 0)
         self.assertTrue(result["ok"])
 
-    def test_recon_summary_empty(self) -> None:
-        """Test recon-summary with empty interventions."""
-        recon_file = os.path.join(self.tmp_dir.name, "recon.json")
-        with open(recon_file, "w") as f:
+    def test_research_summary_empty(self) -> None:
+        """Test research-summary with empty recommendations."""
+        research_file = os.path.join(self.tmp_dir.name, "research.json")
+        with open(research_file, "w") as f:
             json.dump(
                 {
                     "schemaVersion": 1,
                     "goal": "Test",
-                    "interventions": [],
+                    "sections": {},
+                    "recommendations": [],
                     "contradictions": [],
                 },
                 f,
             )
 
-        args = argparse.Namespace(recon_path=recon_file)
-        exit_code, result = self._run_cmd(cmd_recon_summary, args)
+        args = argparse.Namespace(research_path=research_file)
+        exit_code, result = self._run_cmd(cmd_research_summary, args)
 
         self.assertEqual(exit_code, 0)
         self.assertTrue(result["ok"])
@@ -6045,24 +6022,24 @@ class TestPlanCommands(unittest.TestCase):
         self.assertFalse(result["ok"])
 
     # ================================================================
-    # Tests for cmd_recon_validate with interventions
+    # Tests for cmd_research_validate with recommendations
     # ================================================================
 
-    def test_recon_validate_with_interventions(self) -> None:
-        """Test recon-validate with valid interventions and score computation."""
-        recon_file = os.path.join(self.tmp_dir.name, "recon.json")
-        with open(recon_file, "w") as f:
+    def test_research_validate_with_recommendations(self) -> None:
+        """Test research-validate with valid recommendations."""
+        research_file = os.path.join(self.tmp_dir.name, "research_valid.json")
+        with open(research_file, "w") as f:
             json.dump(
                 {
                     "schemaVersion": 1,
-                    "goal": "Improve performance",
-                    "scope": {"directories": ["src/"]},
-                    "interventions": [
+                    "goal": "Evaluate caching strategy",
+                    "sections": {"usagePatterns": {"summary": "Redis is common"}},
+                    "recommendations": [
                         {
-                            "title": "Add caching",
-                            "leverageLevel": 6,
-                            "leverageGroup": "Design",
-                            "designGoal": "Reduce latency",
+                            "action": "adopt",
+                            "scope": "all services",
+                            "designGoal": "Add Redis caching layer",
+                            "reasoning": "Reduces latency by 80%",
                             "confidence": "high",
                             "effort": "medium",
                         }
@@ -6072,28 +6049,26 @@ class TestPlanCommands(unittest.TestCase):
                 f,
             )
 
-        args = argparse.Namespace(recon_path=recon_file)
-        exit_code, result = self._run_cmd(cmd_recon_validate, args)
+        args = argparse.Namespace(research_path=research_file)
+        exit_code, result = self._run_cmd(cmd_research_validate, args)
         self.assertEqual(exit_code, 0)
         self.assertTrue(result["ok"])
-        self.assertEqual(len(result["interventions"]), 1)
-        self.assertIn("compositeScore", result["interventions"][0])
+        self.assertEqual(result["recommendationCount"], 1)
 
-    def test_recon_validate_invalid_leverage_level(self) -> None:
-        """Test recon-validate rejects invalid leverage level."""
-        recon_file = os.path.join(self.tmp_dir.name, "bad_recon.json")
-        with open(recon_file, "w") as f:
+    def test_research_validate_invalid_action(self) -> None:
+        """Test research-validate rejects invalid action enum."""
+        research_file = os.path.join(self.tmp_dir.name, "bad_research.json")
+        with open(research_file, "w") as f:
             json.dump(
                 {
                     "schemaVersion": 1,
                     "goal": "Test",
-                    "scope": {"directories": ["src/"]},
-                    "interventions": [
+                    "sections": {},
+                    "recommendations": [
                         {
-                            "title": "Bad",
-                            "leverageLevel": 99,
-                            "leverageGroup": "Design",
-                            "designGoal": "Test",
+                            "action": "unknown-action",
+                            "scope": "all",
+                            "reasoning": "test",
                             "confidence": "high",
                             "effort": "small",
                         }
@@ -6103,28 +6078,28 @@ class TestPlanCommands(unittest.TestCase):
                 f,
             )
 
-        args = argparse.Namespace(recon_path=recon_file)
-        exit_code, result = self._run_cmd(cmd_recon_validate, args)
+        args = argparse.Namespace(research_path=research_file)
+        exit_code, result = self._run_cmd(cmd_research_validate, args)
         self.assertEqual(exit_code, 1)
         self.assertFalse(result["ok"])
 
-    def test_recon_validate_missing_wrong_direction(self) -> None:
-        """Test recon-validate requires wrongDirection for levels 1-5."""
-        recon_file = os.path.join(self.tmp_dir.name, "no_wd_recon.json")
-        with open(recon_file, "w") as f:
+    def test_research_validate_missing_design_goal(self) -> None:
+        """Test research-validate requires designGoal for adopt/adapt actions."""
+        research_file = os.path.join(self.tmp_dir.name, "no_goal_research.json")
+        with open(research_file, "w") as f:
             json.dump(
                 {
                     "schemaVersion": 1,
                     "goal": "Test",
-                    "scope": {"directories": ["src/"]},
-                    "interventions": [
+                    "sections": {},
+                    "recommendations": [
                         {
-                            "title": "Low level",
-                            "leverageLevel": 3,
-                            "leverageGroup": "Feedbacks",
-                            "designGoal": "Test",
+                            "action": "adopt",
+                            "scope": "all",
+                            "reasoning": "good idea",
                             "confidence": "medium",
                             "effort": "small",
+                            # designGoal missing — should fail
                         }
                     ],
                     "contradictions": [],
@@ -6132,54 +6107,58 @@ class TestPlanCommands(unittest.TestCase):
                 f,
             )
 
-        args = argparse.Namespace(recon_path=recon_file)
-        exit_code, result = self._run_cmd(cmd_recon_validate, args)
+        args = argparse.Namespace(research_path=research_file)
+        exit_code, result = self._run_cmd(cmd_research_validate, args)
         self.assertEqual(exit_code, 1)
         self.assertFalse(result["ok"])
 
     # ================================================================
-    # Tests for cmd_recon_summary with data
+    # Tests for cmd_research_summary with data
     # ================================================================
 
-    def test_recon_summary_with_interventions(self) -> None:
-        """Test recon-summary formats interventions for display."""
-        recon_file = os.path.join(self.tmp_dir.name, "recon_sum.json")
-        with open(recon_file, "w") as f:
+    def test_research_summary_with_recommendations(self) -> None:
+        """Test research-summary formats recommendations for display."""
+        research_file = os.path.join(self.tmp_dir.name, "research_sum.json")
+        with open(research_file, "w") as f:
             json.dump(
                 {
                     "schemaVersion": 1,
-                    "goal": "Improve",
-                    "interventions": [
+                    "goal": "Evaluate GraphQL",
+                    "sections": {
+                        "usagePatterns": {"summary": "Apollo is popular"},
+                        "failurePatterns": {"summary": "N+1 is common"},
+                    },
+                    "recommendations": [
                         {
-                            "rank": 1,
-                            "title": "Cache layer",
-                            "designGoal": "Reduce latency",
-                            "leverageGroup": "Design",
-                            "compositeScore": 3.5,
+                            "action": "adopt",
+                            "scope": "API layer",
+                            "designGoal": "Replace REST with GraphQL",
+                            "reasoning": "Reduces over-fetching",
                             "confidence": "high",
+                            "effort": "large",
                         },
                         {
-                            "rank": 2,
-                            "title": "Index queries",
-                            "designGoal": "Faster queries",
-                            "leverageGroup": "Parameters",
-                            "compositeScore": 2.1,
+                            "action": "defer",
+                            "scope": "mobile clients",
+                            "reasoning": "Not ready yet",
                             "confidence": "medium",
+                            "effort": "small",
                         },
                     ],
                     "contradictions": [],
-                    "additionalFindings": 3,
+                    "researchGaps": ["Need production data"],
                 },
                 f,
             )
 
-        args = argparse.Namespace(recon_path=recon_file)
-        exit_code, result = self._run_cmd(cmd_recon_summary, args)
+        args = argparse.Namespace(research_path=research_file)
+        exit_code, result = self._run_cmd(cmd_research_summary, args)
         self.assertEqual(exit_code, 0)
         self.assertTrue(result["ok"])
-        self.assertEqual(result["interventionCount"], 2)
-        self.assertEqual(len(result["topInterventions"]), 2)
-        self.assertEqual(result["additionalFindings"], 3)
+        self.assertEqual(result["recommendationCount"], 2)
+        self.assertEqual(result["sectionCount"], 2)
+        self.assertEqual(result["verdict"], "adopt")
+        self.assertEqual(result["researchGapCount"], 1)
 
     # ================================================================
     # Tests for cmd_memory_summary
@@ -6262,7 +6241,7 @@ class TestPlanCommands(unittest.TestCase):
         os.makedirs(design_dir, exist_ok=True)
 
         # Create persistent files
-        for pf in ["memory.jsonl", "reflection.jsonl", "handoff.md", "recon.json"]:
+        for pf in ["memory.jsonl", "reflection.jsonl", "handoff.md", "research.json"]:
             with open(os.path.join(design_dir, pf), "w") as f:
                 f.write("persistent\n")
 
@@ -6278,7 +6257,7 @@ class TestPlanCommands(unittest.TestCase):
         self.assertIn("archivedTo", result)
 
         # Persistent files still exist
-        for pf in ["memory.jsonl", "reflection.jsonl", "handoff.md", "recon.json"]:
+        for pf in ["memory.jsonl", "reflection.jsonl", "handoff.md", "research.json"]:
             self.assertTrue(
                 os.path.exists(os.path.join(design_dir, pf)),
                 f"Persistent file {pf} should survive archive",
@@ -6817,18 +6796,18 @@ def main() -> None:
     p.add_argument("--limit", type=int, default=5, help="Max results to return")
     p.set_defaults(func=cmd_reflection_search)
 
-    # Recon commands
+    # Research commands
     p = subparsers.add_parser(
-        "recon-validate", help="Validate recon.json and compute composite scores"
+        "research-validate", help="Validate research.json schema and recommendations"
     )
-    p.add_argument("recon_path", nargs="?", default=".design/recon.json")
-    p.set_defaults(func=cmd_recon_validate)
+    p.add_argument("research_path", nargs="?", default=".design/research.json")
+    p.set_defaults(func=cmd_research_validate)
 
     p = subparsers.add_parser(
-        "recon-summary", help="Extract summary from recon.json for display"
+        "research-summary", help="Extract summary from research.json for display"
     )
-    p.add_argument("recon_path", nargs="?", default=".design/recon.json")
-    p.set_defaults(func=cmd_recon_summary)
+    p.add_argument("research_path", nargs="?", default=".design/research.json")
+    p.set_defaults(func=cmd_research_summary)
 
     # Validation commands
     p = subparsers.add_parser(
@@ -6901,7 +6880,7 @@ def main() -> None:
     p.add_argument(
         "--skill",
         required=True,
-        help="Skill name (design|execute|recon|improve|reflect)",
+        help="Skill name (design|execute|research|improve|reflect)",
     )
     p.add_argument(
         "--agent", help="Agent name (optional for skill-start/skill-complete)"
