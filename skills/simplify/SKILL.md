@@ -105,8 +105,8 @@ Additional constraint for all analysts: **SKIP recursive algorithms — 42% LLM 
 - **Tools denied**: Edit, Write.
 - Apply the symptom table as primary analytical lens. For EVERY symptom found, run the 5-step process. Report cascade opportunities with eliminationCount.
 - **Scope exclusion**: SKILL.md files are NEVER in scope.
+- **PRIMARY LENS: "Everything is a special case of..."** — This is the core collapse mechanism. Before analyzing any code, ask: what's the unifying principle that makes multiple components unnecessary? One powerful abstraction > ten clever hacks. The pattern is usually already there, just needs recognition.
 - Core question: **"What if they're all the same thing underneath?"**
-- Generalization heuristic: "Everything is a special case of..."
 - Ambition calibration: Seek 10x wins (structural collapses), not 10% improvements. Measure in "how many things can we delete?"
 
 Include in pattern-recognizer prompt:
@@ -156,6 +156,13 @@ Include in pattern-recognizer prompt:
 - Insight: All are per-entity resource limits
 - After: One ResourceGovernor with 4 resource types
 - Eliminated: 4 custom enforcement systems (eliminationCount: 4)
+
+**Worked Example 3: Immutability (Paradigm-Level Cascade)**
+- Before: Defensive copying, locking, cache invalidation, temporal coupling — all separate synchronization mechanisms
+- Insight: Treat everything as immutable data + transformations — the paradigm shift eliminates entire classes of problems
+- After: Functional programming patterns with immutable data structures
+- Eliminated: Entire categories of synchronization, cache invalidation, and temporal coupling bugs (eliminationCount: 4+)
+- Note: This example shows cascades can operate at the PARADIGM level, not just the component level. Look for paradigm shifts that make whole problem categories disappear.
 
 Each analyst finding must include:
 ```json

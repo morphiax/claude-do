@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.18.0] - 2026-02-18
+
+### Added
+
+- Concept dependency graph (`conceptDependencyGraph[]`) in research prerequisites section — ordered learning paths ("understand A before B before C")
+- Evolution paths (`evolutionPaths[]`) in research usage patterns section — captures pattern progression at scale ("start with X, refactor to Y as you scale")
+- Team adoption factors (`teamAdoption`) in research production readiness section — learning timeline, documentation quality, community support assessment
+- Decision framework (`bestFit[]`, `wrongFit[]`) in research recommendations — explicit fit/anti-fit scenarios for adoption planning
+- Minimum research thresholds enforced during synthesis — >=3 production post-mortems, >=5 beginner mistakes, quantitative performance claims required
+- Second calibration example for external-researcher (prerequisite documentation quality)
+- Paradigm-level cascade worked example (immutability) in simplify pattern-recognizer prompt — expands analytical search space beyond component unification
+
+### Changed
+
+- Elevated "Everything is a special case of..." as primary lens in simplify pattern-recognizer prompt (before symptom table)
+- Research DO/DON'T guardrail table expanded with quantitative performance and intended-vs-actual-use rules
+- External-researcher prompt explicitly seeks "intended use case vs how people actually use it" gaps
+
 ## [2.17.0] - 2026-02-18
 
 ### Added

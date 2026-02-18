@@ -3,7 +3,7 @@
 > Multi-agent planning with structured debate, self-verifying execution, and cross-session memory
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Version](https://img.shields.io/badge/version-2.17.0-green.svg)
+![Version](https://img.shields.io/badge/version-2.18.0-green.svg)
 ![Claude Code](https://img.shields.io/badge/Claude%20Code-2.1.32%2B-orange.svg)
 
 ## What's Novel
@@ -28,7 +28,7 @@
 
 **Automated self-test suite** — `plan.py self-test` exercises all 32 commands against synthetic fixtures in a temp directory, enabling CI-style validation of the helper script.
 
-**Comprehensive knowledge research** — `/do:research` gathers and structures knowledge across 5 sections (prerequisites, mental models, usage patterns, failure patterns, production readiness). Spawns researchers to map findings across codebase, external sources, and domain expertise. Produces recommendations with confidence and effort estimates for adoption planning, stored in `.design/research.json`. Design handoff preserves concrete building blocks (patterns, templates, schemas, constraints) from expert artifacts so `/do:design` can read research output alone without re-reading expert artifacts.
+**Comprehensive knowledge research** — `/do:research` gathers and structures knowledge across 5 sections (prerequisites, mental models, usage patterns, failure patterns, production readiness). Spawns researchers to map findings across codebase, external sources, and domain expertise. Minimum research thresholds enforce quality floors (>=3 post-mortems, >=5 beginner mistakes, quantitative performance claims). Concept dependency graphs order learning paths. Evolution paths capture pattern progression at scale. Team adoption factors assess learning timeline, documentation quality, and community support. Decision framework (bestFit/wrongFit scenarios) makes recommendations actionable. Design handoff preserves concrete building blocks for `/do:design`.
 
 ## Usage
 
@@ -57,7 +57,7 @@
 
 ## How It Works
 
-**`/do:research`** always spawns full research team (codebase analyst, external researcher, domain specialist) — research is inherently exploratory, so external sources are always included. Researchers gather findings across codebase, literature, and comparative/theoretical domains. Lead synthesizes findings into 5 knowledge sections (prerequisites, mentalModels, usagePatterns, failurePatterns, productionReadiness) and ranks recommendations by confidence and effort. Outputs to `.design/research.json` with recommendations including confidence, effort, and prerequisites for adoption planning. Memory injection with transparency. 3-turn liveness timeout. End-of-run summary shows recommendation count and research gaps identified.
+**`/do:research`** always spawns full research team (codebase analyst, external researcher, domain specialist) — research is inherently exploratory, so external sources are always included. Researchers gather findings across codebase, literature, and comparative/theoretical domains with minimum quality thresholds (>=3 post-mortems, >=5 beginner mistakes, quantitative performance claims). Lead synthesizes findings into 5 knowledge sections with concept dependency graphs, evolution paths, and team adoption factors. Recommendations include decision framework (bestFit/wrongFit scenarios) alongside confidence and effort. Outputs to `.design/research.json`. Memory injection with transparency. 3-turn liveness timeout. End-of-run summary shows recommendation count and research gaps identified.
 
 **`/do:design`** spawns experts (architects, researchers, domain specialists) based on goal type. For complex goals, experts debate via structured challenges/defenses. The lead synthesizes findings into role briefs with acceptance criteria. Scout auxiliaries verify expert assumptions against the real codebase. Phase announcements show progress. Draft plan review checkpoint for complex goals. Memory injection with transparency. Behavioral trait instructions for experts and auxiliaries. 3-turn liveness timeout (simplified from 5+7). End-of-run summary with metrics.
 
@@ -65,7 +65,7 @@
 
 **`/do:improve`** analyzes Claude Code skills using 7 quality dimensions (Protocol Clarity, Constraint Enforcement, Error Handling, Agent Coordination, Information Flow, Prompt Economy, Verifiability). For general analysis, spawns 2-3 experts; for targeted improvements, uses a single analyst. Produces testable hypotheses with predicted behavioral impacts. Always outputs `.design/plan.json` for `/do:execute` — never writes source files directly. Anti-pattern guards prevent token bloat, circular improvements, and regressions. Expert artifact schema validation. 3-turn liveness timeout. Compressed quality rubric (1/3/5 anchors). Behavioral trait instructions. Phase announcements and end-of-run summary.
 
-**`/do:simplify`** analyzes codebases for cascade simplification opportunities — where one insight eliminates multiple components at once, reducing cognitive overhead without sacrificing capability. Spawns pattern-recognizer and preservation-guardian analysts. Pattern-recognizer identifies cascade opportunities (5 categories: structural, behavioral, data, cross-cutting, organizational). Preservation-guardian ensures semantics are preserved, not just deleted. Lead synthesizes findings into plan.json with preservation-focused worker roles for `/do:execute`. Memory injection with transparency. 3-turn liveness timeout.
+**`/do:simplify`** analyzes codebases for cascade simplification opportunities — where one insight eliminates multiple components at once, reducing cognitive overhead without sacrificing capability. Spawns pattern-recognizer and complexity-analyst. Pattern-recognizer's primary lens is "Everything is a special case of..." — seeking paradigm-level cascades (not just component unification) with 3 worked examples spanning component, system, and paradigm levels. Complexity-analyst cross-references git churn with cyclomatic complexity. Lead synthesizes findings into plan.json with preservation-focused worker roles for `/do:execute`. Memory injection with transparency. 3-turn liveness timeout.
 
 **`/do:reflect`** uses execution outcomes (from `.design/reflection.jsonl`) to identify what's actually working and what isn't. Direct Bash-based analysis (no Task agent) gathers data via plan.py commands, computes metrics, and formulates hypotheses — eliminating hallucination risk. Temporal resolution tracking classifies patterns as active/likely_resolved/confirmed_resolved using a 3-run recency window and memory.jsonl cross-referencing, preventing duplicate improvement work on already-fixed issues. Hypotheses are grounded in real evidence with confidence levels. Requires >=2 reflections to identify patterns. Complements `/do:improve` (static prompt quality) with dynamic functional optimization. Phase announcements and end-of-run summary.
 

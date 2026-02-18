@@ -121,8 +121,8 @@ Key points:
 Research produces structured knowledge across 5 sections with ranked recommendations. Key points:
 
 - Schema fields: schemaVersion (1), goal, context {same as plan.json}, sections {prerequisites, mentalModels, usagePatterns, failurePatterns, productionReadiness}, recommendations[], researchGaps[], designHandoff[] (optional)
-- **Section fields**: name (string), findings (array of finding objects), synthesis (string summary)
-- **Recommendation fields**: id, title, summary, confidence (low/medium/high), effort (low/medium/high), prerequisites (array), reasoning (string)
+- **Section fields**: name (string), findings (array of finding objects), synthesis (string summary). Notable sub-fields: prerequisites.conceptDependencyGraph[] (ordered learning paths), usagePatterns.evolutionPaths[] (stage/pattern/trigger progression), productionReadiness.teamAdoption {learningTimeline, documentationQuality, communitySupport}
+- **Recommendation fields**: id, title, summary, confidence (low/medium/high), effort (low/medium/high), prerequisites (array), reasoning (string), bestFit[] (scenarios where this is the right choice), wrongFit[] (scenarios where this is the wrong choice)
 - **Finding fields**: id, section, source, summary, domain (codebase/literature/comparative/theoretical)
 - **Design handoff fields**: source (reference-material|codebase-analysis|expert-finding|literature), element (what the building block is), material (concrete content — string, array, or object), usage (how /do:design should use it)
 - Recommendations include confidence levels and effort estimates for adoption planning
@@ -225,13 +225,13 @@ All six skills use the **main conversation as team lead** with Agent Teams (or T
 - Always spawns full research team (codebase-analyst, external-researcher, domain-specialist) — research is inherently exploratory, external research is always valuable
 - Memory injection: lead searches .design/memory.jsonl for relevant past learnings and injects top 3 into researcher prompts with transparency. Memory search failures gracefully fallback to empty results
 - Researcher prompts include behavioral trait instructions (e.g., "prefer empirical evidence", "ground research in concrete findings")
-- Researcher quality calibration: behavioral sharpeners per researcher type (codebase-analyst, external-researcher, domain-specialist), DO/DON'T guardrail table with dual-scan posture (seek failure signals AND working constraints), source hierarchy tiers for external-researcher, invisible curriculum elicitation for codebase-analyst and domain-specialist
+- Researcher quality calibration: behavioral sharpeners per researcher type (codebase-analyst, external-researcher, domain-specialist), DO/DON'T guardrail table with dual-scan posture (seek failure signals AND working constraints), source hierarchy tiers for external-researcher, invisible curriculum elicitation for codebase-analyst and domain-specialist. Minimum research thresholds: >=3 production post-mortems for failure patterns, >=5 beginner mistakes across all sections, quantitative performance claims required
 - Researcher liveness pipeline: completion checklist tracking which researchers have reported, turn-based timeout (3 turns then re-spawn), re-spawn ceiling (max 2 attempts then proceed with available findings)
 - Synthesis: lead organizes findings across 5 knowledge sections (prerequisites, mentalModels, usagePatterns, failurePatterns, productionReadiness), generates recommendations ranked by confidence and effort
 - Synthesis delegation: lead synthesizes by default. For >15 findings across >3 domains, spawns single synthesis Task agent
 - `research-validate` validates schema, outputs validation result
 - `research-summary` formats findings and recommendations for display
-- Output: produces `.design/research.json` (schemaVersion 1) with knowledge sections and recommendations array. Recommendations include confidence, effort, and prerequisites for adoption planning
+- Output: produces `.design/research.json` (schemaVersion 1) with knowledge sections and recommendations array. Recommendations include confidence, effort, prerequisites, and decision framework (bestFit/wrongFit scenarios) for adoption planning. Sections include concept dependency graphs, evolution paths, and team adoption factors
 - Self-reflection: writes structured self-evaluation to `.design/reflection.jsonl` at end of run using `reflection-add`
 - End-of-run summary: displays recommendation count, knowledge sections completed, research gaps identified, and findings analyzed
 
