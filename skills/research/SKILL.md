@@ -135,10 +135,14 @@ Create the team and spawn researchers in parallel.
 | Surface what experts know but docs omit (invisible curriculum) | Repeat what official docs already say |
 | Separate confirmed-in-this-codebase from literature findings | Conflate external best practice with local reality |
 | Tag each finding with which knowledge sections it informs | Produce untagged findings lists for the lead to classify |
+| Preserve worked examples, concrete demonstrations, and prompt patterns VERBATIM | Summarize examples into abstract descriptions |
+| Include the actual content that makes a technique reproducible | Describe what something does without showing how |
+
+**Verbatim preservation rule**: When reference materials, prompts, agent definitions, or documentation contain worked examples, concrete demonstrations, structural templates, process steps, or prompt engineering patterns — include them VERBATIM in your findings as a `verbatim` field. These are the materials that make the difference between understanding a concept abstractly and being able to reproduce it. Summarizing "there are 3 examples of cascades" loses the teaching value; including the actual examples preserves it. This applies to: example inputs/outputs, step-by-step processes, decision tables, prompt structures, configuration templates, schema patterns, and any content where the specific wording or structure IS the value.
 
 - "Save your complete findings to `.design/expert-{name}.json` as structured JSON."
 - "Then SendMessage to the lead with a summary."
-- "For each finding include: area, observation, evidence, sections (array from: prerequisites/mentalModels/usagePatterns/failurePatterns/productionReadiness), confidence (high/medium/low), effort (trivial/small/medium/large/transformative)."
+- "For each finding include: area, observation, evidence, sections (array from: prerequisites/mentalModels/usagePatterns/failurePatterns/productionReadiness), confidence (high/medium/low), effort (trivial/small/medium/large/transformative). If the finding contains worked examples, templates, process steps, or prompt patterns from reference materials, include a `verbatim` field with the actual content."
 
 6. **Researcher liveness pipeline**: Track completion: (a) SendMessage received AND (b) artifact file exists (`ls .design/expert-{name}.json`). **Show user status**: "Researcher progress: {name} done ({M}/{N} complete)." On completion: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event completion --skill research --agent "{name}" || true`
 
@@ -159,7 +163,14 @@ The lead assembles pre-tagged findings into knowledge sections and writes recomm
 4. **Contradiction detection**: Scan for findings from different researchers that recommend opposing positions on the same area. If found, add to `contradictions[]` in research.json. Do NOT resolve via agent messaging — surface both positions for user decision.
 5. **Write recommendations**: Synthesize all sections into `recommendations[]`. Each recommendation has an `action` (adopt|adapt|investigate|defer|reject) and a concrete `designGoal` for `/do:design` (required when action is adopt or adapt).
 6. **Research gaps**: Tacit or inferred findings lacking corroboration from a second researcher go to `researchGaps[]`, not sections.
-7. **Validate**: Run `python3 $PLAN_CLI research-validate .design/research.json`. Fix any validation errors.
+7. **Design handoff**: Extract concrete, actionable building blocks from expert artifacts into `designHandoff[]`. This is CRITICAL — design should be able to read research.json alone without re-reading expert artifacts. For each building block, include: `source` (reference-material|codebase-analysis|expert-finding|literature), `element` (what it is — e.g., "symptom table", "expert prompt template", "schema pattern"), `material` (the actual content — verbatim excerpts, structured data, concrete patterns), `usage` (how /do:design should use it — e.g., "inject into expert prompts", "use as acceptance criteria template", "adopt as team composition"). Prioritize: concrete patterns/templates over abstract summaries, verbatim reference material over paraphrased, structural schemas over prose descriptions.
+
+   **Completeness check**: Before finalizing designHandoff, verify against source material:
+   - For each reference material mentioned in the user's goal: are worked examples, process steps, decision tables, and prompt patterns preserved verbatim (not just summarized)?
+   - For each tool/skill/agent analyzed: is the actual prompt structure or configuration captured (not just a description of what it does)?
+   - For each technique recommended for adoption: is there enough concrete material that /do:design could implement it without going back to the original source?
+   If any of these checks fail, go back to the expert artifacts' `verbatim` fields or re-read the source to fill the gap.
+8. **Validate**: Run `python3 $PLAN_CLI research-validate .design/research.json`. Fix any validation errors.
 
 ### 5. Output
 
@@ -185,6 +196,7 @@ Recommendations:
 
 Contradictions: {count or "none"}
 Research gaps: {count or "none"}
+Design handoff: {count} building blocks
 
 To act on this research: /do:design {designGoal from primary adopt/adapt recommendation}
 ```
@@ -290,13 +302,25 @@ The lead writes `.design/research.json` — this is NOT `.design/plan.json`. Res
     }
   ],
   "researchGaps": ["areas where additional research would most improve confidence"],
+  "designHandoff": [
+    {
+      "source": "reference-material|codebase-analysis|expert-finding|literature",
+      "element": "what this building block is (e.g., 'symptom table', 'schema pattern', 'expert prompt template')",
+      "material": "the actual content — verbatim excerpts, structured data, concrete patterns. Can be string, array, or object.",
+      "usage": "how /do:design should use this (e.g., 'inject into expert prompts', 'use as team composition template')"
+    }
+  ],
   "timestamp": "ISO 8601"
 }
 ```
 
 **Required top-level fields**: schemaVersion (1), goal, sections, recommendations, contradictions.
 
+**Optional top-level fields**: designHandoff (array of building blocks for /do:design consumption).
+
 **Recommendation required fields**: action (adopt|adapt|investigate|defer|reject), scope, reasoning, confidence, effort. designGoal required when action is adopt or adapt.
+
+**Design handoff fields**: source (reference-material|codebase-analysis|expert-finding|literature), element, material, usage. All required per entry.
 
 **Sections**: All 5 section keys should be present. Each section may be sparsely populated for narrow research topics.
 
