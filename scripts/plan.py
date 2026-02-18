@@ -1421,6 +1421,16 @@ def cmd_health_check(args: argparse.Namespace) -> NoReturn:
     all_issues.extend(ref_issues)
     all_warnings.extend(ref_warnings)
 
+    # Check trace.jsonl
+    trace_path = os.path.join(design_dir, "trace.jsonl")
+    trace_issues, trace_warnings = _check_jsonl_file(
+        trace_path,
+        {"id", "sessionId", "eventType", "timestamp"},
+        "trace.jsonl",
+    )
+    all_issues.extend(trace_issues)
+    all_warnings.extend(trace_warnings)
+
     # Check symlinks
     sym_issues, sym_warnings = _check_symlinks(design_dir)
     all_issues.extend(sym_issues)
@@ -1946,6 +1956,271 @@ def cmd_reflection_search(args: argparse.Namespace) -> NoReturn:
     entries.sort(key=lambda x: _parse_timestamp(x.get("timestamp", 0)), reverse=True)
 
     output_json({"ok": True, "reflections": entries[:limit]})
+
+
+# ============================================================================
+# Trace Commands
+# ============================================================================
+
+_VALID_TRACE_EVENT_TYPES = frozenset(
+    {"spawn", "completion", "failure", "respawn", "skill-start", "skill-complete"}
+)
+_LEAD_LEVEL_EVENT_TYPES = frozenset({"skill-start", "skill-complete"})
+_VALID_TRACE_SKILLS = frozenset({"design", "execute", "recon", "improve", "reflect"})
+
+
+def _parse_trace_payload(payload_str: str | None) -> dict[str, Any]:
+    """Parse --payload string to dict. Calls error_exit on invalid input."""
+    if not payload_str:
+        return {}
+    try:
+        payload = json.loads(payload_str)
+    except json.JSONDecodeError as e:
+        error_exit(f"Invalid JSON in --payload: {e}")
+    if not isinstance(payload, dict):
+        error_exit("--payload must be a JSON object (dict), not a scalar or array")
+    return payload  # type: ignore[return-value]
+
+
+def _validate_trace_args(event_type: str, skill: str, agent_name: str | None) -> None:
+    """Validate trace-add arguments. Calls error_exit on invalid input."""
+    if event_type not in _VALID_TRACE_EVENT_TYPES:
+        error_exit(
+            f"Invalid eventType '{event_type}'. "
+            f"Must be one of: {', '.join(sorted(_VALID_TRACE_EVENT_TYPES))}"
+        )
+    if skill not in _VALID_TRACE_SKILLS:
+        error_exit(
+            f"Invalid skill '{skill}'. Must be one of: {', '.join(sorted(_VALID_TRACE_SKILLS))}"
+        )
+    if event_type not in _LEAD_LEVEL_EVENT_TYPES and not agent_name:
+        error_exit(
+            f"--agent is required for event type '{event_type}'. "
+            "Only skill-start and skill-complete are lead-level events."
+        )
+
+
+def _write_trace_entry(trace_path: str, entry: dict[str, Any]) -> None:
+    """Append entry to trace.jsonl. Raises OSError on failure."""
+    trace_dir = os.path.dirname(trace_path)
+    if trace_dir and not os.path.exists(trace_dir):
+        os.makedirs(trace_dir)
+    with open(trace_path, "a") as f:
+        f.write(json.dumps(entry) + "\n")
+
+
+def cmd_trace_add(args: argparse.Namespace) -> NoReturn:
+    """Append one trace event to trace.jsonl.
+
+    Generates id and timestamp automatically. Returns {ok: true, id: uuid}.
+    Gracefully degrades: if write fails, returns {ok: false, error: ...} but
+    never exits 1 (always exits 0).
+    """
+    event_type = args.event
+    agent_name = args.agent
+    _validate_trace_args(event_type, args.skill, agent_name)
+    payload = _parse_trace_payload(args.payload)
+
+    entry: dict[str, Any] = {
+        "id": str(uuid.uuid4()),
+        "timestamp": _now_iso(),
+        "sessionId": args.session_id,
+        "skill": args.skill,
+        "eventType": event_type,
+        "payload": payload,
+    }
+    if agent_name is not None:
+        entry["agentName"] = agent_name
+    if args.role is not None:
+        entry["agentRole"] = args.role
+
+    try:
+        _write_trace_entry(args.trace_path, entry)
+    except OSError as e:
+        # Always exit 0 — trace failures must never break skill execution
+        sys.stdout.write(
+            json.dumps({"ok": False, "error": f"Trace write failed: {e}"}, indent=2)
+            + "\n"
+        )
+        sys.exit(0)
+
+    output_json({"ok": True, "id": entry["id"]})
+
+
+def _trace_event_matches(
+    entry: dict[str, Any],
+    session_id: str | None,
+    skill: str | None,
+    event: str | None,
+    agent: str | None,
+) -> bool:
+    """Return True if entry matches all provided filters (AND logic)."""
+    if session_id and entry.get("sessionId") != session_id:
+        return False
+    if skill and entry.get("skill") != skill:
+        return False
+    if event and entry.get("eventType") != event:
+        return False
+    return not (agent and entry.get("agentName") != agent)
+
+
+def _load_trace_events(
+    trace_path: str,
+    session_id: str | None,
+    skill: str | None,
+    event: str | None,
+    agent: str | None,
+) -> list[dict[str, Any]]:
+    """Load and filter trace events from file. Returns [] if file missing."""
+    if not os.path.exists(trace_path):
+        return []
+    events: list[dict[str, Any]] = []
+    try:
+        with open(trace_path) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                    if _trace_event_matches(entry, session_id, skill, event, agent):
+                        events.append(entry)
+                except json.JSONDecodeError:
+                    pass
+    except OSError as e:
+        error_exit(f"Error reading trace file: {e}")
+    return events
+
+
+def cmd_trace_search(args: argparse.Namespace) -> NoReturn:
+    """Search trace events with optional filters.
+
+    Returns {ok: true, events: [...], count: N}.
+    All filters are optional and AND-combined.
+    Returns empty list (not error) if file missing.
+    """
+    events = _load_trace_events(
+        args.trace_path,
+        getattr(args, "session_id", None),
+        getattr(args, "skill", None),
+        getattr(args, "event", None),
+        getattr(args, "agent", None),
+    )
+    events.sort(key=lambda x: _parse_timestamp(x.get("timestamp", 0)), reverse=True)
+    limited = events[: args.limit]
+    output_json({"ok": True, "events": limited, "count": len(limited)})
+
+
+def _aggregate_trace_stats(
+    events: list[dict[str, Any]],
+) -> tuple[set[str], set[str], dict[str, int], dict[str, Any] | None]:
+    """Aggregate session/agent/type stats and find latest event."""
+    sessions: set[str] = set()
+    agents: set[str] = set()
+    events_by_type: dict[str, int] = {}
+    latest_event: dict[str, Any] | None = None
+    latest_ts: float = 0.0
+
+    for ev in events:
+        sid = ev.get("sessionId", "")
+        if sid:
+            sessions.add(sid)
+        agent = ev.get("agentName")
+        if agent:
+            agents.add(agent)
+        etype = ev.get("eventType", "unknown")
+        events_by_type[etype] = events_by_type.get(etype, 0) + 1
+        ts = _parse_timestamp(ev.get("timestamp", 0))
+        if ts > latest_ts:
+            latest_ts = ts
+            latest_event = ev
+
+    return sessions, agents, events_by_type, latest_event
+
+
+def cmd_trace_summary(args: argparse.Namespace) -> NoReturn:
+    """Format trace data for human-readable display.
+
+    Returns aggregate stats: sessionCount, eventsByType, agentCount, latestSession.
+    If --session-id given, shows that session only.
+    """
+    session_id_filter = getattr(args, "session_id", None)
+    events = _load_trace_events(args.trace_path, session_id_filter, None, None, None)
+
+    if not events and not os.path.exists(args.trace_path):
+        output_json(
+            {
+                "ok": True,
+                "sessionCount": 0,
+                "eventsByType": {},
+                "agentCount": 0,
+                "latestSession": None,
+            }
+        )
+
+    sessions, agents, events_by_type, latest_event = _aggregate_trace_stats(events)
+
+    latest_session = None
+    if latest_event:
+        session_events = [
+            e for e in events if e.get("sessionId") == latest_event.get("sessionId")
+        ]
+        latest_session = {
+            "sessionId": latest_event.get("sessionId"),
+            "skill": latest_event.get("skill"),
+            "startTime": min(
+                (e.get("timestamp", "") for e in session_events), default=""
+            ),
+            "eventCount": len(session_events),
+        }
+
+    output_json(
+        {
+            "ok": True,
+            "sessionCount": len(sessions),
+            "eventsByType": events_by_type,
+            "agentCount": len(agents),
+            "latestSession": latest_session,
+        }
+    )
+
+
+def cmd_trace_validate(args: argparse.Namespace) -> NoReturn:
+    """Schema validation for trace.jsonl entries.
+
+    Checks required fields on each line. Returns {ok: true/false, warnings: [...], entryCount: N}.
+    Missing file is not an error (returns ok=true, empty result).
+    """
+    trace_path = args.trace_path
+    required_fields = {"id", "timestamp", "sessionId", "skill", "eventType", "payload"}
+    warnings = []
+    entry_count = 0
+
+    if not os.path.exists(trace_path):
+        output_json({"ok": True, "warnings": [], "entryCount": 0})
+
+    try:
+        with open(trace_path) as f:
+            line_num = 0
+            for line in f:
+                line_num += 1
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                    entry_count += 1
+                    missing = required_fields - set(entry.keys())
+                    if missing:
+                        warnings.append(
+                            f"trace.jsonl line {line_num}: missing fields {missing}"
+                        )
+                except json.JSONDecodeError:
+                    warnings.append(f"trace.jsonl line {line_num}: invalid JSON")
+    except OSError as e:
+        error_exit(f"Error reading trace file: {e}")
+
+    output_json({"ok": True, "warnings": warnings, "entryCount": entry_count})
 
 
 # ============================================================================
@@ -3034,6 +3309,7 @@ def cmd_archive(args: argparse.Namespace) -> NoReturn:
         "reflection.jsonl",
         "handoff.md",
         "recon.json",
+        "trace.jsonl",
         "history",
     }
 
@@ -3214,6 +3490,68 @@ def cmd_self_test(args: argparse.Namespace) -> NoReturn:
             (
                 "sync-check",
                 lambda: _test_sync_check(script_path, fixtures["skills_dir"]),
+            ),
+            (
+                "trace-add (new file)",
+                lambda: _test_trace_add_new(script_path, fixtures["trace_file"]),
+            ),
+            (
+                "trace-add (invalid event type)",
+                lambda: _test_trace_add_invalid_event(script_path, tmp_dir),
+            ),
+            (
+                "trace-add (invalid payload)",
+                lambda: _test_trace_add_invalid_payload(script_path, tmp_dir),
+            ),
+            (
+                "trace-add (graceful degradation)",
+                lambda: _test_trace_add_graceful(script_path),
+            ),
+            (
+                "trace-add (skill-start without agent)",
+                lambda: _test_trace_add_skill_start(script_path, tmp_dir),
+            ),
+            (
+                "trace-search (by session-id)",
+                lambda: _test_trace_search_session(script_path, fixtures["trace_file"]),
+            ),
+            (
+                "trace-search (by event type)",
+                lambda: _test_trace_search_event(script_path, fixtures["trace_file"]),
+            ),
+            (
+                "trace-search (missing file)",
+                lambda: _test_trace_search_missing(script_path, tmp_dir),
+            ),
+            (
+                "trace-summary (all sessions)",
+                lambda: _test_trace_summary_all(script_path, fixtures["trace_file"]),
+            ),
+            (
+                "trace-summary (single session)",
+                lambda: _test_trace_summary_session(
+                    script_path, fixtures["trace_file"]
+                ),
+            ),
+            (
+                "trace-validate (valid file)",
+                lambda: _test_trace_validate_valid(script_path, fixtures["trace_file"]),
+            ),
+            (
+                "trace-validate (malformed entries)",
+                lambda: _test_trace_validate_malformed(script_path, tmp_dir),
+            ),
+            (
+                "archive preserves trace.jsonl",
+                lambda: _test_archive_preserves_trace(
+                    script_path, fixtures["trace_archive_dir"]
+                ),
+            ),
+            (
+                "health-check includes trace.jsonl",
+                lambda: _test_health_check_trace(
+                    script_path, fixtures["trace_design_dir"]
+                ),
             ),
         ]
 
@@ -3615,6 +3953,66 @@ End of skill.
         with open(skill_md, "w") as f:
             f.write(content)
 
+    # Trace file with events across 2 sessions
+    trace_file_path = os.path.join(tmp_dir, "trace.jsonl")
+    trace_entries = [
+        {
+            "id": "t-1",
+            "timestamp": one_day_ago,
+            "sessionId": "session-a",
+            "skill": "design",
+            "eventType": "skill-start",
+            "payload": {},
+        },
+        {
+            "id": "t-2",
+            "timestamp": one_day_ago,
+            "sessionId": "session-a",
+            "skill": "design",
+            "eventType": "spawn",
+            "agentName": "architect",
+            "agentRole": "expert",
+            "payload": {"model": "sonnet"},
+        },
+        {
+            "id": "t-3",
+            "timestamp": one_day_ago,
+            "sessionId": "session-a",
+            "skill": "design",
+            "eventType": "completion",
+            "agentName": "architect",
+            "agentRole": "expert",
+            "payload": {},
+        },
+        {
+            "id": "t-4",
+            "timestamp": two_days_ago,
+            "sessionId": "session-b",
+            "skill": "execute",
+            "eventType": "spawn",
+            "agentName": "worker-1",
+            "agentRole": "worker",
+            "payload": {"model": "haiku"},
+        },
+    ]
+    with open(trace_file_path, "w") as f:
+        for entry in trace_entries:
+            f.write(json.dumps(entry) + "\n")
+
+    # Archive dir for trace persistence test
+    trace_archive_dir = os.path.join(tmp_dir, "trace_archive")
+    os.makedirs(trace_archive_dir, exist_ok=True)
+    shutil.copy(minimal_plan_path, os.path.join(trace_archive_dir, "plan.json"))
+    with open(os.path.join(trace_archive_dir, "trace.jsonl"), "w") as f:
+        f.write(json.dumps(trace_entries[0]) + "\n")
+
+    # Design dir for health-check trace test
+    trace_design_dir = os.path.join(tmp_dir, "trace_design")
+    os.makedirs(trace_design_dir, exist_ok=True)
+    shutil.copy(minimal_plan_path, os.path.join(trace_design_dir, "plan.json"))
+    with open(os.path.join(trace_design_dir, "trace.jsonl"), "w") as f:
+        f.write(json.dumps(trace_entries[0]) + "\n")
+
     return {
         "minimal_plan": minimal_plan_path,
         "failed_plan": failed_plan_path,
@@ -3629,6 +4027,9 @@ End of skill.
         "archive_dir": archive_dir,
         "recon_file": recon_file_path,
         "skills_dir": skills_dir,
+        "trace_file": trace_file_path,
+        "trace_archive_dir": trace_archive_dir,
+        "trace_design_dir": trace_design_dir,
     }
 
 
@@ -4119,6 +4520,227 @@ def _test_archive(script_path: str, archive_dir: str) -> None:
     assert not os.path.exists(os.path.join(archive_dir, "plan.json")), (
         "plan.json should be archived"
     )
+
+
+def _test_trace_add_new(script_path: str, trace_file: str) -> None:
+    """Test trace-add creates valid JSONL entry with all required fields."""
+    new_trace = trace_file + ".add_test"
+    output = _run_command(
+        script_path,
+        [
+            "trace-add",
+            new_trace,
+            "--session-id",
+            "test-sess",
+            "--event",
+            "spawn",
+            "--skill",
+            "design",
+            "--agent",
+            "test-agent",
+            "--role",
+            "expert",
+        ],
+    )
+    assert output.get("ok") is True, f"trace-add failed: {output}"
+    assert "id" in output, "trace-add missing id field"
+    with open(new_trace) as f:
+        entry = json.loads(f.readline().strip())
+    for field in ("id", "timestamp", "sessionId", "skill", "eventType", "payload"):
+        assert field in entry, f"trace entry missing {field}"
+    assert entry["agentName"] == "test-agent"
+    assert entry["agentRole"] == "expert"
+
+
+def _test_trace_add_invalid_event(script_path: str, tmp_dir: str) -> None:
+    """Test trace-add rejects unknown event types."""
+    cmd = [
+        "python3",
+        script_path,
+        "trace-add",
+        os.path.join(tmp_dir, "inv.jsonl"),
+        "--session-id",
+        "s",
+        "--event",
+        "bogus-event",
+        "--skill",
+        "design",
+        "--agent",
+        "a",
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)  # noqa: S603
+    assert result.returncode == 1, f"Expected exit 1, got {result.returncode}"
+
+
+def _test_trace_add_invalid_payload(script_path: str, tmp_dir: str) -> None:
+    """Test trace-add rejects invalid JSON payload."""
+    cmd = [
+        "python3",
+        script_path,
+        "trace-add",
+        os.path.join(tmp_dir, "inv2.jsonl"),
+        "--session-id",
+        "s",
+        "--event",
+        "spawn",
+        "--skill",
+        "design",
+        "--agent",
+        "a",
+        "--payload",
+        "not-json",
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)  # noqa: S603
+    assert result.returncode == 1, f"Expected exit 1, got {result.returncode}"
+
+
+def _test_trace_add_graceful(script_path: str) -> None:
+    """Test trace-add gracefully handles unwritable path (exit 0)."""
+    cmd = [
+        "python3",
+        script_path,
+        "trace-add",
+        "/nonexistent/dir/trace.jsonl",
+        "--session-id",
+        "s",
+        "--event",
+        "spawn",
+        "--skill",
+        "design",
+        "--agent",
+        "a",
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)  # noqa: S603
+    assert result.returncode == 0, (
+        f"Expected exit 0 (graceful), got {result.returncode}"
+    )
+    output = json.loads(result.stdout)
+    assert output.get("ok") is False, "Should return ok=false on write failure"
+
+
+def _test_trace_add_skill_start(script_path: str, tmp_dir: str) -> None:
+    """Test trace-add allows skill-start without --agent."""
+    output = _run_command(
+        script_path,
+        [
+            "trace-add",
+            os.path.join(tmp_dir, "skill_start.jsonl"),
+            "--session-id",
+            "s",
+            "--event",
+            "skill-start",
+            "--skill",
+            "design",
+        ],
+    )
+    assert output.get("ok") is True, f"skill-start without agent failed: {output}"
+
+
+def _test_trace_search_session(script_path: str, trace_file: str) -> None:
+    """Test trace-search filters by session-id."""
+    output = _run_command(
+        script_path,
+        ["trace-search", trace_file, "--session-id", "session-a"],
+    )
+    assert output.get("ok") is True, f"trace-search failed: {output}"
+    assert output["count"] == 3, (
+        f"Expected 3 events for session-a, got {output['count']}"
+    )
+    for ev in output["events"]:
+        assert ev["sessionId"] == "session-a", f"Wrong session: {ev['sessionId']}"
+
+
+def _test_trace_search_event(script_path: str, trace_file: str) -> None:
+    """Test trace-search filters by event type."""
+    output = _run_command(
+        script_path,
+        ["trace-search", trace_file, "--event", "spawn"],
+    )
+    assert output.get("ok") is True, f"trace-search failed: {output}"
+    assert output["count"] == 2, f"Expected 2 spawn events, got {output['count']}"
+    for ev in output["events"]:
+        assert ev["eventType"] == "spawn", f"Wrong event type: {ev['eventType']}"
+
+
+def _test_trace_search_missing(script_path: str, tmp_dir: str) -> None:
+    """Test trace-search returns empty list for missing file."""
+    output = _run_command(
+        script_path,
+        ["trace-search", os.path.join(tmp_dir, "nonexistent.jsonl")],
+    )
+    assert output.get("ok") is True, f"trace-search failed: {output}"
+    assert output["events"] == [], f"Expected empty events, got {output['events']}"
+    assert output["count"] == 0, f"Expected count 0, got {output['count']}"
+
+
+def _test_trace_summary_all(script_path: str, trace_file: str) -> None:
+    """Test trace-summary aggregates across all sessions."""
+    output = _run_command(script_path, ["trace-summary", trace_file])
+    assert output.get("ok") is True, f"trace-summary failed: {output}"
+    assert output["sessionCount"] == 2, (
+        f"Expected 2 sessions, got {output['sessionCount']}"
+    )
+    assert output["eventsByType"].get("spawn", 0) >= 2, (
+        f"Expected >=2 spawn events: {output['eventsByType']}"
+    )
+    assert output["agentCount"] >= 2, f"Expected >=2 agents, got {output['agentCount']}"
+
+
+def _test_trace_summary_session(script_path: str, trace_file: str) -> None:
+    """Test trace-summary filters to a single session."""
+    output = _run_command(
+        script_path,
+        ["trace-summary", trace_file, "--session-id", "session-a"],
+    )
+    assert output.get("ok") is True, f"trace-summary failed: {output}"
+    assert output["sessionCount"] == 1, (
+        f"Expected 1 session, got {output['sessionCount']}"
+    )
+    assert output["latestSession"] is not None, "Missing latestSession"
+    assert output["latestSession"]["sessionId"] == "session-a"
+
+
+def _test_trace_validate_valid(script_path: str, trace_file: str) -> None:
+    """Test trace-validate on valid file."""
+    output = _run_command(script_path, ["trace-validate", trace_file])
+    assert output.get("ok") is True, f"trace-validate failed: {output}"
+    assert output["warnings"] == [], f"Unexpected warnings: {output['warnings']}"
+    assert output["entryCount"] == 4, f"Expected 4 entries, got {output['entryCount']}"
+
+
+def _test_trace_validate_malformed(script_path: str, tmp_dir: str) -> None:
+    """Test trace-validate reports warnings for malformed entries."""
+    malformed_path = os.path.join(tmp_dir, "malformed_trace.jsonl")
+    with open(malformed_path, "w") as f:
+        f.write(
+            '{"id":"ok","timestamp":"t","sessionId":"s","skill":"design","eventType":"spawn","payload":{}}\n'
+        )
+        f.write('{"malformed": true}\n')
+        f.write("not json at all\n")
+    output = _run_command(script_path, ["trace-validate", malformed_path])
+    assert output.get("ok") is True, f"trace-validate failed: {output}"
+    assert len(output["warnings"]) >= 2, (
+        f"Expected >=2 warnings, got {output['warnings']}"
+    )
+
+
+def _test_archive_preserves_trace(script_path: str, archive_dir: str) -> None:
+    """Test archive command preserves trace.jsonl."""
+    output = _run_command(script_path, ["archive", archive_dir])
+    assert output.get("ok") is True, f"archive failed: {output}"
+    assert os.path.exists(os.path.join(archive_dir, "trace.jsonl")), (
+        "trace.jsonl should not be archived"
+    )
+    assert not os.path.exists(os.path.join(archive_dir, "plan.json")), (
+        "plan.json should be archived"
+    )
+
+
+def _test_health_check_trace(script_path: str, design_dir: str) -> None:
+    """Test health-check validates trace.jsonl when present."""
+    output = _run_command(script_path, ["health-check", design_dir])
+    assert output.get("ok") is True, f"health-check failed: {output}"
+    assert output.get("healthy") is True, f"health-check should be healthy: {output}"
 
 
 # ============================================================================
@@ -6266,6 +6888,55 @@ def main() -> None:
     p.add_argument("--category", help="Filter by category")
     p.add_argument("--keyword", help="Filter by keyword")
     p.set_defaults(func=cmd_memory_review)
+
+    # Trace commands
+    p = subparsers.add_parser("trace-add", help="Append one trace event to trace.jsonl")
+    p.add_argument("trace_path", nargs="?", default=".design/trace.jsonl")
+    p.add_argument("--session-id", required=True, help="Session ID (e.g., TEAM_NAME)")
+    p.add_argument(
+        "--event",
+        required=True,
+        help="Event type (spawn|completion|failure|respawn|skill-start|skill-complete)",
+    )
+    p.add_argument(
+        "--skill",
+        required=True,
+        help="Skill name (design|execute|recon|improve|reflect)",
+    )
+    p.add_argument(
+        "--agent", help="Agent name (optional for skill-start/skill-complete)"
+    )
+    p.add_argument(
+        "--role", help="Agent role (expert|worker|auxiliary|lead)", default=None
+    )
+    p.add_argument(
+        "--payload", help="JSON object with event-specific data", default=None
+    )
+    p.set_defaults(func=cmd_trace_add)
+
+    p = subparsers.add_parser(
+        "trace-search", help="Search trace events with optional filters"
+    )
+    p.add_argument("trace_path", nargs="?", default=".design/trace.jsonl")
+    p.add_argument("--session-id", help="Filter by session ID")
+    p.add_argument("--skill", help="Filter by skill name")
+    p.add_argument("--event", help="Filter by event type")
+    p.add_argument("--agent", help="Filter by agent name")
+    p.add_argument("--limit", type=int, default=50, help="Max results to return")
+    p.set_defaults(func=cmd_trace_search)
+
+    p = subparsers.add_parser(
+        "trace-summary", help="Format trace data for human-readable display"
+    )
+    p.add_argument("trace_path", nargs="?", default=".design/trace.jsonl")
+    p.add_argument("--session-id", help="Filter to a single session")
+    p.set_defaults(func=cmd_trace_summary)
+
+    p = subparsers.add_parser(
+        "trace-validate", help="Schema validation for trace.jsonl entries"
+    )
+    p.add_argument("trace_path", nargs="?", default=".design/trace.jsonl")
+    p.set_defaults(func=cmd_trace_validate)
 
     # Archive command
     p = subparsers.add_parser(
