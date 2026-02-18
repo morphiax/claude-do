@@ -1,5 +1,0 @@
-{
-  "globalExclusions": {
-    "full": ["**/.claude/**/*.md", "**/.loop/**", "**/scripts/plan.py"]
-  }
-}
