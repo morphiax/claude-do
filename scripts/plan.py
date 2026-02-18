@@ -2555,21 +2555,6 @@ def cmd_worker_completion_validate(args: argparse.Namespace) -> NoReturn:
     output_json({"ok": True, "valid": True})
 
 
-def _compute_intervention_score(
-    level: int,
-    confidence: str,
-    effort: str,
-    tier_weights: dict[int, int],
-    confidence_multipliers: dict[str, float],
-    effort_multipliers: dict[str, float],
-) -> float:
-    """Compute compositeScore for an intervention."""
-    tier_weight = tier_weights[level]
-    confidence_mult = confidence_multipliers[confidence]
-    effort_mult = effort_multipliers[effort]
-    return tier_weight * confidence_mult / effort_mult
-
-
 def _load_research_json(research_path: str) -> dict[str, Any]:
     """Load research.json from disk, exit on error."""
     if not os.path.exists(research_path):
@@ -4789,15 +4774,6 @@ class TestPlanCommands(unittest.TestCase):
         self.assertEqual(depths[2], 2)
         self.assertEqual(depths[3], 3)
 
-    def skip_test_compute_depths_cycle_detection(self) -> None:
-        """Test that circular dependencies return depth 999."""
-        roles = [{"name": "a"}, {"name": "b"}]
-        deps = [[1], [0]]
-        depths = compute_depths(roles, deps)
-
-        self.assertEqual(depths[0], 1001)
-        self.assertEqual(depths[1], 1001)
-
     def test_paths_overlap_exact_match(self) -> None:
         """Test that identical paths overlap."""
         self.assertTrue(_paths_overlap("src/", "src/"))
@@ -4911,43 +4887,6 @@ class TestPlanCommands(unittest.TestCase):
         keywords = _validate_memory_input("pattern", "test content", "python,testing")
         self.assertEqual(keywords, ["python", "testing"])
 
-        #     def test_validate_memory_input_invalid_category(self) -> None:
-        # """Test invalid category is rejected."""
-        # errors = _validate_memory_input("invalid-cat", "content", "keywords")
-        # self.assertGreater(len(errors), 0)
-        # self.assertTrue(any("category" in e.lower() for e in errors))
-
-        # (Test disabled - function calls error_exit)
-
-        #     def test_validate_memory_input_empty_content(self) -> None:
-        # """Test empty content is rejected."""
-        # errors = _validate_memory_input("pattern", "", "keywords")
-        # self.assertGreater(len(errors), 0)
-
-        # (Test disabled - function calls error_exit)
-
-        #     def test_compute_intervention_score_max(self) -> None:
-        # """Test maximum intervention score calculation."""
-        # score = _compute_intervention_score(7, "high", "low")
-        # self.assertEqual(score, 100.0)
-
-        # (Test disabled - needs 6 params)
-
-        #     def test_compute_intervention_score_min(self) -> None:
-        # """Test minimum intervention score calculation."""
-        # score = _compute_intervention_score(1, "low", "high")
-        # self.assertAlmostEqual(score, 1.6, places=1)
-
-        # (Test disabled - needs 6 params)
-
-        #     def test_compute_intervention_score_medium(self) -> None:
-        # """Test medium intervention score calculation."""
-        # score = _compute_intervention_score(4, "medium", "medium")
-        # expected = 35 * 0.7 / 1.5
-        # self.assertAlmostEqual(score, expected, places=1)
-
-    # (Test disabled - needs 6 params)
-
     def test_find_closing_quote_simple(self) -> None:
         """Test finding closing quote in simple string."""
         idx = _find_closing_quote("'hello'", 0, "'")
@@ -5043,40 +4982,6 @@ class TestPlanCommands(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertTrue(result["ok"])
         self.assertFalse(result.get("shouldAbort", False))
-
-    def skip_test_memory_search_empty(self) -> None:
-        """Test memory-search with empty memory file."""
-        memory_path = os.path.join(self.tmp_dir.name, "empty_memory.jsonl")
-        with open(memory_path, "w"):
-            pass
-
-        args = argparse.Namespace(
-            memory_path=memory_path,
-            goal="test goal",
-            stack=None,
-            keywords=None,
-            limit=5,
-        )
-        exit_code, result = self._run_cmd(cmd_memory_search, args)
-
-        self.assertEqual(exit_code, 0)
-        self.assertTrue(result["ok"])
-        self.assertEqual(result["results"], [])
-
-    def skip_test_memory_search_not_found_graceful(self) -> None:
-        """Test memory-search with missing memory file."""
-        args = argparse.Namespace(
-            memory_path="/nonexistent/memory.jsonl",
-            goal="test",
-            stack=None,
-            keywords=None,
-            limit=5,
-        )
-        exit_code, result = self._run_cmd(cmd_memory_search, args)
-
-        self.assertEqual(exit_code, 0)
-        self.assertTrue(result["ok"])
-        self.assertEqual(result["results"], [])
 
     def test_validate_checks_success(self) -> None:
         """Test validate-checks passes valid acceptance criteria."""
@@ -5209,71 +5114,12 @@ class TestPlanCommands(unittest.TestCase):
         self.assertIsInstance(overlaps_found, int)
         self.assertGreaterEqual(overlaps_found, 0)
 
-    def skip_test_compute_cascading_failures(self) -> None:
-        """Test _compute_cascading_failures function."""
-        roles = [
-            {"status": "failed"},
-            {"status": "pending"},
-            {"status": "pending"},
-        ]
-        deps = [[], [0], [1]]
-        cascaded = _compute_cascading_failures(roles, deps, {0})
-        self.assertIsInstance(cascaded, set)
-
     def test_validate_role_brief_valid(self) -> None:
         """Test _validate_role_brief with valid role."""
         plan = load_plan(self.fixtures["minimal_plan"])
         role = plan["roles"][0]
         errors = _validate_role_brief(role, 0)
         self.assertEqual(errors, [])
-
-    def skip_test_expert_validate_valid(self) -> None:
-        """Test expert-validate with valid expert artifact."""
-        expert_file = os.path.join(self.tmp_dir.name, "expert.json")
-        with open(expert_file, "w") as f:
-            json.dump(
-                {
-                    "approach": "Test approach",
-                    "keyFindings": ["finding1"],
-                    "verificationProperties": [],
-                },
-                f,
-            )
-
-        args = argparse.Namespace(artifact_path=expert_file)
-        exit_code, result = self._run_cmd(cmd_expert_validate, args)
-
-        self.assertEqual(exit_code, 0)
-        self.assertTrue(result["ok"])
-
-    def skip_test_memory_summary_empty(self) -> None:
-        """Test memory-summary with no memories injected."""
-        args = argparse.Namespace(count=0, categories=[])
-        exit_code, result = self._run_cmd(cmd_memory_summary, args)
-
-        self.assertEqual(exit_code, 0)
-        self.assertTrue(result["ok"])
-
-    def skip_test_research_validate_minimal(self) -> None:
-        """Test research-validate with minimal valid research file."""
-        research_file = os.path.join(self.tmp_dir.name, "research.json")
-        with open(research_file, "w") as f:
-            json.dump(
-                {
-                    "schemaVersion": 1,
-                    "goal": "Test goal",
-                    "sections": {},
-                    "recommendations": [],
-                    "contradictions": [],
-                },
-                f,
-            )
-
-        args = argparse.Namespace(research_path=research_file)
-        exit_code, result = self._run_cmd(cmd_research_validate, args)
-
-        self.assertEqual(exit_code, 0)
-        self.assertTrue(result["ok"])
 
     def test_research_summary_empty(self) -> None:
         """Test research-summary with empty recommendations."""
@@ -6505,40 +6351,6 @@ class TestPlanCommands(unittest.TestCase):
     # ================================================================
     # Tests for additional algorithm coverage
     # ================================================================
-
-    def test_compute_intervention_score(self) -> None:
-        """Test _compute_intervention_score calculation."""
-        tier_weights = {1: 5, 2: 4, 3: 6, 4: 5, 5: 6, 6: 7, 7: 1}
-        confidence_multipliers = {"high": 1.0, "medium": 0.7, "low": 0.4}
-        effort_multipliers = {
-            "trivial": 0.5,
-            "small": 1.0,
-            "medium": 2.0,
-            "large": 4.0,
-            "transformative": 8.0,
-        }
-
-        # Level 7, high confidence, trivial effort = 1 * 1.0 / 0.5 = 2.0
-        score = _compute_intervention_score(
-            7,
-            "high",
-            "trivial",
-            tier_weights,
-            confidence_multipliers,
-            effort_multipliers,
-        )
-        self.assertAlmostEqual(score, 2.0)
-
-        # Level 6, high confidence, medium effort = 7 * 1.0 / 2.0 = 3.5
-        score = _compute_intervention_score(
-            6,
-            "high",
-            "medium",
-            tier_weights,
-            confidence_multipliers,
-            effort_multipliers,
-        )
-        self.assertAlmostEqual(score, 3.5)
 
     def test_memory_add_new_entry(self) -> None:
         """Test cmd_memory_add adds a new entry (not boost/decay)."""

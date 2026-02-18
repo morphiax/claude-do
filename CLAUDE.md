@@ -27,7 +27,7 @@ All six skills must be tested end-to-end. Changes to design, execute, research, 
 
 - `.claude-plugin/plugin.json` — Plugin manifest (name, version, metadata)
 - `.claude-plugin/marketplace.json` — Marketplace distribution config
-- `scripts/plan.py` — Shared helper script (32 commands: 17 query, 6 mutation, 7 validation, 1 build, 1 test)
+- `scripts/plan.py` — Shared helper script (35 commands: 17 query, 6 mutation, 9 validation, 1 build, 2 test)
 - `skills/design/SKILL.md` — `/do:design` skill definition
 - `skills/design/scripts/plan.py` — Symlink → `../../../scripts/plan.py`
 - `skills/execute/SKILL.md` — `/do:execute` skill definition
