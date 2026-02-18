@@ -2763,47 +2763,15 @@ def cmd_research_summary(args: argparse.Namespace) -> NoReturn:
     )
 
 
-def _load_memories(memory_path: str) -> list[dict[str, Any]]:
-    """Load memories from JSONL file."""
-    try:
-        return _read_jsonl(memory_path)
-    except OSError:
-        return []
-
-
 def _score_and_format_memories(
     memories: list[dict[str, Any]], goal: str
 ) -> list[dict[str, Any]]:
     """Score memories by relevance and format for display."""
+    query_tokens = _tokenize(goal)
+    current_time = time.time()
 
-    def score_memory(mem: dict[str, Any]) -> float:
-        content = mem.get("content", "").lower()
-        keywords = mem.get("keywords", "")
-        # Handle keywords as string or list
-        if isinstance(keywords, list):
-            keywords_str = " ".join(keywords).lower()
-        else:
-            keywords_str = str(keywords).lower()
-        importance = mem.get("importance", 5)
-
-        # Count keyword matches
-        query_tokens = goal.lower().split()
-        matches = sum(
-            1 for token in query_tokens if token in content or token in keywords_str
-        )
-
-        # Recency decay (10% per 30 days)
-        timestamp = _parse_timestamp(mem.get("timestamp", 0))
-        if timestamp:
-            age_days = (time.time() - timestamp) / 86400
-            recency_factor = max(0.1, 1.0 - (age_days / 30) * 0.1)
-        else:
-            recency_factor = 1.0
-
-        return matches * recency_factor * (importance / 10)
-
-    # Score and sort
-    scored = [(mem, score_memory(mem)) for mem in memories]
+    # Score and sort using canonical _score_memory (proper tokenization)
+    scored = [(mem, _score_memory(mem, query_tokens, current_time)) for mem in memories]
     scored.sort(key=lambda x: x[1], reverse=True)
     top_memories = scored[:5]
 
@@ -2837,7 +2805,10 @@ def cmd_memory_summary(args: argparse.Namespace) -> NoReturn:
         )
 
     # Load memories
-    memories = _load_memories(memory_path)
+    try:
+        memories = _load_memory_entries(memory_path)
+    except OSError:
+        memories = []
     if not memories:
         output_json(
             {"ok": True, "summary": "No memories found", "count": 0, "entries": []}
