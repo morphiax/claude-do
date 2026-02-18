@@ -48,17 +48,11 @@ Scoring anchors: **5** = exemplary, no gaps, reference-quality | **3** = adequat
 
 ### Script Setup
 
-Resolve the plugin root directory (containing `.claude-plugin/` and `skills/`). Set:
+Resolve plugin root (containing `.claude-plugin/`). All script calls: `python3 $PLAN_CLI <command> [args]` via Bash. JSON output: `{"ok": true/false, ...}`.
 
-```
-PLAN_CLI = {plugin_root}/skills/improve/scripts/plan.py
-```
-
-All script calls: `python3 $PLAN_CLI <command> [args]` via Bash. Output is JSON with `{"ok": true/false, ...}`.
-
-**Team name** (project-unique, avoids cross-contamination between terminals):
-```
-TEAM_NAME = $(python3 $PLAN_CLI team-name improve).teamName
+```bash
+PLAN_CLI={plugin_root}/skills/improve/scripts/plan.py
+TEAM_NAME=$(python3 $PLAN_CLI team-name improve).teamName
 ```
 
 ---
@@ -146,11 +140,14 @@ Proceed directly to Step 4 (Synthesize) after receiving the analyst's report.
 
 Every expert prompt MUST end with: "In your findings JSON, include a `verificationProperties` section: an array of properties that should hold regardless of implementation (behavioral invariants, boundary conditions, cross-role contracts). Format: `[{\"property\": \"...\", \"category\": \"invariant|boundary|integration\", \"testableVia\": \"how to test this with concrete commands/endpoints\"}]`. Provide concrete, externally observable properties that can be tested without reading source code. Save your complete findings to `.design/expert-{name}.json` as structured JSON. Then SendMessage to the lead with a summary." Include past learnings and historical evidence paths if available.
 
-4. **Expert liveness pipeline**: After spawning N experts, track completion. Mark each expert complete when: (a) SendMessage received AND (b) artifact file exists (`ls .design/expert-{name}.json`). **Show user status as experts complete**: "Expert progress: {name} done ({M}/{N} complete)." Proceed when all complete.
-   - **Turn-based timeout**: Expert not complete after 2 turns → send: "Status check — artifact expected at `.design/expert-{name}.json`. Report completion or blockers."
-   - **Re-spawn ceiling**: No completion 1 turn after ping → re-spawn with same prompt (max 2 re-spawn attempts per expert).
-   - **Proceed with available**: After 2 re-spawn attempts → log failure, proceed with responsive experts' artifacts.
-   - **Never write artifacts yourself** — lead interpretation ≠ specialist analysis.
+4. **Expert liveness pipeline**: Track completion: (a) SendMessage received AND (b) artifact file exists (`ls .design/expert-{name}.json`). **Show user status**: "Expert progress: {name} done ({M}/{N} complete)."
+
+| Rule | Action |
+|---|---|
+| Turn timeout (2 turns) | Send: "Status check — artifact expected at `.design/expert-{name}.json`. Report completion or blockers." |
+| Re-spawn ceiling | No completion 1 turn after ping → re-spawn with same prompt (max 2 attempts). |
+| Proceed with available | After 2 re-spawn attempts → log failure, proceed with responsive experts' artifacts. |
+| Never write artifacts yourself | Lead interpretation ≠ specialist analysis. |
 5. **Validate expert artifacts** before cross-review:
    - Verify existence: `ls .design/expert-*.json`
    - Validate JSON structure: For each artifact, parse and confirm it contains required fields: `skillPath`, `dimensions` (or `qualityScores`), `findings`, `summary`
@@ -266,15 +263,10 @@ Run /do:execute to apply improvements.
 5. **Self-reflection** — Evaluate this improve run:
 
    ```bash
-   echo '{"targetSkill":"<skill-path>","analysisMode":"<general|targeted>","expertCount":N,"qualityScores":{"dimension":N},"findingsCount":N,"rolesProduced":N,"whatWorked":["<item>"],"whatFailed":["<item>"],"doNextTime":["<item>"]}' | \
-     python3 $PLAN_CLI reflection-add .design/reflection.jsonl \
-       --skill improve \
-       --goal "<the improvement goal>" \
-       --outcome "<completed|partial|failed|aborted>" \
-       --goal-achieved <true|false>
+   echo '{"targetSkill":"<skill-path>","analysisMode":"<general|targeted>","expertCount":N,"qualityScores":{"dimension":N},"findingsCount":N,"rolesProduced":N,"whatWorked":["<item>"],"whatFailed":["<item>"],"doNextTime":["<item>"]}' | python3 $PLAN_CLI reflection-add .design/reflection.jsonl --skill improve --goal "<the improvement goal>" --outcome "<completed|partial|failed|aborted>" --goal-achieved <true|false>
    ```
 
-   On failure: proceed (reflection is valuable but not blocking).
+   On failure: proceed (not blocking).
 
 **Fallback** (if finalize fails):
 1. Read the error message from plan.py output (contains field name and issue)

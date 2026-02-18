@@ -10,6 +10,8 @@ Execute `.design/plan.json` with persistent, self-organizing workers. Design pro
 
 **Do NOT use `EnterPlanMode`** — this skill IS the plan.
 
+**PROTOCOL REQUIREMENT: Follow the Flow step-by-step.** Begin with pre-flight checks, spawn workers only after auxiliaries complete.
+
 **CRITICAL: Always use agent teams.** When spawning any worker via Task tool, you MUST include `team_name: $TEAM_NAME` and `name: "{role}"` parameters. Without these, workers are standalone and cannot coordinate.
 
 **Lead boundaries**: Use only `TeamCreate`, `TeamDelete`, `TaskCreate`, `TaskUpdate`, `TaskList`, `SendMessage`, `Task`, `AskUserQuestion`, and `Bash` (for `python3 $PLAN_CLI`, cleanup, verification, `git`). Project metadata (CLAUDE.md, package.json, README) allowed via Bash. **Never use Read, Grep, Glob, Edit, Write, LSP, WebFetch, WebSearch, or MCP tools on project source files.** The lead orchestrates — agents think.
@@ -20,56 +22,18 @@ Execute `.design/plan.json` with persistent, self-organizing workers. Design pro
 
 ### Script Setup
 
-```
-PLAN_CLI = {plugin_root}/skills/execute/scripts/plan.py
-```
+Resolve plugin root. All script calls: `python3 $PLAN_CLI <command> [args]` via Bash. JSON output: `{"ok": true/false, ...}`.
 
-All script calls: `python3 $PLAN_CLI <command> [args]` via Bash. Output: JSON with `{"ok": true/false, ...}`.
-
-**Team name** (project-unique, avoids cross-contamination between terminals):
-```
-TEAM_NAME = $(python3 $PLAN_CLI team-name execute).teamName
+```bash
+PLAN_CLI={plugin_root}/skills/execute/scripts/plan.py
+TEAM_NAME=$(python3 $PLAN_CLI team-name execute).teamName
 ```
 
 ---
 
-## Worker Protocol
+## Worker Protocol (Inline)
 
-This section defines the shared worker protocol content that the lead writes to `.design/worker-protocol.md` before spawning workers. All workers reference this file instead of receiving inlined copies of these instructions.
-
-**Content for `.design/worker-protocol.md`:**
-
-````markdown
-# Worker Protocol
-
-## Pre-Completion Verification (MANDATORY)
-
-Before reporting done, you MUST run every acceptance criterion's `check` command as a separate shell invocation. This is non-negotiable — do not skip any check, do not assume one passing check implies another passes.
-
-For EACH criterion:
-1. Run the exact shell command from the `check` field
-2. Capture its exit code and output
-3. Record pass/fail with the actual output as evidence
-
-If ANY check fails, you are NOT done — fix the issue and re-run ALL checks. Do not report completion until every check command exits 0.
-
-## Verification Specs
-
-Check plan.json verificationSpecs[] for an entry with your role name. If found, run the spec via its runCommand AFTER all acceptance criteria pass.
-
-Spec files in `.design/specs/` are IMMUTABLE — fix code, never modify specs. Spec failures are blocking.
-
-## Universal Worker Rules
-
-| Rule | Instruction |
-|---|---|
-| Task discovery | Check TaskList for your pending unblocked task. Claim by setting status to in_progress. |
-| Committing | git add specific files + git commit with conventional commit message (feat:/fix:/refactor: etc). Never git add -A. |
-| Completion reporting | When done, SendMessage to lead with this JSON structure: `{"role": "{name}", "achieved": true, "filesChanged": ["path1", "path2"], "acceptanceCriteria": [{"criterion": "...", "passed": true\|false, "evidence": "exit code and output"}], "keyDecisions": ["brief decision and why"], "contextForDependents": "one paragraph summarizing what downstream roles need to know"}`. |
-| Tool boundaries | You may use Read, Grep, Glob, Edit, Write, Bash (for tests/build/git), LSP. Do NOT use WebFetch, WebSearch, MCP tools, or Task (no sub-spawning). |
-| Failure handling | If you cannot complete your goal, SendMessage to lead with: role name, what failed, why, what you tried, suggested alternative. If rollback triggers fire, stop immediately and report. |
-| Scope boundaries | Stay within your scope directories. Do not modify files outside your scope unless absolutely necessary for integration. |
-````
+This protocol is included directly in each worker's spawn prompt below (no separate file needed).
 
 ---
 
@@ -113,8 +77,6 @@ python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "{role.goal}" --stac
 ```
 If `ok: false` or no memories → proceed without injection. Otherwise take top 2-3. **Show user**: "Memory: {role.name} ← {count} learnings ({keyword summaries})."
 
-**Worker protocol setup** — Before spawning workers, write the shared worker protocol to `.design/worker-protocol.md`. Use Write tool with this exact content (see Worker Protocol section below). This file is written ONCE and referenced by all workers.
-
 Spawn workers as teammates using the Task tool. Each worker prompt MUST include:
 
 **Role-specific context** (customize per worker):
@@ -127,7 +89,11 @@ Spawn workers as teammates using the Task tool. Each worker prompt MUST include:
 6. **Constraints**: "Constraints from role brief — read them from plan.json roles[{roleIndex}].constraints."
 7. **Done when**: "Done when — read acceptance criteria from plan.json roles[{roleIndex}].acceptanceCriteria."
 8. **Fallback**: If role has a fallback: "If your primary approach fails: {fallback}"
-9. **Working protocol**: "Read `.design/worker-protocol.md` for your working protocol (task claiming, verification requirements, completion reporting, tool boundaries, failure handling, scope rules)."
+9. **Working protocol** (inline):
+
+**Pre-Completion Verification (MANDATORY)**: Before reporting done, run EVERY acceptance criterion's `check` command as separate shell invocation. For each: (a) run exact shell command from `check` field, (b) capture exit code and output, (c) record pass/fail with evidence. If ANY fails, fix and re-run ALL checks. Don't report completion until every check exits 0. If plan.json verificationSpecs[] has entry for your role, run spec via its runCommand AFTER all acceptance criteria pass. Spec files in `.design/specs/` are IMMUTABLE — fix code, never modify specs. Spec failures are blocking.
+
+**Universal Worker Rules**: Task discovery: Check TaskList for pending unblocked task, claim by setting status to in_progress. | Committing: git add specific files + git commit with conventional message (feat:/fix:/refactor:). Never git add -A. | Completion reporting: SendMessage to lead with JSON: `{"role": "{name}", "achieved": true, "filesChanged": ["..."], "acceptanceCriteria": [{"criterion": "...", "passed": true|false, "evidence": "..."}], "keyDecisions": ["..."], "contextForDependents": "..."}`. | Tool boundaries: You may use Read, Grep, Glob, Edit, Write, Bash (for tests/build/git), LSP. Do NOT use WebFetch, WebSearch, MCP tools, or Task (no sub-spawning). | Failure handling: If cannot complete, SendMessage to lead with: role name, what failed, why, what you tried, suggested alternative. If rollback triggers fire, stop immediately and report. | Scope boundaries: Stay within your scope directories. Don't modify files outside scope unless absolutely necessary for integration.
 
 ```
 Task(subagent_type: "general-purpose", team_name: $TEAM_NAME, name: "{worker-name}", model: "{model}", prompt: <role-specific prompt with all above>)
@@ -228,20 +194,13 @@ Integration: {PASS|FAIL|SKIPPED — with details}
 ```
 2. **Session handoff** — Write `.design/handoff.md` with sections: goal + date, completed roles (name + one-line result), failed roles (name + reason), integration status (PASS/FAIL/SKIPPED), decisions (deviations/retries/workarounds), files changed (deduplicated list), known gaps (missing coverage/TODOs/skipped roles), next steps (concrete actions).
 
-3. **Self-reflection** — Evaluate this run against the goal. Write a structured reflection entry:
-
-   Assess: (a) Did completed roles deliver the goal end-to-end? (b) What worked well? (c) What failed or was suboptimal? (d) What should be done differently next time?
+3. **Self-reflection** — Assess: (a) Roles delivered goal end-to-end? (b) What worked well? (c) What failed/suboptimal? (d) What differently next time?
 
    ```bash
-   echo '{"roleQuality":"<N of M roles completed first attempt>","whatWorked":["<item>"],"whatFailed":["<item>"],"doNextTime":["<item>"],"coordinationNotes":"<any team/worker observations>"}' | \
-     python3 $PLAN_CLI reflection-add .design/reflection.jsonl \
-       --skill execute \
-       --goal "<the goal from plan.json>" \
-       --outcome "<completed|partial|failed|aborted>" \
-       --goal-achieved <true|false>
+   echo '{"roleQuality":"<N of M roles completed first attempt>","whatWorked":["<item>"],"whatFailed":["<item>"],"doNextTime":["<item>"],"coordinationNotes":"<any team/worker observations>"}' | python3 $PLAN_CLI reflection-add .design/reflection.jsonl --skill execute --goal "<the goal from plan.json>" --outcome "<completed|partial|failed|aborted>" --goal-achieved <true|false>
    ```
 
-   The evaluation JSON is piped via stdin. Be honest — this reflection feeds future runs via memory curation. On failure: proceed (reflection is valuable but not blocking).
+   Be honest — this reflection feeds future runs via memory curation. On failure: proceed (not blocking).
 
 4. **Memory curation** — Spawn memory-curator via `Task(subagent_type: "general-purpose")`:
 

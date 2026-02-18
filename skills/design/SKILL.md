@@ -31,17 +31,11 @@ Decompose a goal into `.design/plan.json` with role briefs — goal-directed sco
 
 ### Script Setup
 
-Resolve the plugin root directory (containing `.claude-plugin/` and `skills/`). Set:
+Resolve plugin root (containing `.claude-plugin/`). All script calls: `python3 $PLAN_CLI <command> [args]` via Bash. JSON output: `{"ok": true/false, ...}`.
 
-```
-PLAN_CLI = {plugin_root}/skills/design/scripts/plan.py
-```
-
-All script calls: `python3 $PLAN_CLI <command> [args]` via Bash. Output is JSON with `{"ok": true/false, ...}`.
-
-**Team name** (project-unique, avoids cross-contamination between terminals):
-```
-TEAM_NAME = $(python3 $PLAN_CLI team-name design).teamName
+```bash
+PLAN_CLI={plugin_root}/skills/design/scripts/plan.py
+TEAM_NAME=$(python3 $PLAN_CLI team-name design).teamName
 ```
 
 ---
@@ -117,11 +111,14 @@ Create the team and spawn experts in parallel.
    - Instruct: "Then SendMessage to the lead with a summary."
 
    Expert artifacts flow directly to execution workers — they are structured JSON with sections that can be referenced selectively.
-6. **Expert liveness pipeline**: After spawning N experts, track completion. Mark each expert complete when: (a) SendMessage received AND (b) artifact file exists (`ls .design/expert-{name}.json`). **Show user status as experts complete**: "Expert progress: {name} done ({M}/{N} complete)." Proceed when all complete.
-   - **Turn-based timeout**: Expert not complete after 2 turns → send: "Status check — artifact expected at `.design/expert-{name}.json`. Report completion or blockers."
-   - **Re-spawn ceiling**: No completion 1 turn after ping → re-spawn with same prompt (max 2 re-spawn attempts per expert). **Show user**: "Re-spawning {name} (timeout)."
-   - **Proceed with available**: After 2 re-spawn attempts → log failure, proceed with responsive experts' artifacts.
-   - **Never write artifacts yourself** — lead interpretation ≠ specialist analysis.
+6. **Expert liveness pipeline**: Track completion: (a) SendMessage received AND (b) artifact file exists (`ls .design/expert-{name}.json`). **Show user status**: "Expert progress: {name} done ({M}/{N} complete)."
+
+| Rule | Action |
+|---|---|
+| Turn timeout (2 turns) | Send: "Status check — artifact expected at `.design/expert-{name}.json`. Report completion or blockers." |
+| Re-spawn ceiling | No completion 1 turn after ping → re-spawn with same prompt (max 2 attempts). Show: "Re-spawning {name} (timeout)." |
+| Proceed with available | After 2 re-spawn attempts → log failure, proceed with responsive experts' artifacts. |
+| Never write artifacts yourself | Lead interpretation ≠ specialist analysis. |
 
 ### 3.5. Interface Negotiation & Cross-Review
 
@@ -342,20 +339,13 @@ Memories applied: {count or "none"}
 Run /do:execute to begin.
 ```
 
-5. **Self-reflection** — Evaluate this design run. Write a structured reflection entry:
-
-   Assess: (a) Did the plan capture the goal effectively? (b) Were experts well-chosen? (c) Did cross-review add value or was it redundant? (d) What should be done differently next time?
+5. **Self-reflection** — Assess: (a) Plan captured goal effectively? (b) Experts well-chosen? (c) Cross-review added value? (d) What differently next time?
 
    ```bash
-   echo '{"expertQuality":"<which experts contributed most/least>","crossReviewValue":"<useful|redundant|skipped>","planCompleteness":"<assessment>","whatWorked":["<item>"],"whatFailed":["<item>"],"doNextTime":["<item>"]}' | \
-     python3 $PLAN_CLI reflection-add .design/reflection.jsonl \
-       --skill design \
-       --goal "<the goal>" \
-       --outcome "<completed|partial|failed|aborted>" \
-       --goal-achieved <true|false>
+   echo '{"expertQuality":"<which experts contributed most/least>","crossReviewValue":"<useful|redundant|skipped>","planCompleteness":"<assessment>","whatWorked":["<item>"],"whatFailed":["<item>"],"doNextTime":["<item>"]}' | python3 $PLAN_CLI reflection-add .design/reflection.jsonl --skill design --goal "<the goal>" --outcome "<completed|partial|failed|aborted>" --goal-achieved <true|false>
    ```
 
-   On failure: proceed (reflection is valuable but not blocking).
+   On failure: proceed (not blocking).
 
 **Fallback** (if finalize fails):
 1. Fix validation errors and re-run finalize.

@@ -42,13 +42,11 @@ Analyze `.design/reflection.jsonl` to identify what's actually working and what 
 
 ### Script Setup
 
-Resolve the plugin root directory (containing `.claude-plugin/` and `skills/`). Set:
+Resolve plugin root. All script calls: `python3 $PLAN_CLI <command> [args]` via Bash. JSON output: `{"ok": true/false, ...}`.
 
+```bash
+PLAN_CLI={plugin_root}/skills/reflect/scripts/plan.py
 ```
-PLAN_CLI = {plugin_root}/skills/reflect/scripts/plan.py
-```
-
-All script calls: `python3 $PLAN_CLI <command> [args]` via Bash. Output is JSON with `{"ok": true/false, ...}`.
 
 ---
 
@@ -337,12 +335,7 @@ Run /do:execute to apply improvements.
 4. **Self-reflection** — Evaluate this reflect run:
 
    ```bash
-   echo '{"reflectionsAnalyzed":N,"patternsFound":N,"hypothesesGenerated":N,"hypothesesApproved":N,"whatWorked":["<item>"],"whatFailed":["<item>"],"doNextTime":["<item>"]}' | \
-     python3 $PLAN_CLI reflection-add .design/reflection.jsonl \
-       --skill reflect \
-       --goal "<the analysis goal>" \
-       --outcome "<completed|partial|failed|aborted>" \
-       --goal-achieved <true|false>
+   echo '{"reflectionsAnalyzed":N,"patternsFound":N,"hypothesesGenerated":N,"hypothesesApproved":N,"whatWorked":["<item>"],"whatFailed":["<item>"],"doNextTime":["<item>"]}' | python3 $PLAN_CLI reflection-add .design/reflection.jsonl --skill reflect --goal "<the analysis goal>" --outcome "<completed|partial|failed|aborted>" --goal-achieved <true|false>
    ```
 
 **Fallback** (if finalize fails):

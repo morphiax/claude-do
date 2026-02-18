@@ -32,17 +32,11 @@ Recon tolerates vague inputs better than design. "What should we improve?" is va
 
 ### Script Setup
 
-Resolve the plugin root directory (containing `.claude-plugin/` and `skills/`). Set:
+Resolve plugin root (containing `.claude-plugin/`). All script calls: `python3 $PLAN_CLI <command> [args]` via Bash. JSON output: `{"ok": true/false, ...}`.
 
-```
-PLAN_CLI = {plugin_root}/skills/recon/scripts/plan.py
-```
-
-All script calls: `python3 $PLAN_CLI <command> [args]` via Bash. Output is JSON with `{"ok": true/false, ...}`.
-
-**Team name** (project-unique, avoids cross-contamination between terminals):
-```
-TEAM_NAME = $(python3 $PLAN_CLI team-name recon).teamName
+```bash
+PLAN_CLI={plugin_root}/skills/recon/scripts/plan.py
+TEAM_NAME=$(python3 $PLAN_CLI team-name recon).teamName
 ```
 
 ---
@@ -153,9 +147,12 @@ Create the team and spawn researchers in parallel.
 - "For each finding include: area, observation, evidence, preliminary leverageLevel (1-7), leverageGroup (Intent/Design/Feedbacks/Parameters), effort estimate (trivial/small/medium/large/transformative), recommendation."
 - "Include a confidence assessment (high/medium/low) with basis for each finding."
 
-6. **Researcher liveness pipeline**: Track completion. Mark each researcher complete when: (a) SendMessage received AND (b) artifact file exists (`ls .design/expert-{name}.json`). **Show user status as researchers complete**: "Researcher progress: {name} done ({M}/{N} complete)."
-   - **Turn-based timeout**: Researcher not complete after 3 turns, re-spawn with same prompt (max 2 re-spawn attempts per researcher).
-   - **Proceed with available**: After 2 re-spawn attempts, proceed with responsive researchers' artifacts.
+6. **Researcher liveness pipeline**: Track completion: (a) SendMessage received AND (b) artifact file exists (`ls .design/expert-{name}.json`). **Show user status**: "Researcher progress: {name} done ({M}/{N} complete)."
+
+| Rule | Action |
+|---|---|
+| Turn timeout (3 turns) | Re-spawn with same prompt (max 2 attempts). |
+| Proceed with available | After 2 re-spawn attempts, proceed with responsive researchers' artifacts. |
 
 ### 4. Synthesis
 
@@ -215,15 +212,10 @@ To design an intervention: /do:design {designGoal from chosen intervention}
 3. **Self-reflection** — Evaluate this recon run:
 
 ```bash
-echo '{"researchQuality":"<assessment>","leverageAssessmentAccuracy":"<assessment>","scopeDiscipline":"<stayed focused|drifted>","researchersSpawned":N,"findingsCount":N,"interventionsProduced":N,"contradictionsFound":N,"whatWorked":["<item>"],"whatFailed":["<item>"],"doNextTime":["<item>"]}' | \
-  python3 $PLAN_CLI reflection-add .design/reflection.jsonl \
-    --skill recon \
-    --goal "<the investigated area>" \
-    --outcome "<completed|partial|failed|aborted>" \
-    --goal-achieved <true|false>
+echo '{"researchQuality":"<assessment>","leverageAssessmentAccuracy":"<assessment>","scopeDiscipline":"<stayed focused|drifted>","researchersSpawned":N,"findingsCount":N,"interventionsProduced":N,"contradictionsFound":N,"whatWorked":["<item>"],"whatFailed":["<item>"],"doNextTime":["<item>"]}' | python3 $PLAN_CLI reflection-add .design/reflection.jsonl --skill recon --goal "<the investigated area>" --outcome "<completed|partial|failed|aborted>" --goal-achieved <true|false>
 ```
 
-On failure: proceed (reflection is valuable but not blocking).
+On failure: proceed (not blocking).
 
 ---
 
