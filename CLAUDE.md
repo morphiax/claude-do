@@ -27,7 +27,7 @@ All five skills must be tested end-to-end. Changes to design, execute, recon, im
 
 - `.claude-plugin/plugin.json` — Plugin manifest (name, version, metadata)
 - `.claude-plugin/marketplace.json` — Marketplace distribution config
-- `scripts/plan.py` — Shared helper script (27 commands: 14 query, 5 mutation, 6 validation, 1 build, 1 test)
+- `scripts/plan.py` — Shared helper script (28 commands: 15 query, 5 mutation, 6 validation, 1 build, 1 test)
 - `skills/design/SKILL.md` — `/do:design` skill definition
 - `skills/design/scripts/plan.py` — Symlink → `../../../scripts/plan.py`
 - `skills/execute/SKILL.md` — `/do:execute` skill definition
@@ -49,7 +49,7 @@ Each SKILL.md has YAML frontmatter (`name`, `description`, `argument-hint`) that
 
 A single `scripts/plan.py` at the repo root provides all deterministic operations. Each skill symlinks to it from `skills/{name}/scripts/plan.py` so SKILL.md can resolve a skill-local path.
 
-- **Query** (14 commands): team-name (generate project-unique team name from skill + cwd), status, summary, overlap-matrix, tasklist-data, worker-pool, retry-candidates, circuit-breaker, memory-search (keyword-based search in .design/memory.jsonl with recency weighting and importance scoring), reflection-search (filter past reflections by skill, sorted by recency), memory-review (list all memories in human-readable format with filtering), health-check (validate .design/ integrity), plan-diff (compare two plan.json files), plan-health-summary (lifecycle context from handoff and reflections)
+- **Query** (15 commands): team-name (generate project-unique team name from skill + cwd), status, summary, overlap-matrix, tasklist-data, worker-pool, retry-candidates, circuit-breaker, memory-search (keyword-based search in .design/memory.jsonl with recency weighting and importance scoring), reflection-search (filter past reflections by skill, sorted by recency), memory-review (list all memories in human-readable format with filtering), health-check (validate .design/ integrity), plan-diff (compare two plan.json files), plan-health-summary (lifecycle context from handoff and reflections), sync-check (detect drift between shared protocol sections across SKILL.md files using structural fingerprints)
 - **Mutation** (5 commands): update-status (atomically modify plan.json via temp file + rename with state machine validation), memory-add (append JSONL entry with UUID, importance 1-10, and dynamic boost/decay), reflection-add (append structured self-evaluation to reflection.jsonl, evaluation JSON via stdin), resume-reset (resets in_progress roles to pending, increments attempts), archive (archives stale .design/ artifacts to .design/history/{timestamp}/)
 - **Validation** (6 commands): expert-validate (schema validation for expert artifacts), reflection-validate (schema validation for reflection evaluations), memory-summary (format injection summary for display), validate-checks (syntax validation for acceptanceCriteria check commands — detects broken Python in `python3 -c` checks, including f-string brace nesting errors), recon-validate (schema validation for recon.json with leverage scoring), recon-summary (format recon output for display)
 - **Build** (1 command): finalize — validates role briefs, computes directory overlaps, validates state transitions, and computes SHA256 checksums for verification specs in one atomic operation

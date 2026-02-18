@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.14.0] - 2026-02-18
+
+### Added
+
+- `sync-check` command in plan.py — detects drift between shared protocol sections (Script Setup, Liveness Pipeline, Finalize Fallback) across all 5 SKILL.md files using structural fingerprints
+
+### Changed
+
+- Compacted duplicated protocol blocks inline across all 5 SKILL.md files (74 lines saved, 4.5% reduction): Script Setup merged to single code block, Liveness Pipeline converted to table format, Self-Reflection commands compacted
+- Inlined worker protocol into `/do:execute` SKILL.md — removed separate `.design/worker-protocol.md` runtime file pattern
+
 ## [2.13.0] - 2026-02-17
 
 ### Changed
