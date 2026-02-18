@@ -3,7 +3,7 @@
 > Multi-agent planning with structured debate, self-verifying execution, and cross-session memory
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Version](https://img.shields.io/badge/version-2.14.0-green.svg)
+![Version](https://img.shields.io/badge/version-2.15.0-green.svg)
 ![Claude Code](https://img.shields.io/badge/Claude%20Code-2.1.32%2B-orange.svg)
 
 ## What's Novel
@@ -24,7 +24,9 @@
 
 **Acceptance criteria validation** — Design-time syntax validation catches broken `python3 -c` checks (including f-string brace nesting errors) before execution. Shift-left anti-pattern warnings in expert prompts prevent grep-only criteria from entering plans. Lead-side verification re-runs every criterion before marking roles complete (trust-but-verify). Surface-only checks (grep, file-existence) are flagged as anti-patterns.
 
-**Automated self-test suite** — `plan.py self-test` exercises all 27 commands against synthetic fixtures in a temp directory, enabling CI-style validation of the helper script.
+**Execution observability via trace.jsonl** — Append-only event log capturing agent lifecycle events (spawn, completion, failure, respawn) with timestamps and session grouping. `trace-search` and `trace-summary` commands enable post-execution analysis for `/do:reflect` and debugging.
+
+**Automated self-test suite** — `plan.py self-test` exercises all 32 commands against synthetic fixtures in a temp directory, enabling CI-style validation of the helper script.
 
 **Meadows-based reconnaissance** — `/do:recon` analyzes goals through systems thinking before design. Spawns researchers to map leverage points (paradigm shifts, goal alignment, feedback loops, structure, parameters). Ranks interventions by impact using Meadows framework adapted for software. Outputs ranked designGoals + constraints (not implementation suggestions) to `.design/recon.json`.
 

@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.15.0] - 2026-02-18
+
+### Added
+
+- `trace.jsonl` — append-only event log capturing agent lifecycle events (spawn, completion, failure, respawn, skill-start, skill-complete) with automatic timestamps and session grouping
+- `trace-add` command in plan.py — append events to trace.jsonl with graceful degradation on write failure
+- `trace-search` command in plan.py — query trace events by session, skill, event type, or agent with AND-logic filtering
+- `trace-summary` command in plan.py — format trace data for display with aggregate statistics (session count, event counts, latest session info)
+- `trace-validate` command in plan.py — schema validation for trace.jsonl entries with required field checks
+- Trace emission instrumentation in all 5 SKILL.md files at lifecycle points with graceful || true degradation
+- `trace.jsonl` persisted during archive (treated as cross-session observability data like memory.jsonl and reflection.jsonl)
+- Health-check validation for `trace.jsonl` integrity
+
 ## [2.14.0] - 2026-02-18
 
 ### Added
