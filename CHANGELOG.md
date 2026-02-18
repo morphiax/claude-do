@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.17.0] - 2026-02-18
+
+### Added
+
+- `/do:simplify` skill — analyzes codebases for cascade simplification opportunities (one insight eliminates multiple components) using pattern-recognizer and preservation-guardian analysts. Produces `.design/plan.json` with preservation-focused worker roles for `/do:execute`. Cascade thinking taxonomy covers 5 categories: structural, behavioral, data, cross-cutting, and organizational simplification.
+- `skills/simplify/SKILL.md` — complete 6-phase skill protocol with cascade methodology, analyst coordination, and preservation safety constraints
+- `skills/simplify/scripts/plan.py` — symlink to shared `scripts/plan.py`
+
+## [2.16.1] - 2026-02-18
+
+### Added
+
+- `designHandoff[]` optional field in research.json schema — array of concrete building blocks extracted from expert artifacts during synthesis, enabling /do:design to read research.json alone without re-reading expert artifacts (token efficiency)
+- `_validate_research_design_handoff()` in plan.py — validates designHandoff entries (source enum, required fields, material type)
+- `designHandoffCount` in research-validate and research-summary output
+
+### Changed
+
+- Research SKILL.md synthesis step 7: extracts concrete building blocks (patterns, templates, schemas, constraints) from expert findings into designHandoff[]
+- Research output display includes design handoff count
+
 ## [2.16.0] - 2026-02-18
 
 ### Changed

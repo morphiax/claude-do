@@ -3,7 +3,7 @@
 > Multi-agent planning with structured debate, self-verifying execution, and cross-session memory
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Version](https://img.shields.io/badge/version-2.16.0-green.svg)
+![Version](https://img.shields.io/badge/version-2.17.0-green.svg)
 ![Claude Code](https://img.shields.io/badge/Claude%20Code-2.1.32%2B-orange.svg)
 
 ## What's Novel
@@ -28,7 +28,7 @@
 
 **Automated self-test suite** — `plan.py self-test` exercises all 32 commands against synthetic fixtures in a temp directory, enabling CI-style validation of the helper script.
 
-**Comprehensive knowledge research** — `/do:research` gathers and structures knowledge across 5 sections (prerequisites, mental models, usage patterns, failure patterns, production readiness). Spawns researchers to map findings across codebase, external sources, and domain expertise. Produces recommendations with confidence and effort estimates for adoption planning, stored in `.design/research.json`.
+**Comprehensive knowledge research** — `/do:research` gathers and structures knowledge across 5 sections (prerequisites, mental models, usage patterns, failure patterns, production readiness). Spawns researchers to map findings across codebase, external sources, and domain expertise. Produces recommendations with confidence and effort estimates for adoption planning, stored in `.design/research.json`. Design handoff preserves concrete building blocks (patterns, templates, schemas, constraints) from expert artifacts so `/do:design` can read research output alone without re-reading expert artifacts.
 
 ## Usage
 
@@ -42,6 +42,9 @@
 # Plan and execute a goal
 /do:design implement user authentication with JWT tokens
 /do:execute
+
+# Simplify a codebase using cascade thinking
+/do:simplify
 
 # Analyze and improve a skill with scientific methodology
 /do:improve skills/design/SKILL.md
@@ -61,6 +64,8 @@
 **`/do:execute`** spawns persistent worker agents per role. Workers use CoVe-style verification, apply reflexion on failures, and report structured completion reports (role, achieved, filesChanged, acceptanceCriteria results). Adaptive model escalation on retry (haiku→sonnet→opus). Worker-to-worker handoff injects completed role context into dependent workers. Liveness pipeline detects worker silence with 3-turn timeout and re-spawn (simplified from 5+7). Safety rails: retry budgets, cascading failures, circuit breaker, overlap serialization. Memory curator distills outcomes (including failures) into importance-rated learnings with 6 categories (convention/pattern/mistake/approach/failure/procedure). Dynamic importance tracking via boost/decay. Progress reporting for significant events. Curation transparency. End-of-run summary with detailed metrics.
 
 **`/do:improve`** analyzes Claude Code skills using 7 quality dimensions (Protocol Clarity, Constraint Enforcement, Error Handling, Agent Coordination, Information Flow, Prompt Economy, Verifiability). For general analysis, spawns 2-3 experts; for targeted improvements, uses a single analyst. Produces testable hypotheses with predicted behavioral impacts. Always outputs `.design/plan.json` for `/do:execute` — never writes source files directly. Anti-pattern guards prevent token bloat, circular improvements, and regressions. Expert artifact schema validation. 3-turn liveness timeout. Compressed quality rubric (1/3/5 anchors). Behavioral trait instructions. Phase announcements and end-of-run summary.
+
+**`/do:simplify`** analyzes codebases for cascade simplification opportunities — where one insight eliminates multiple components at once, reducing cognitive overhead without sacrificing capability. Spawns pattern-recognizer and preservation-guardian analysts. Pattern-recognizer identifies cascade opportunities (5 categories: structural, behavioral, data, cross-cutting, organizational). Preservation-guardian ensures semantics are preserved, not just deleted. Lead synthesizes findings into plan.json with preservation-focused worker roles for `/do:execute`. Memory injection with transparency. 3-turn liveness timeout.
 
 **`/do:reflect`** uses execution outcomes (from `.design/reflection.jsonl`) to identify what's actually working and what isn't. Direct Bash-based analysis (no Task agent) gathers data via plan.py commands, computes metrics, and formulates hypotheses — eliminating hallucination risk. Temporal resolution tracking classifies patterns as active/likely_resolved/confirmed_resolved using a 3-run recency window and memory.jsonl cross-referencing, preventing duplicate improvement work on already-fixed issues. Hypotheses are grounded in real evidence with confidence levels. Requires >=2 reflections to identify patterns. Complements `/do:improve` (static prompt quality) with dynamic functional optimization. Phase announcements and end-of-run summary.
 

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-`claude-do` is a Claude Code plugin providing five skills: `/do:design` (team-based goal decomposition into `.design/plan.json`), `/do:execute` (dependency-graph execution with worker teammates), `/do:research` (comprehensive knowledge research producing actionable research.json with recommendations), `/do:improve` (static analysis of prompt quality across 7 dimensions), and `/do:reflect` (evidence-based improvement from execution reflections). It leverages Claude Code's native Agent Teams and Tasks features for multi-agent collaboration. All skills use the main conversation as team lead with teammates for analytical/execution work. Skills are implemented as SKILL.md prompts augmented with python3 helper scripts for deterministic operations.
+`claude-do` is a Claude Code plugin providing six skills: `/do:design` (team-based goal decomposition into `.design/plan.json`), `/do:execute` (dependency-graph execution with worker teammates), `/do:research` (comprehensive knowledge research producing actionable research.json with recommendations), `/do:simplify` (codebase simplification via cascade thinking — one insight eliminates multiple components — producing plan.json with preservation-focused worker roles), `/do:improve` (static analysis of prompt quality across 7 dimensions), and `/do:reflect` (evidence-based improvement from execution reflections). It leverages Claude Code's native Agent Teams and Tasks features for multi-agent collaboration. All skills use the main conversation as team lead with teammates for analytical/execution work. Skills are implemented as SKILL.md prompts augmented with python3 helper scripts for deterministic operations.
 
 ## Testing
 
@@ -19,7 +19,7 @@ claude --plugin-dir /path/to/claude-do
 /do:execute
 ```
 
-All five skills must be tested end-to-end. Changes to design, execute, research, improve, or reflect may affect the others since they share the `.design/plan.json` contract (or `.design/research.json` for research) and persistent files (`memory.jsonl`, `reflection.jsonl`, `handoff.md`).
+All six skills must be tested end-to-end. Changes to design, execute, research, simplify, improve, or reflect may affect the others since they share the `.design/plan.json` contract (or `.design/research.json` for research) and persistent files (`memory.jsonl`, `reflection.jsonl`, `handoff.md`).
 
 ## Architecture
 
@@ -38,6 +38,8 @@ All five skills must be tested end-to-end. Changes to design, execute, research,
 - `skills/improve/scripts/plan.py` — Symlink → `../../../scripts/plan.py`
 - `skills/reflect/SKILL.md` — `/do:reflect` skill definition
 - `skills/reflect/scripts/plan.py` — Symlink → `../../../scripts/plan.py`
+- `skills/simplify/SKILL.md` — `/do:simplify` skill definition
+- `skills/simplify/scripts/plan.py` — Symlink → `../../../scripts/plan.py`
 
 ### Skill Files Are the Implementation
 
@@ -51,7 +53,7 @@ A single `scripts/plan.py` at the repo root provides all deterministic operation
 
 - **Query** (17 commands): team-name (generate project-unique team name from skill + cwd), status, summary, overlap-matrix, tasklist-data, worker-pool, retry-candidates, circuit-breaker, memory-search (keyword-based search in .design/memory.jsonl with recency weighting and importance scoring), reflection-search (filter past reflections by skill, sorted by recency), memory-review (list all memories in human-readable format with filtering), health-check (validate .design/ integrity), plan-diff (compare two plan.json files), plan-health-summary (lifecycle context from handoff and reflections), sync-check (detect drift between shared protocol sections across SKILL.md files using structural fingerprints), trace-search (query trace events by session, skill, event type, or agent), trace-summary (format trace data for display with aggregate statistics)
 - **Mutation** (6 commands): update-status (atomically modify plan.json via temp file + rename with state machine validation), memory-add (append JSONL entry with UUID, importance 1-10, and dynamic boost/decay), reflection-add (append structured self-evaluation to reflection.jsonl, evaluation JSON via stdin), resume-reset (resets in_progress roles to pending, increments attempts), archive (archives stale .design/ artifacts to .design/history/{timestamp}/), trace-add (append agent lifecycle events to trace.jsonl with automatic ID/timestamp generation)
-- **Validation** (7 commands): expert-validate (schema validation for expert artifacts), reflection-validate (schema validation for reflection evaluations), memory-summary (format injection summary for display), validate-checks (syntax validation for acceptanceCriteria check commands — detects broken Python in `python3 -c` checks, including f-string brace nesting errors), research-validate (schema validation for research.json), research-summary (format research output for display), trace-validate (schema validation for trace.jsonl with required field checks)
+- **Validation** (7 commands): expert-validate (schema validation for expert artifacts), reflection-validate (schema validation for reflection evaluations), memory-summary (format injection summary for display), validate-checks (syntax validation for acceptanceCriteria check commands — detects broken Python in `python3 -c` checks, including f-string brace nesting errors), research-validate (schema validation for research.json including optional designHandoff), research-summary (format research output for display including designHandoffCount), trace-validate (schema validation for trace.jsonl with required field checks)
 - **Build** (1 command): finalize — validates role briefs, computes directory overlaps, validates state transitions, and computes SHA256 checksums for verification specs in one atomic operation
 - **Test** (1 command): self-test — exercises every command against synthetic fixtures in a temp directory, reports pass/fail per command as JSON
 
@@ -118,12 +120,14 @@ Key points:
 
 Research produces structured knowledge across 5 sections with ranked recommendations. Key points:
 
-- Schema fields: schemaVersion (1), goal, context {same as plan.json}, sections {prerequisites, mentalModels, usagePatterns, failurePatterns, productionReadiness}, recommendations[], researchGaps []
+- Schema fields: schemaVersion (1), goal, context {same as plan.json}, sections {prerequisites, mentalModels, usagePatterns, failurePatterns, productionReadiness}, recommendations[], researchGaps[], designHandoff[] (optional)
 - **Section fields**: name (string), findings (array of finding objects), synthesis (string summary)
 - **Recommendation fields**: id, title, summary, confidence (low/medium/high), effort (low/medium/high), prerequisites (array), reasoning (string)
 - **Finding fields**: id, section, source, summary, domain (codebase/literature/comparative/theoretical)
+- **Design handoff fields**: source (reference-material|codebase-analysis|expert-finding|literature), element (what the building block is), material (concrete content — string, array, or object), usage (how /do:design should use it)
 - Recommendations include confidence levels and effort estimates for adoption planning
 - Research gaps document areas needing additional investigation
+- Design handoff preserves concrete building blocks from expert artifacts so /do:design can read research.json alone without re-reading expert artifacts (token efficiency)
 
 ### Verification Specs Protocol
 
@@ -265,6 +269,20 @@ All five skills use the **main conversation as team lead** with Agent Teams (or 
 - Self-reflection at end of run (writes to reflection.jsonl like other skills) using `reflection-add` with validation
 - Output: always produces `.design/plan.json` (schemaVersion 4) for `/do:execute` — reflect never writes source files directly
 - End-of-run summary: displays reflection count analyzed, hypotheses generated by confidence level, and user-selected improvements
+
+**`/do:simplify`** — team name: `do-simplify-{project}-{hash}` (generated by `team-name` command)
+- Protocol guardrail: lead must follow the flow step-by-step (pre-flight, analyst spawning, cascade synthesis, plan output)
+- Phase announcements: lead announces each major phase (pre-flight, analyst spawning, cascade synthesis, finalization) for user visibility
+- Lifecycle context: runs `plan-health-summary` to display previous session handoff and recent reflections at skill start
+- TeamCreate health check: verifies team is reachable, retries once on failure
+- Spawns 2 analysts (pattern-recognizer, preservation-guardian) with behavioral trait instructions
+- Cascade thinking: analysts seek simplification opportunities where one insight eliminates multiple components, reducing cognitive overhead without sacrificing capability
+- Memory injection: lead searches .design/memory.jsonl for relevant past learnings and injects top 3 into analyst prompts with transparency. Memory search failures gracefully fallback to empty results
+- Analyst liveness pipeline: completion checklist tracking which analysts have reported, turn-based timeout (3 turns then re-spawn), re-spawn ceiling (max 2 attempts then proceed with available findings)
+- Lead synthesizes cascade opportunities into preservation-focused worker roles: roles that remove/restructure code preserve semantics, not just delete
+- Auxiliary roles: challenger (pre-execution), integration-verifier (post-execution), memory-curator (post-execution)
+- Output: always produces `.design/plan.json` (schemaVersion 4) for `/do:execute` — simplify never writes source files directly
+- End-of-run summary: displays cascade opportunities identified, simplification roles created, and preservation constraints documented
 
 ## Requirements
 
