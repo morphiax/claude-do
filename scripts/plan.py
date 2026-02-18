@@ -96,6 +96,30 @@ def build_name_index(roles: list[dict[str, Any]]) -> dict[str, int]:
     return {r.get("name", ""): i for i, r in enumerate(roles)}
 
 
+def _read_jsonl(path: str, filter_fn=None) -> list[dict[str, Any]]:
+    """Read a JSONL file, skipping empty lines and parse errors.
+
+    Returns list of parsed dicts. Returns [] if file does not exist.
+    Raises OSError if file exists but cannot be opened/read.
+    Optional filter_fn(entry) -> bool filters out entries when False.
+    """
+    if not os.path.exists(path):
+        return []
+    entries: list[dict[str, Any]] = []
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+                if filter_fn is None or filter_fn(entry):
+                    entries.append(entry)
+            except json.JSONDecodeError:
+                pass
+    return entries
+
+
 def resolve_dependencies(
     roles: list[dict[str, Any]], name_index: dict[str, int]
 ) -> list[list[int]]:
@@ -1635,17 +1659,7 @@ def _score_memory(
 
 def _load_memory_entries(memory_path: str) -> list[dict[str, Any]]:
     """Load and parse JSONL entries from memory file."""
-    entries: list[dict[str, Any]] = []
-    with open(memory_path) as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                entries.append(json.loads(line))
-            except json.JSONDecodeError:
-                pass  # Skip malformed lines
-    return entries
+    return _read_jsonl(memory_path)
 
 
 def _format_memory_result(score: float, entry: dict[str, Any]) -> dict[str, Any]:
@@ -1937,19 +1951,8 @@ def cmd_reflection_search(args: argparse.Namespace) -> NoReturn:
         output_json({"ok": True, "reflections": []})
 
     try:
-        entries: list[dict[str, Any]] = []
-        with open(reflection_path) as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    entry = json.loads(line)
-                    if skill_filter and entry.get("skill") != skill_filter:
-                        continue
-                    entries.append(entry)
-                except json.JSONDecodeError:
-                    pass
+        filter_fn = (lambda e: e.get("skill") == skill_filter) if skill_filter else None
+        entries = _read_jsonl(reflection_path, filter_fn)
     except OSError as e:
         error_exit(f"Error reading reflection file: {e}")
 
@@ -2075,24 +2078,13 @@ def _load_trace_events(
     agent: str | None,
 ) -> list[dict[str, Any]]:
     """Load and filter trace events from file. Returns [] if file missing."""
-    if not os.path.exists(trace_path):
-        return []
-    events: list[dict[str, Any]] = []
     try:
-        with open(trace_path) as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    entry = json.loads(line)
-                    if _trace_event_matches(entry, session_id, skill, event, agent):
-                        events.append(entry)
-                except json.JSONDecodeError:
-                    pass
+        return _read_jsonl(
+            trace_path,
+            lambda e: _trace_event_matches(e, session_id, skill, event, agent),
+        )
     except OSError as e:
         error_exit(f"Error reading trace file: {e}")
-    return events
 
 
 def cmd_trace_search(args: argparse.Namespace) -> NoReturn:
@@ -2773,20 +2765,10 @@ def cmd_research_summary(args: argparse.Namespace) -> NoReturn:
 
 def _load_memories(memory_path: str) -> list[dict[str, Any]]:
     """Load memories from JSONL file."""
-    memories = []
     try:
-        with open(memory_path) as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    memories.append(json.loads(line))
-                except json.JSONDecodeError:
-                    continue
+        return _read_jsonl(memory_path)
     except OSError:
         return []
-    return memories
 
 
 def _score_and_format_memories(
@@ -2932,33 +2914,18 @@ def _read_handoff_summary(design_dir: str) -> str:
 def _read_recent_reflections(design_dir: str) -> list[str]:
     """Read last 2 reflections and format as summaries."""
     reflection_path = os.path.join(design_dir, "reflection.jsonl")
-    if not os.path.exists(reflection_path):
-        return []
-
     try:
-        with open(reflection_path) as f:
-            entries = []
-            for line in f:
-                line = line.strip()
-                if line:
-                    try:
-                        entries.append(json.loads(line))
-                    except json.JSONDecodeError:
-                        pass
-            entries.sort(
-                key=lambda x: _parse_timestamp(x.get("timestamp", 0)), reverse=True
-            )
-            recent = entries[:2]
-
-            summaries = []
-            for ref in recent:
-                skill = ref.get("skill", "unknown")
-                outcome = ref.get("outcome", "unknown")
-                status = "succeeded" if ref.get("goalAchieved", False) else "failed"
-                summaries.append(f"{skill}: {outcome} ({status})")
-            return summaries
+        entries = _read_jsonl(reflection_path)
     except OSError:
         return []
+    entries.sort(key=lambda x: _parse_timestamp(x.get("timestamp", 0)), reverse=True)
+    summaries = []
+    for ref in entries[:2]:
+        skill = ref.get("skill", "unknown")
+        outcome = ref.get("outcome", "unknown")
+        status = "succeeded" if ref.get("goalAchieved", False) else "failed"
+        summaries.append(f"{skill}: {outcome} ({status})")
+    return summaries
 
 
 def _read_plan_status(design_dir: str) -> str:
