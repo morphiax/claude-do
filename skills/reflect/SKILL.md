@@ -46,7 +46,12 @@ Resolve plugin root. All script calls: `python3 $PLAN_CLI <command> [args]` via 
 
 ```bash
 PLAN_CLI={plugin_root}/skills/reflect/scripts/plan.py
+SESSION_ID=reflect-$(date +%s)
 ```
+
+### Trace Emission
+
+Emit skill-start and skill-complete: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event {event} --skill reflect || true`. Failures are non-blocking (`|| true`). Reflect has no agents — only 2 trace calls per run.
 
 ---
 
@@ -54,7 +59,7 @@ PLAN_CLI={plugin_root}/skills/reflect/scripts/plan.py
 
 ### 1. Pre-flight
 
-1. **Lifecycle context**: Run `python3 $PLAN_CLI plan-health-summary .design` and display to user: "Previous session: {handoff summary}. Recent runs: {reflection summaries}. {plan status}." Skip if all fields empty.
+1. **Lifecycle context**: Run `python3 $PLAN_CLI plan-health-summary .design` and display to user: "Previous session: {handoff summary}. Recent runs: {reflection summaries}. {plan status}." Skip if all fields empty. Then: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event skill-start --skill reflect || true`
 2. **Parse arguments**: Extract optional `[skill-filter]` (design|execute|improve) and `[--min-runs N]` (default 2).
 3. **Load reflections**:
    ```bash
@@ -336,6 +341,7 @@ Run /do:execute to apply improvements.
 
    ```bash
    echo '{"reflectionsAnalyzed":N,"patternsFound":N,"hypothesesGenerated":N,"hypothesesApproved":N,"whatWorked":["<item>"],"whatFailed":["<item>"],"doNextTime":["<item>"]}' | python3 $PLAN_CLI reflection-add .design/reflection.jsonl --skill reflect --goal "<the analysis goal>" --outcome "<completed|partial|failed|aborted>" --goal-achieved <true|false>
+   python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event skill-complete --skill reflect || true
    ```
 
 **Fallback** (if finalize fails):

@@ -37,7 +37,12 @@ Resolve plugin root (containing `.claude-plugin/`). All script calls: `python3 $
 ```bash
 PLAN_CLI={plugin_root}/skills/recon/scripts/plan.py
 TEAM_NAME=$(python3 $PLAN_CLI team-name recon).teamName
+SESSION_ID=$TEAM_NAME
 ```
+
+### Trace Emission
+
+After each agent lifecycle event: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event {event} --skill recon [--agent "{name}"] || true`. Events: skill-start, skill-complete, spawn, completion, failure, respawn. Failures are non-blocking (`|| true`).
 
 ---
 
@@ -93,7 +98,7 @@ Example: "Responding to slow tests by skipping tests rather than making them fas
 
 ### 1. Pre-flight
 
-1. **Lifecycle context**: Run `python3 $PLAN_CLI plan-health-summary .design` and display to user: "Previous session: {handoff summary}. Recent runs: {reflection summaries}." Skip if all fields empty.
+1. **Lifecycle context**: Run `python3 $PLAN_CLI plan-health-summary .design` and display to user: "Previous session: {handoff summary}. Recent runs: {reflection summaries}." Skip if all fields empty. Then: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event skill-start --skill recon || true`
 2. **Check for ambiguity**: If the area has multiple valid interpretations per the Clarification Protocol, use `AskUserQuestion` before proceeding.
 3. **Check existing recon**: `ls .design/recon.json`. If exists, ask user: "Existing recon output found. Overwrite?" If declined, stop.
 5. **Archive stale artifacts**: `python3 $PLAN_CLI archive .design`
@@ -116,6 +121,7 @@ Create the team and spawn researchers in parallel.
 3. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "{area}" --keywords "{relevant keywords}"`. If `ok: false` or no memories, proceed without injection. Otherwise inject top 3-5 into researcher prompts. **Show user**: "Memory: injecting {count} past learnings — {keyword summaries}."
 4. `TaskCreate` for each researcher.
 5. Spawn researchers as teammates using the Task tool. For each researcher:
+   - Before Task call: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event spawn --skill recon --agent "{researcher-name}" || true`
    - Use Task with `team_name: $TEAM_NAME`, `name: "{researcher-name}"`, and `model: "sonnet"` (researchers require Read/Grep/Glob/Bash for codebase analysis and WebSearch/WebFetch for literature research).
    - Include the leverage framework reference table so researchers can classify findings.
    - Include scope bounds: "Focus your investigation on {directories/areas}. Do not explore unrelated areas."
@@ -147,12 +153,12 @@ Create the team and spawn researchers in parallel.
 - "For each finding include: area, observation, evidence, preliminary leverageLevel (1-7), leverageGroup (Intent/Design/Feedbacks/Parameters), effort estimate (trivial/small/medium/large/transformative), recommendation."
 - "Include a confidence assessment (high/medium/low) with basis for each finding."
 
-6. **Researcher liveness pipeline**: Track completion: (a) SendMessage received AND (b) artifact file exists (`ls .design/expert-{name}.json`). **Show user status**: "Researcher progress: {name} done ({M}/{N} complete)."
+6. **Researcher liveness pipeline**: Track completion: (a) SendMessage received AND (b) artifact file exists (`ls .design/expert-{name}.json`). **Show user status**: "Researcher progress: {name} done ({M}/{N} complete)." On completion: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event completion --skill recon --agent "{name}" || true`
 
 | Rule | Action |
 |---|---|
-| Turn timeout (3 turns) | Re-spawn with same prompt (max 2 attempts). |
-| Proceed with available | After 2 re-spawn attempts, proceed with responsive researchers' artifacts. |
+| Turn timeout (3 turns) | On re-spawn: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event respawn --skill recon --agent "{name}" || true`. Re-spawn with same prompt (max 2 attempts). |
+| Proceed with available | After 2 re-spawn attempts: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event failure --skill recon --agent "{name}" || true`. Proceed with responsive researchers' artifacts. |
 
 ### 4. Synthesis
 
@@ -213,6 +219,7 @@ To design an intervention: /do:design {designGoal from chosen intervention}
 
 ```bash
 echo '{"researchQuality":"<assessment>","leverageAssessmentAccuracy":"<assessment>","scopeDiscipline":"<stayed focused|drifted>","researchersSpawned":N,"findingsCount":N,"interventionsProduced":N,"contradictionsFound":N,"whatWorked":["<item>"],"whatFailed":["<item>"],"doNextTime":["<item>"]}' | python3 $PLAN_CLI reflection-add .design/reflection.jsonl --skill recon --goal "<the investigated area>" --outcome "<completed|partial|failed|aborted>" --goal-achieved <true|false>
+python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event skill-complete --skill recon || true
 ```
 
 On failure: proceed (not blocking).

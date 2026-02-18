@@ -36,7 +36,12 @@ Resolve plugin root (containing `.claude-plugin/`). All script calls: `python3 $
 ```bash
 PLAN_CLI={plugin_root}/skills/design/scripts/plan.py
 TEAM_NAME=$(python3 $PLAN_CLI team-name design).teamName
+SESSION_ID=$TEAM_NAME
 ```
+
+### Trace Emission
+
+After each agent lifecycle event: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event {event} --skill design [--agent "{name}"] || true`. Events: skill-start, skill-complete, spawn, completion, failure, respawn. Use `--payload '{"key":"val"}'` for extras. Failures are non-blocking (`|| true`).
 
 ---
 
@@ -44,7 +49,7 @@ TEAM_NAME=$(python3 $PLAN_CLI team-name design).teamName
 
 ### 1. Pre-flight
 
-1. **Lifecycle context**: Run `python3 $PLAN_CLI plan-health-summary .design` and display to user: "Previous session: {handoff summary}. Recent runs: {reflection summaries}. {plan status}." Skip if all fields empty.
+1. **Lifecycle context**: Run `python3 $PLAN_CLI plan-health-summary .design` and display to user: "Previous session: {handoff summary}. Recent runs: {reflection summaries}. {plan status}." Skip if all fields empty. Then: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event skill-start --skill design || true`
 2. **Check for ambiguity**: If the goal has multiple valid interpretations per the Clarification Protocol, use `AskUserQuestion` before proceeding.
 3. If >5 roles likely needed, suggest phases. Design only phase 1.
 4. Check existing plan: `python3 $PLAN_CLI status .design/plan.json`. If `ok` and `isResume`: ask user "Existing plan has {counts} roles. Overwrite?" If declined, stop.
@@ -102,6 +107,7 @@ Create the team and spawn experts in parallel.
 3. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "{goal}" --stack "{stack}"`. If `ok: false` or no memories → proceed without injection. Otherwise inject top 3-5 into expert prompts. **Show user**: "Memory: injecting {count} past learnings — {keyword summaries}."
 4. `TaskCreate` for each expert.
 5. Spawn experts as teammates using the Task tool. For each expert:
+   - Before Task call: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event spawn --skill design --agent "{expert-name}" || true`
    - Use Task with `team_name: $TEAM_NAME`, `name: "{expert-name}"`, and `model: "sonnet"` (experts require Read/Grep/Glob/Bash for codebase analysis).
    - Write prompts appropriate to the goal and each expert's focus area. Ask them to score relevant dimensions and trace scenarios.
    - **Behavioral traits**: Include behavioral instructions — tell experts HOW to think, not WHO to be. Examples: "Question assumptions that feel obvious", "Reject solutions that add complexity without clear benefit", "Focus on failure modes before success paths", "Assume prior art exists — search before inventing." Tailor traits to the expert's focus (e.g., architect: "Prefer composable patterns over monolithic solutions"; security specialist: "Assume every input is hostile until validated").
@@ -111,13 +117,13 @@ Create the team and spawn experts in parallel.
    - Instruct: "Then SendMessage to the lead with a summary."
 
    Expert artifacts flow directly to execution workers — they are structured JSON with sections that can be referenced selectively.
-6. **Expert liveness pipeline**: Track completion: (a) SendMessage received AND (b) artifact file exists (`ls .design/expert-{name}.json`). **Show user status**: "Expert progress: {name} done ({M}/{N} complete)."
+6. **Expert liveness pipeline**: Track completion: (a) SendMessage received AND (b) artifact file exists (`ls .design/expert-{name}.json`). **Show user status**: "Expert progress: {name} done ({M}/{N} complete)." On completion: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event completion --skill design --agent "{name}" || true`
 
 | Rule | Action |
 |---|---|
 | Turn timeout (2 turns) | Send: "Status check — artifact expected at `.design/expert-{name}.json`. Report completion or blockers." |
-| Re-spawn ceiling | No completion 1 turn after ping → re-spawn with same prompt (max 2 attempts). Show: "Re-spawning {name} (timeout)." |
-| Proceed with available | After 2 re-spawn attempts → log failure, proceed with responsive experts' artifacts. |
+| Re-spawn ceiling | No completion 1 turn after ping → re-spawn with same prompt (max 2 attempts). On re-spawn: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event respawn --skill design --agent "{name}" || true`. Show: "Re-spawning {name} (timeout)." |
+| Proceed with available | After 2 re-spawn attempts → `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event failure --skill design --agent "{name}" || true`. Log failure, proceed with responsive experts' artifacts. |
 | Never write artifacts yourself | Lead interpretation ≠ specialist analysis. |
 
 ### 3.5. Interface Negotiation & Cross-Review
@@ -343,6 +349,7 @@ Run /do:execute to begin.
 
    ```bash
    echo '{"expertQuality":"<which experts contributed most/least>","crossReviewValue":"<useful|redundant|skipped>","planCompleteness":"<assessment>","whatWorked":["<item>"],"whatFailed":["<item>"],"doNextTime":["<item>"]}' | python3 $PLAN_CLI reflection-add .design/reflection.jsonl --skill design --goal "<the goal>" --outcome "<completed|partial|failed|aborted>" --goal-achieved <true|false>
+   python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event skill-complete --skill design || true
    ```
 
    On failure: proceed (not blocking).
