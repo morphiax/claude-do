@@ -67,16 +67,26 @@ def _parse_timestamp(value: Any) -> float:
 
 def load_plan(path: str) -> dict[str, Any]:
     """Load and parse plan.json. Exit on error."""
+    return _load_json_file(path, "plan file")
+
+
+def _load_json_file(path: str, label: str = "file") -> dict[str, Any]:
+    """Load and parse a JSON file. Exit on error.
+
+    Args:
+        path: File path to load.
+        label: Human-readable label for error messages (e.g., "plan file", "research file").
+    """
     if not os.path.exists(path):
-        error_exit(f"Plan file not found: {path}")
+        error_exit(f"{label.capitalize()} not found: {path}")
 
     try:
         with open(path) as f:
             return json.load(f)
     except json.JSONDecodeError as e:
-        error_exit(f"Invalid JSON in plan file: {e}")
+        error_exit(f"Invalid JSON in {label}: {e}")
     except OSError as e:
-        error_exit(f"Error reading plan file: {e}")
+        error_exit(f"Error reading {label}: {e}")
 
 
 def output_json(data: Any) -> NoReturn:
@@ -1661,11 +1671,6 @@ def _score_memory(
     return keyword_score * recency_factor * importance_factor
 
 
-def _load_memory_entries(memory_path: str) -> list[dict[str, Any]]:
-    """Load and parse JSONL entries from memory file."""
-    return _read_jsonl(memory_path)
-
-
 def _format_memory_result(score: float, entry: dict[str, Any]) -> dict[str, Any]:
     """Format a memory entry for output."""
     return {
@@ -1710,7 +1715,7 @@ def cmd_memory_search(args: argparse.Namespace) -> NoReturn:
         output_json({"ok": True, "memories": []})
 
     try:
-        entries = _load_memory_entries(memory_path)
+        entries = _read_jsonl(memory_path)
     except OSError as e:
         error_exit(f"Error reading memory file: {e}")
 
@@ -1758,7 +1763,7 @@ def _update_memory_importance(memory_path: str, entry_id: str, boost: bool) -> N
         error_exit(f"Memory file not found: {memory_path}")
 
     try:
-        entries = _load_memory_entries(memory_path)
+        entries = _read_jsonl(memory_path)
     except OSError as e:
         error_exit(f"Error reading memory file: {e}")
 
@@ -2233,17 +2238,7 @@ def cmd_expert_validate(args: argparse.Namespace) -> NoReturn:
     Required fields: summary, verificationProperties
     """
     artifact_path = args.artifact_path
-
-    if not os.path.exists(artifact_path):
-        error_exit(f"Artifact file not found: {artifact_path}")
-
-    try:
-        with open(artifact_path) as f:
-            data = json.load(f)
-    except json.JSONDecodeError as e:
-        error_exit(f"Invalid JSON in artifact: {e}")
-    except OSError as e:
-        error_exit(f"Error reading artifact: {e}")
+    data = _load_json_file(artifact_path, "artifact")
 
     # Check required fields
     missing = []
@@ -2466,17 +2461,7 @@ def cmd_validate_auxiliary_report(args: argparse.Namespace) -> NoReturn:
     """
     artifact_path = args.artifact_path
     aux_type = args.type
-
-    if not os.path.exists(artifact_path):
-        error_exit(f"Artifact file not found: {artifact_path}")
-
-    try:
-        with open(artifact_path) as f:
-            data = json.load(f)
-    except json.JSONDecodeError as e:
-        error_exit(f"Invalid JSON in artifact: {e}")
-    except OSError as e:
-        error_exit(f"Error reading artifact: {e}")
+    data = _load_json_file(artifact_path, "artifact")
 
     errors = _validate_auxiliary_by_type(aux_type, data)
     if errors:
@@ -2561,15 +2546,7 @@ def cmd_worker_completion_validate(args: argparse.Namespace) -> NoReturn:
 
 def _load_research_json(research_path: str) -> dict[str, Any]:
     """Load research.json from disk, exit on error."""
-    if not os.path.exists(research_path):
-        error_exit(f"Research file not found: {research_path}")
-    try:
-        with open(research_path) as f:
-            return json.load(f)  # type: ignore[return-value]
-    except json.JSONDecodeError as e:
-        error_exit(f"Invalid JSON in research file: {e}")
-    except OSError as e:
-        error_exit(f"Error reading research file: {e}")
+    return _load_json_file(research_path, "research file")  # type: ignore[return-value]
 
 
 def _load_and_validate_research_structure(
@@ -2795,7 +2772,7 @@ def cmd_memory_summary(args: argparse.Namespace) -> NoReturn:
 
     # Load memories
     try:
-        memories = _load_memory_entries(memory_path)
+        memories = _read_jsonl(memory_path)
     except OSError:
         memories = []
     if not memories:
@@ -2938,7 +2915,7 @@ def cmd_memory_review(args: argparse.Namespace) -> NoReturn:
         )
 
     try:
-        all_memories = _load_memory_entries(memory_path)
+        all_memories = _read_jsonl(memory_path)
     except OSError as e:
         error_exit(f"Error reading memory file: {e}")
 
