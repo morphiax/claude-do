@@ -28,21 +28,25 @@ All five skills must be tested end-to-end. Changes to design, execute, research,
 - `.claude-plugin/plugin.json` — Plugin manifest (name, version, metadata)
 - `.claude-plugin/marketplace.json` — Marketplace distribution config
 - `shared/plan.py` — Shared helper script (35 commands: 17 query, 6 mutation, 9 validation, 1 build, 2 test)
-- `shared/lead-protocol.md` — Canonical lead protocol (boundaries, team setup, trace emission, liveness, memory injection). Consumed by design/execute/research/simplify at startup. Reflect is fully inline (no team).
+- `shared/lead-protocol-core.md` — Canonical lead protocol core (boundaries, no-polling, trace, memory, phase announcements, INSIGHT handling). Consumed by all team-based skills at startup.
+- `shared/lead-protocol-teams.md` — Lead protocol teams patterns (TeamCreate enforcement, liveness pipeline, team patterns). Consumed by design/execute/simplify at startup.
 - `skills/design/SKILL.md` — `/do:design` skill definition
 - `skills/design/scripts/plan.py` — Symlink → `shared/plan.py`
-- `skills/design/lead-protocol.md` — Symlink → `shared/lead-protocol.md`
+- `skills/design/lead-protocol-core.md` — Symlink → `shared/lead-protocol-core.md`
+- `skills/design/lead-protocol-teams.md` — Symlink → `shared/lead-protocol-teams.md`
 - `skills/execute/SKILL.md` — `/do:execute` skill definition
 - `skills/execute/scripts/plan.py` — Symlink → `shared/plan.py`
-- `skills/execute/lead-protocol.md` — Symlink → `shared/lead-protocol.md`
+- `skills/execute/lead-protocol-core.md` — Symlink → `shared/lead-protocol-core.md`
+- `skills/execute/lead-protocol-teams.md` — Symlink → `shared/lead-protocol-teams.md`
 - `skills/research/SKILL.md` — `/do:research` skill definition
 - `skills/research/scripts/plan.py` — Symlink → `shared/plan.py`
-- `skills/research/lead-protocol.md` — Symlink → `shared/lead-protocol.md`
+- `skills/research/lead-protocol-core.md` — Symlink → `shared/lead-protocol-core.md`
 - `skills/reflect/SKILL.md` — `/do:reflect` skill definition
 - `skills/reflect/scripts/plan.py` — Symlink → `shared/plan.py`
 - `skills/simplify/SKILL.md` — `/do:simplify` skill definition
 - `skills/simplify/scripts/plan.py` — Symlink → `shared/plan.py`
-- `skills/simplify/lead-protocol.md` — Symlink → `shared/lead-protocol.md`
+- `skills/simplify/lead-protocol-core.md` — Symlink → `shared/lead-protocol-core.md`
+- `skills/simplify/lead-protocol-teams.md` — Symlink → `shared/lead-protocol-teams.md`
 
 ### Skill Files Are the Implementation
 
@@ -50,7 +54,7 @@ The SKILL.md files are imperative prompts that Claude interprets at runtime. Det
 
 Each SKILL.md has YAML frontmatter (`name`, `description`, `argument-hint`) that must be preserved.
 
-**Shared Lead Protocol**: Design, execute, research, and simplify share common orchestration patterns (team boundaries, liveness tracking, memory injection, trace emission). These patterns live in `shared/lead-protocol.md` as the canonical source, symlinked into each skill directory. Each of these four skills reads `lead-protocol.md` (the local symlink) at startup and substitutes skill-specific values (agent types, keywords). Reflect is fully inline (no team, no agent spawning) and does not consume the shared protocol.
+**Shared Lead Protocol**: Design, execute, research, and simplify share common orchestration patterns through two symlinked files. `shared/lead-protocol-core.md` (consumed by all team-based skills) covers boundaries, no-polling guarantees, trace emission, memory injection, phase announcements, and INSIGHT handling. `shared/lead-protocol-teams.md` (consumed by design/execute/simplify only) covers TeamCreate enforcement, liveness pipeline patterns, and team-member coordination. Research uses standalone Task() subagents and consumes only the core protocol. Reflect is fully inline (no team, no agent spawning) and does not consume the shared protocol.
 
 ### Scripts
 
@@ -187,11 +191,12 @@ All five skills use the **main conversation as team lead** with Agent Teams (or 
 - Lifecycle context: runs `plan-health-summary` to display recent reflections at skill start
 - TeamCreate health check: verifies team is reachable, retries once on failure
 - Memory injection: lead searches .design/memory.jsonl for relevant past learnings (using importance-weighted scoring) and injects top 3-5 into expert prompts with transparency (shows what was injected to user). Expert prompts request verificationProperties (behavioral invariants, boundary conditions, integration contracts) to inform spec generation. Expert prompts include anti-pattern warnings for acceptance criteria (shift-left prevention of grep-only checks). Memory search failures gracefully fallback to empty results
+- Expert prompts include INSIGHT: instruction: agents emit intermediate findings during analysis with INSIGHT: prefix for real-time user feedback on discovery progress.
 - Lead spawns expert teammates (architect, researcher, domain-specialists) based on goal type awareness (implementation/meta/research). Expert prompts include behavioral trait instructions (e.g., "prefer composable patterns", "be skeptical of X") and require measurable verificationProperties based on actual code metrics (not theoretical estimates)
 - Expert liveness pipeline: completion checklist tracking which experts have reported, turn-based timeout (3 turns then re-spawn), re-spawn ceiling (max 2 attempts then proceed with available artifacts)
 - Cross-review: interface negotiation and perspective resolution via actual expert messaging (lead must not perform cross-review solo). Audit trail saved to `.design/cross-review.json`. Lead resolves unresolved conflicts in designDecisions[]
 - Draft plan review: for complex/high-stakes goals (based on complexity tier), lead displays draft plan.json to user for brief review before finalization
-- Auxiliary selection is independent of complexity tier: challenger (with adversarial behavioral traits) and integration-verifier always run. Scout runs when the goal touches code (implementation, refactoring, bug fixes). Memory-curator runs post-execution with strict quality persona
+- Complexity-proportional auxiliary selection: plans with roleCount ≤ 2 skip challenger and scout auxiliaries (lower token overhead). Plans with roleCount > 2 run challenger (with adversarial behavioral traits) and scout (when the goal touches code). Integration-verifier and memory-curator always run post-execution.
 - Lead synthesizes expert findings into role briefs in plan.json directly (no plan-writer delegate)
 - Step 4.5 (conditional, after role briefs written): Lead generates verification specs from expert verificationProperties and role briefs. Mandatory for complex goals (4+ roles, new skills, API integration). Optional for simple goals (1-3 roles, docs/config-only, sparse verificationProperties). For complex goals, a standalone spec-writer Task agent can assist. Specs are written to `.design/specs/{role-name}.{ext}` in the project's test framework (or shell scripts as fallback) and added to plan.json's verificationSpecs[].
 - `finalize` validates role briefs (including that not all acceptance criteria are surface-only checks), validates verificationSpecs schema (if present), computes SHA256 checksums for spec files, and computes directory overlaps (no prompt assembly)
@@ -201,12 +206,12 @@ All five skills use the **main conversation as team lead** with Agent Teams (or 
 - Phase announcements: lead announces each major phase (pre-flight, auxiliary spawning, worker execution, post-execution) for user visibility
 - Lifecycle context: runs `plan-health-summary` to display recent reflections at skill start
 - TeamCreate health check: verifies team is reachable, retries once on failure
-- Pre-execution auxiliaries (challenger with adversarial traits, scout with fact-checking focus) run in parallel before workers spawn with structured output formats. After parallel completion, challenger results (plan.json constraint injection) are processed first, then scout results are consumed. Scout verifies that verificationSpec files exist and that runCommands reference valid tools/paths if specs are present.
+- Complexity-proportional auxiliaries: plans with roleCount ≤ 2 skip challenger and scout auxiliaries (lower token overhead for trivial goals). Plans with roleCount > 2 run pre-execution auxiliaries (challenger with adversarial traits, scout with fact-checking focus) in parallel before workers spawn with structured output formats. After parallel completion, challenger results (plan.json constraint injection) are processed first, then scout results are consumed. Scout verifies that verificationSpec files exist and that runCommands reference valid tools/paths if specs are present.
 - AC pre-validation: before worker spawning, lead runs each role's acceptance criteria `check` commands to detect always-pass or broken criteria early. Workers then verify criteria again during completion as a fresh question.
 - Memory injection: lead searches .design/memory.jsonl per role (using importance-weighted scoring with role.goal + scope as context) and injects top 2-3 into worker prompts with transparency (shows injected memories to user). Memory search failures gracefully fallback to empty results
 - Lead creates TaskList from plan.json, spawns one persistent worker per role via `worker-pool`. Worker instructions use structured tables for clarity (identity, brief, context, verification, reporting)
 - Adaptive model escalation: workers start on assigned model (haiku/sonnet/opus), escalate to next-higher tier on retry (haiku→sonnet→opus). Model escalation shown in worker status updates
-- Worker-to-worker handoff: when a role completes and is a dependency for others, worker provides keyDecisions and contextForDependents in completion report. Lead injects this context into dependent worker prompts via SendMessage
+- Peer-to-peer worker handoff: when a role completes and is a dependency for others, worker can send keyDecisions and contextForDependents directly to dependent workers via SendMessage (notifyOnComplete). Lead still controls task unblocking. Enables faster context delivery for dependent roles.
 - Worker liveness pipeline: turn-based silence detection with 3-turn timeout then re-spawn (max 2 attempts per role before proceeding with available progress). Workers must acknowledge fix requests within 1 turn (no idle-without-responding). Simplified from previous 5-turn ping + 7-turn timeout
 - Workers report completion as structured JSON schema: `{role, achieved, filesChanged[], acceptanceCriteria[{criterion, passed, evidence}], keyDecisions[], contextForDependents}`
 - Workers provide progress reporting for significant events (file writes, test runs, criterion verification). Tool boundaries: workers do NOT use WebFetch, WebSearch, or Task
@@ -221,16 +226,14 @@ All five skills use the **main conversation as team lead** with Agent Teams (or 
 - Self-reflection: both design and execute write structured self-evaluations to `.design/reflection.jsonl` at end of each run (episodic memory). Memory-curator reads reflections as primary signal
 - End-of-run summary: displays roles completed/failed/skipped, files changed, acceptance criteria results, verification spec results, and memories curated
 
-**`/do:research`** — team name: `do-research-{project}-{hash}` (generated by `team-name` command)
+**`/do:research`** — standalone Task() subagents (not team-based)
 - Protocol guardrail: lead must follow the flow step-by-step (pre-flight, researcher spawning, synthesis, output finalization)
 - Phase announcements: lead announces each major phase (pre-flight, researcher spawning, synthesis, finalization) for user visibility
 - Lifecycle context: runs `plan-health-summary` to display recent reflections at skill start
-- TeamCreate health check: verifies team is reachable, retries once on failure
-- Always spawns full research team (codebase-analyst, external-researcher, domain-specialist) — research is inherently exploratory, external research is always valuable
+- Spawns parallel standalone Task() subagents (codebase-analyst, external-researcher, domain-specialist) — research is inherently exploratory, external research is always valuable. Researchers report findings via artifact files in `.design/`, not via team messaging.
 - Memory injection: lead searches .design/memory.jsonl for relevant past learnings and injects top 3 into researcher prompts with transparency. Memory search failures gracefully fallback to empty results
 - Researcher prompts include behavioral trait instructions (e.g., "prefer empirical evidence", "ground research in concrete findings")
 - Researcher quality calibration: behavioral sharpeners per researcher type (codebase-analyst, external-researcher, domain-specialist), DO/DON'T guardrail table with dual-scan posture (seek failure signals AND working constraints), source hierarchy tiers for external-researcher, invisible curriculum elicitation for codebase-analyst and domain-specialist. Minimum research thresholds: >=3 production post-mortems for failure patterns, >=5 beginner mistakes across all sections, quantitative performance claims required
-- Researcher liveness pipeline: completion checklist tracking which researchers have reported, turn-based timeout (3 turns then re-spawn), re-spawn ceiling (max 2 attempts then proceed with available findings)
 - Synthesis: lead organizes findings across 5 knowledge sections (prerequisites, mentalModels, usagePatterns, failurePatterns, productionReadiness), generates recommendations ranked by confidence and effort
 - Synthesis delegation: lead synthesizes by default. For >15 findings across >3 domains, spawns single synthesis Task agent
 - `research-validate` validates schema, outputs validation result
@@ -260,13 +263,13 @@ All five skills use the **main conversation as team lead** with Agent Teams (or 
 - Lifecycle context: runs `plan-health-summary` to display recent reflections at skill start
 - TeamCreate health check: verifies team is reachable, retries once on failure
 - Target type detection: code (.py/.js/.ts etc), text (.md/SKILL.md/.yaml etc), or mixed — drives which analyst variant spawns
-- Spawns 2 analysts (pattern-recognizer, complexity-analyst) with target-type-aware behavioral trait instructions. Text targets get token weight, dead rules, and redundancy analysis instead of git churn/cyclomatic complexity
+- Spawns 2 analysts (pattern-recognizer, complexity-analyst) with target-type-aware behavioral trait instructions. Text targets get token weight, dead rules, and redundancy analysis instead of git churn/cyclomatic complexity. Analyst prompts include INSIGHT: instruction for intermediate findings.
 - Cascade thinking: analysts seek simplification opportunities where one insight eliminates multiple components, reducing cognitive overhead without sacrificing capability
 - Anti-pattern guards from improve merged in: token budget tracking, circular simplification detection, regression safety
 - Memory injection: lead searches .design/memory.jsonl for relevant past learnings and injects top 3 into analyst prompts with transparency. Memory search failures gracefully fallback to empty results
 - Analyst liveness pipeline: completion checklist tracking which analysts have reported, turn-based timeout (3 turns then re-spawn), re-spawn ceiling (max 2 attempts then proceed with available findings)
 - Lead synthesizes cascade opportunities into preservation-focused worker roles: roles that remove/restructure code preserve semantics, not just delete
-- Auxiliary roles: challenger (pre-execution), integration-verifier (post-execution), memory-curator (post-execution)
+- Complexity-proportional auxiliary selection: plans with roleCount ≤ 2 skip challenger and scout (post-execution only remains). Plans with roleCount > 2 run full auxiliary pipeline (challenger pre-execution, integration-verifier + memory-curator post-execution).
 - Output: always produces `.design/plan.json` (schemaVersion 4) for `/do:execute` — simplify never writes source files directly
 - End-of-run summary: displays cascade opportunities identified, simplification roles created, and preservation constraints documented
 

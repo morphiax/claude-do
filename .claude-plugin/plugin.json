@@ -1,6 +1,6 @@
 {
   "name": "do",
-  "version": "2.21.0",
+  "version": "2.22.0",
   "description": "Structured planning, dependency-graph execution, comprehensive knowledge research, cascade simplification for code and text, and reflection-driven optimization for Claude Code — /do:design, /do:execute, /do:research, /do:simplify, and /do:reflect",
   "author": {
     "name": "morphiax",

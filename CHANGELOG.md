@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.22.0] - 2026-02-19
+
+### Changed
+
+- **Lead protocol split**: `shared/lead-protocol.md` split into `shared/lead-protocol-core.md` (boundaries, no-polling, trace, memory, phase announcements, INSIGHT handling) and `shared/lead-protocol-teams.md` (TeamCreate enforcement, liveness pipeline, team patterns). All symlinks updated in skill directories.
+- **Research topology**: Research skill converted from TeamCreate with team-member researchers to parallel standalone Task() subagents. Researchers report via artifact files instead of SendMessage. Simplified team lifecycle overhead, research consumes only lead-protocol-core.md.
+- **Complexity-proportional auxiliaries**: Execute, design, and simplify now gate auxiliary selection by complexity tier. Plans with roleCount ≤ 2 skip challenger and scout auxiliaries. Reduces token overhead for trivial goals while maintaining safety for complex ones.
+- **INSIGHT surfacing**: Lead protocol (core) now documents how to handle INSIGHT: messages from agents for immediate intermediate findings. Agent prompts in design, execute, research, and simplify updated to emit INSIGHT: prefixed messages during research/analysis phases. Improves real-time user feedback.
+- **Peer-to-peer worker handoff**: Execute workers can now send context directly to dependent workers via SendMessage (notifyOnComplete). Lead still controls task unblocking. Enables faster context delivery for dependent roles.
+
 ## [2.21.0] - 2026-02-19
 
 ### Added
