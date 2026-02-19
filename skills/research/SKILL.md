@@ -8,7 +8,7 @@ argument-hint: "<topic or question to research>"
 
 Investigate a topic and produce a knowledge artifact in `.design/research.json` with structured knowledge sections and actionable recommendations. **This skill researches and synthesizes — it does NOT design or execute.**
 
-Before starting the Flow, Read `lead-protocol.md`. It defines the canonical lead protocol (boundaries, team setup, trace emission, liveness, memory injection). Substitute: {skill}=research, {agents}=researchers.
+Before starting the Flow, Read `lead-protocol-core.md`. It defines the canonical lead protocol (boundaries, trace emission, memory injection, phase announcements). Research uses standalone Task() subagents — no team setup required. Task() blocks until done, so no polling logic is needed.
 
 **CRITICAL BOUNDARY: Research captures WHAT is known and WHY it matters. It does NOT determine HOW to implement — that is `/do:design`'s job. Research produces `.design/research.json`, NOT `.design/plan.json`. If you start thinking about role decomposition or acceptance criteria, you have crossed into design territory — stop and refocus on knowledge synthesis.**
 
@@ -55,22 +55,19 @@ Researchers tag each finding with which section(s) it informs. Lead assembles pr
 
 1. Read the topic. Scan project metadata (CLAUDE.md, package.json, README) via Bash to understand stack and context.
 2. Set research depth: surface (quick scan, high-confidence findings only), standard (thorough, default), or deep (exhaustive + production signals). Infer from user phrasing or ask if unclear.
-3. Select team — always spawn the full research team: 1 codebase-analyst + 1 external-researcher + 1 domain-specialist. Research is inherently exploratory — external research is always valuable for grounding knowledge in prior art and production reality.
+3. Always spawn the full researcher set: 1 codebase-analyst + 1 external-researcher + 1 domain-specialist. Research is inherently exploratory — external research is always valuable for grounding knowledge in prior art and production reality.
 4. **Announce to user**: "Research: investigating '{topic}'. Depth: {depth}. Spawning 3 researchers (codebase-analyst, external-researcher, domain-specialist)."
 
 ### 3. Research
 
-Create the team and spawn researchers in parallel.
+Spawn researchers as parallel standalone Task() subagents.
 
-1. `TeamDelete(team_name: $TEAM_NAME)` (ignore errors), `TeamCreate(team_name: $TEAM_NAME)`. If TeamCreate fails, tell user Agent Teams is required and stop.
-2. **TeamCreate health check**: Verify team is reachable. If verification fails, `TeamDelete`, then retry `TeamCreate` once. If retry fails, abort with clear error message.
-3. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "{topic}" --keywords "{relevant keywords}"`. If `ok: false` or no memories, proceed without injection. Otherwise inject top 3-5 into researcher prompts. **Show user**: "Memory: injecting {count} past learnings — {keyword summaries}."
-4. `TaskCreate` for each researcher.
-5. Spawn researchers as teammates using the Task tool. For each researcher:
-   - Before Task call: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event spawn --skill research --agent "{researcher-name}" || true`
-   - Use Task with `team_name: $TEAM_NAME`, `name: "{researcher-name}"`, and `model: "sonnet"`.
+1. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "{topic}" --keywords "{relevant keywords}"`. If `ok: false` or no memories, proceed without injection. Otherwise inject top 3-5 into researcher prompts. **Show user**: "Memory: injecting {count} past learnings — {keyword summaries}."
+2. **Spawn all 3 researchers in the same response** (parallel). Use `Task(subagent_type: "general-purpose", model: "sonnet")` for each — no `team_name` or `name` parameter. Task() returns their result directly when done — no SendMessage or liveness tracking needed.
    - Include scope bounds: "Focus your investigation on {directories/areas}. Do not explore unrelated areas."
    - Inject relevant memories if available.
+   - Each researcher MUST save findings to `.design/expert-{name}.json` before returning.
+3. After all 3 Tasks return, verify artifacts exist: `ls .design/expert-codebase-analyst.json .design/expert-external-researcher.json .design/expert-domain-specialist.json`. If any is missing but Task returned output, write the output to the missing artifact file. If Task errored, spawn a replacement Task() with the same prompt (max 1 retry per researcher).
 
 **Researcher Prompts by Type**:
 
@@ -128,11 +125,8 @@ Create the team and spawn researchers in parallel.
 
 **Verbatim preservation rule**: When reference materials, prompts, agent definitions, or documentation contain worked examples, concrete demonstrations, structural templates, process steps, or prompt engineering patterns — include them VERBATIM in your findings as a `verbatim` field. These are the materials that make the difference between understanding a concept abstractly and being able to reproduce it. Summarizing "there are 3 examples of cascades" loses the teaching value; including the actual examples preserves it. This applies to: example inputs/outputs, step-by-step processes, decision tables, prompt structures, configuration templates, schema patterns, and any content where the specific wording or structure IS the value.
 
-- "Save your complete findings to `.design/expert-{name}.json` as structured JSON."
-- "Then SendMessage to the lead with a summary."
+- "Save your complete findings to `.design/expert-{name}.json` as structured JSON. Return a one-paragraph summary when done."
 - "For each finding include: area, observation, evidence, sections (array from: prerequisites/mentalModels/usagePatterns/failurePatterns/productionReadiness), confidence (high/medium/low), effort (trivial/small/medium/large/transformative). If the finding contains worked examples, templates, process steps, or prompt patterns from reference materials, include a `verbatim` field with the actual content."
-
-6. **Researcher liveness pipeline**: Apply the Liveness Pipeline from `lead-protocol.md`. Track completion per researcher: (a) SendMessage received AND (b) artifact file exists (`ls .design/expert-{name}.json`). Show user status: "Researcher progress: {name} done ({M}/{N} complete)."
 
 ### 4. Synthesis
 
@@ -140,7 +134,7 @@ The lead assembles pre-tagged findings into knowledge sections and writes recomm
 
 **Announce to user**: "Synthesizing {N} researcher findings into knowledge sections and recommendations."
 
-1. Collect all researcher findings from messages and `.design/expert-*.json` files via Bash (`python3 -c "import json; ..."`).
+1. Collect all researcher findings from `.design/expert-*.json` files via Bash (`python3 -c "import json; ..."`).
 2. **Delegation check**: If researchers produced >15 total findings across >3 domains, spawn a single synthesis Task agent via `Task(subagent_type: "general-purpose", model: "sonnet")` to perform assembly. Otherwise, lead synthesizes directly.
 3. **Assemble sections**: Group findings by their section[] tags into the 5 knowledge sections. For each section, merge corroborating findings, surface contradictions, note gaps.
 4. **Contradiction detection**: Scan for findings from different researchers that recommend opposing positions on the same area. If found, add to `contradictions[]` in research.json. Do NOT resolve via agent messaging — surface both positions for user decision.
@@ -190,9 +184,7 @@ To act on this research: /do:design {designGoal from primary adopt/adapt recomme
 
 ### 6. Reflection
 
-1. Shut down teammates, delete team.
-2. Clean up TaskList.
-3. **Self-reflection** — Evaluate this research run:
+1. **Self-reflection** — Evaluate this research run:
 
 ```bash
 echo '{"researchQuality":"<assessment>","sectionCoverage":"<complete|partial>","scopeDiscipline":"<stayed focused|drifted>","researchersSpawned":N,"findingsCount":N,"recommendationsProduced":N,"contradictionsFound":N,"whatWorked":["<item>"],"whatFailed":["<item>"],"doNextTime":["<item>"]}' | python3 $PLAN_CLI reflection-add .design/reflection.jsonl --skill research --goal "<the investigated topic>" --outcome "<completed|partial|failed|aborted>" --goal-achieved <true|false>
