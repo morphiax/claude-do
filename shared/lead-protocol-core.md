@@ -18,23 +18,17 @@
 
 Use only `TeamCreate`, `TeamDelete`, `TaskCreate`, `TaskUpdate`, `TaskList`, `SendMessage`, `Task`, `AskUserQuestion`, and `Bash` (for `python3 $PLAN_CLI`, cleanup, verification). Project metadata (CLAUDE.md, package.json, README) allowed via Bash. **Never use Read, Grep, Glob, Edit, Write, LSP, WebFetch, WebSearch, or MCP tools on project source files.** The lead orchestrates — agents implement.
 
-> **execute override**: Bash also includes `git` (for partial-work cleanup on retry and git status checks).
-
 ---
 
 ## No Polling
 
-Messages auto-deliver automatically. Never use `sleep`, loops, or Bash waits. When a teammate sends a message, it appears in your next turn.
+Messages auto-deliver. Never use `sleep`, loops, or Bash waits. When a teammate sends a message, it appears in your next turn.
 
 ---
 
-## Protocol Requirement
+## Guardrails
 
 **Do NOT answer the goal directly. Your FIRST action after reading the goal MUST be the pre-flight check. Follow the Flow step-by-step.**
-
----
-
-## Do Not Use EnterPlanMode
 
 **Do NOT use `EnterPlanMode`** — this skill IS the plan.
 
@@ -54,20 +48,16 @@ SESSION_ID=$TEAM_NAME
 
 ## Trace Emission
 
-Emit only the following lifecycle events:
+Emit lifecycle events via `python3 $PLAN_CLI trace-add` (failures are non-blocking — append `|| true`):
 
-```bash
-python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event {event} --skill {skill} [--agent "{name}"] [--payload '{"key":"val"}'] || true
-```
-
-Events:
-- `skill-start` **(mandatory)** — emit at the start of every run
-- `skill-complete` **(mandatory)** — emit at the end of every run
-- `failure` **(mandatory)** — emit when any agent or role fails
-- `respawn` **(mandatory)** — emit when re-spawning a timed-out or failed agent
-- `spawn`, `completion` **(optional)** — emit for team-based skills; omit for single Task() calls
-
-Failures are non-blocking (`|| true`).
+| Event | Required | When |
+|-------|----------|------|
+| `skill-start` | mandatory | start of every run |
+| `skill-complete` | mandatory | end of every run |
+| `failure` | mandatory | any agent or role fails |
+| `respawn` | mandatory | re-spawning a timed-out or failed agent |
+| `spawn` | optional | team-based skills only |
+| `completion` | optional | team-based skills only |
 
 ---
 
@@ -102,7 +92,11 @@ python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event
 
 Announce each major phase to user for visibility. Minimum: pre-flight, agent spawning, synthesis/execution, completion. Format: brief one-liner stating what's happening next.
 
-**Insight surfacing**: When an agent sends a message prefixed with `INSIGHT:`, display it to the user immediately: "Insight from {agent}: {finding}". Do NOT count INSIGHT messages as completion signals — continue waiting for the full report or artifact. An INSIGHT message is a partial update, not a completion report.
+---
+
+## INSIGHT Handling
+
+When an agent sends a message prefixed with `INSIGHT:`, display it to the user immediately: "Insight from {agent}: {finding}". Do NOT count INSIGHT messages as completion signals — continue waiting for the full report or artifact. An INSIGHT message is a partial update, not a completion report.
 
 ---
 

@@ -10,6 +10,8 @@ Execute `.design/plan.json` with persistent, self-organizing workers. Design pro
 
 Before starting the Flow, Read `lead-protocol-core.md` and `lead-protocol-teams.md`. They define the canonical lead protocol (boundaries, team setup, trace emission, liveness, memory injection). Substitute: {skill}=execute, {agents}=workers.
 
+> **Execute Lead Boundaries override**: Bash also includes `git` (for partial-work cleanup on retry and git status checks).
+
 **Progress reporting**: After the initial summary, output brief progress updates for significant events. Keep updates to one line each. Suppress intermediate worker tool calls and chatter.
 
 ### Script Setup
