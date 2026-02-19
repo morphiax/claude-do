@@ -3197,11 +3197,60 @@ def cmd_archive(args: argparse.Namespace) -> NoReturn:
 # ============================================================================
 
 
+def _run_unittest_suite() -> list[dict[str, Any]]:
+    """Run the internal unittest suite and return per-test results."""
+    loader = unittest.TestLoader()
+    suite = loader.loadTestsFromTestCase(TestPlanCommands)
+
+    test_results: list[dict[str, Any]] = []
+
+    class _CollectingResult(unittest.TestResult):
+        def addSuccess(self, test: unittest.TestCase) -> None:
+            test_results.append(
+                {
+                    "command": f"unittest:{test._testMethodName}",
+                    "passed": True,
+                    "error": None,
+                }
+            )
+
+        def addFailure(self, test: unittest.TestCase, err: Any) -> None:
+            test_results.append(
+                {
+                    "command": f"unittest:{test._testMethodName}",
+                    "passed": False,
+                    "error": str(err[1]),
+                }
+            )
+
+        def addError(self, test: unittest.TestCase, err: Any) -> None:
+            test_results.append(
+                {
+                    "command": f"unittest:{test._testMethodName}",
+                    "passed": False,
+                    "error": str(err[1]),
+                }
+            )
+
+        def addSkip(self, test: unittest.TestCase, reason: str) -> None:
+            test_results.append(
+                {
+                    "command": f"unittest:{test._testMethodName}",
+                    "passed": True,
+                    "error": None,
+                }
+            )
+
+    suite.run(_CollectingResult())
+    return test_results
+
+
 def cmd_self_test(args: argparse.Namespace) -> NoReturn:
     """Run self-tests on all commands using synthetic fixtures.
 
-    Creates a temporary directory with test fixtures, runs each command
-    via subprocess to validate the full CLI path, and reports results.
+    Runs the internal unittest suite in-process, then runs subprocess tests
+    that cover CLI-specific behaviors (exit codes, graceful degradation,
+    file write verification) not testable in-process.
     """
     _ = args  # Unused but required for dispatch signature
 
@@ -3210,146 +3259,46 @@ def cmd_self_test(args: argparse.Namespace) -> NoReturn:
     passed = 0
     failed = 0
 
-    # Create temp directory for fixtures
+    # Run in-process unittest suite first
+    unittest_results = _run_unittest_suite()
+    for r in unittest_results:
+        results.append(r)
+        if r["passed"]:
+            passed += 1
+        else:
+            failed += 1
+
+    # Create temp directory for subprocess fixtures
     tmp_dir = tempfile.mkdtemp(prefix="plan-self-test-")
 
     try:
         # Get path to this script
         script_path = os.path.abspath(__file__)
 
-        # Create fixtures
+        # Create fixtures (only needed for subprocess tests)
         fixtures = _create_fixtures(tmp_dir)
 
-        # Run tests
+        # Subprocess tests: only those with unique CLI-level value
+        # (exit-code testing, graceful degradation, file write verification)
         tests = [
-            ("team-name", lambda: _test_team_name(script_path)),
-            ("status", lambda: _test_status(script_path, fixtures["minimal_plan"])),
-            ("summary", lambda: _test_summary(script_path, fixtures["minimal_plan"])),
             (
-                "overlap-matrix",
-                lambda: _test_overlap_matrix(script_path, fixtures["minimal_plan"]),
-            ),
-            (
-                "tasklist-data",
-                lambda: _test_tasklist_data(script_path, fixtures["minimal_plan"]),
-            ),
-            (
-                "worker-pool",
-                lambda: _test_worker_pool(script_path, fixtures["minimal_plan"]),
-            ),
-            (
-                "retry-candidates",
-                lambda: _test_retry_candidates(script_path, fixtures["failed_plan"]),
-            ),
-            (
-                "circuit-breaker",
-                lambda: _test_circuit_breaker(script_path, fixtures["failed_plan"]),
-            ),
-            (
-                "memory-search",
-                lambda: _test_memory_search(script_path, fixtures["memory_file"]),
-            ),
-            (
-                "memory-add",
-                lambda: _test_memory_add(script_path, fixtures["memory_file"]),
-            ),
-            (
-                "memory-add --boost",
+                "memory-add --boost (importance arithmetic)",
                 lambda: _test_memory_boost(script_path, fixtures["memory_file"]),
             ),
             (
-                "memory-add --decay",
+                "memory-add --decay (importance arithmetic)",
                 lambda: _test_memory_decay(script_path, fixtures["memory_file"]),
             ),
             (
-                "memory-summary",
-                lambda: _test_memory_summary(script_path, fixtures["memory_file"]),
-            ),
-            (
-                "memory-review",
-                lambda: _test_memory_review(script_path, fixtures["memory_file"]),
-            ),
-            (
-                "reflection-add",
-                lambda: _test_reflection_add(script_path, fixtures["reflection_file"]),
-            ),
-            (
-                "reflection-search",
-                lambda: _test_reflection_search(
-                    script_path, fixtures["reflection_file"]
-                ),
-            ),
-            ("reflection-validate", lambda: _test_reflection_validate(script_path)),
-            (
-                "validate-auxiliary-report",
-                lambda: _test_validate_auxiliary_report(script_path, tmp_dir),
-            ),
-            (
-                "worker-completion-validate",
-                lambda: _test_worker_completion_validate(script_path),
-            ),
-            (
-                "research-validate",
-                lambda: _test_research_validate(script_path, fixtures["research_file"]),
-            ),
-            (
-                "research-summary",
-                lambda: _test_research_summary(script_path, fixtures["research_file"]),
-            ),
-            (
-                "validate-checks (valid)",
-                lambda: _test_validate_checks_valid(
-                    script_path, fixtures["minimal_plan"]
-                ),
-            ),
-            (
-                "validate-checks (invalid)",
-                lambda: _test_validate_checks_invalid(
-                    script_path, fixtures["bad_check_plan"]
-                ),
-            ),
-            (
-                "expert-validate",
-                lambda: _test_expert_validate(script_path, fixtures["expert_artifact"]),
-            ),
-            (
-                "update-status",
-                lambda: _test_update_status(script_path, fixtures["minimal_plan"]),
-            ),
-            (
-                "resume-reset",
-                lambda: _test_resume_reset(script_path, fixtures["in_progress_plan"]),
-            ),
-            ("finalize", lambda: _test_finalize(script_path, fixtures["unfin_plan"])),
-            (
-                "health-check",
-                lambda: _test_health_check(script_path, fixtures["design_dir"]),
-            ),
-            (
-                "plan-diff",
-                lambda: _test_plan_diff(
-                    script_path, fixtures["minimal_plan"], fixtures["modified_plan"]
-                ),
-            ),
-            (
-                "plan-health-summary",
-                lambda: _test_plan_health_summary(script_path, fixtures["design_dir"]),
-            ),
-            ("archive", lambda: _test_archive(script_path, fixtures["archive_dir"])),
-            (
-                "sync-check",
-                lambda: _test_sync_check(script_path, fixtures["skills_dir"]),
-            ),
-            (
-                "trace-add (new file)",
+                "trace-add (new file write verification)",
                 lambda: _test_trace_add_new(script_path, fixtures["trace_file"]),
             ),
             (
-                "trace-add (invalid event type)",
+                "trace-add (invalid event type exit-code)",
                 lambda: _test_trace_add_invalid_event(script_path, tmp_dir),
             ),
             (
-                "trace-add (invalid payload)",
+                "trace-add (invalid payload exit-code)",
                 lambda: _test_trace_add_invalid_payload(script_path, tmp_dir),
             ),
             (
@@ -3359,48 +3308,6 @@ def cmd_self_test(args: argparse.Namespace) -> NoReturn:
             (
                 "trace-add (skill-start without agent)",
                 lambda: _test_trace_add_skill_start(script_path, tmp_dir),
-            ),
-            (
-                "trace-search (by session-id)",
-                lambda: _test_trace_search_session(script_path, fixtures["trace_file"]),
-            ),
-            (
-                "trace-search (by event type)",
-                lambda: _test_trace_search_event(script_path, fixtures["trace_file"]),
-            ),
-            (
-                "trace-search (missing file)",
-                lambda: _test_trace_search_missing(script_path, tmp_dir),
-            ),
-            (
-                "trace-summary (all sessions)",
-                lambda: _test_trace_summary_all(script_path, fixtures["trace_file"]),
-            ),
-            (
-                "trace-summary (single session)",
-                lambda: _test_trace_summary_session(
-                    script_path, fixtures["trace_file"]
-                ),
-            ),
-            (
-                "trace-validate (valid file)",
-                lambda: _test_trace_validate_valid(script_path, fixtures["trace_file"]),
-            ),
-            (
-                "trace-validate (malformed entries)",
-                lambda: _test_trace_validate_malformed(script_path, tmp_dir),
-            ),
-            (
-                "archive preserves trace.jsonl",
-                lambda: _test_archive_preserves_trace(
-                    script_path, fixtures["trace_archive_dir"]
-                ),
-            ),
-            (
-                "health-check includes trace.jsonl",
-                lambda: _test_health_check_trace(
-                    script_path, fixtures["trace_design_dir"]
-                ),
             ),
         ]
 
@@ -3423,7 +3330,7 @@ def cmd_self_test(args: argparse.Namespace) -> NoReturn:
                 failed += 1
 
         output_json(
-            {"ok": True, "passed": passed, "failed": failed, "results": results}
+            {"ok": failed == 0, "passed": passed, "failed": failed, "results": results}
         )
 
     finally:
@@ -3919,121 +3826,6 @@ def _run_command(
         ) from None
 
 
-def _test_team_name(script_path: str) -> None:
-    """Test team-name command."""
-    output = _run_command(script_path, ["team-name", "design"])
-    assert output.get("ok") is True, f"team-name failed: {output}"
-    assert "teamName" in output, "team-name missing teamName field"
-    assert output["teamName"].startswith("do-design-"), (
-        f"Invalid team name pattern: {output['teamName']}"
-    )
-
-
-def _test_status(script_path: str, plan_path: str) -> None:
-    """Test status command."""
-    output = _run_command(script_path, ["status", plan_path])
-    assert output.get("ok") is True, f"status failed: {output}"
-    assert output.get("roleCount") == 2, (
-        f"Expected 2 roles, got {output.get('roleCount')}"
-    )
-    assert "pending" in output.get("counts", {}), "status missing counts.pending"
-
-
-def _test_summary(script_path: str, plan_path: str) -> None:
-    """Test summary command."""
-    output = _run_command(script_path, ["summary", plan_path])
-    assert output.get("ok") is True, f"summary failed: {output}"
-    assert output.get("roleCount") == 2, (
-        f"Expected 2 roles, got {output.get('roleCount')}"
-    )
-    assert "maxDepth" in output, "summary missing maxDepth"
-
-
-def _test_overlap_matrix(script_path: str, plan_path: str) -> None:
-    """Test overlap-matrix command."""
-    output = _run_command(script_path, ["overlap-matrix", plan_path])
-    assert output.get("ok") is True, f"overlap-matrix failed: {output}"
-    assert "matrix" in output, "overlap-matrix missing matrix field"
-    assert isinstance(output["matrix"], dict), "overlap-matrix matrix is not a dict"
-
-
-def _test_tasklist_data(script_path: str, plan_path: str) -> None:
-    """Test tasklist-data command."""
-    output = _run_command(script_path, ["tasklist-data", plan_path])
-    assert output.get("ok") is True, f"tasklist-data failed: {output}"
-    assert len(output.get("roles", [])) == 2, "tasklist-data should return 2 roles"
-    # Role 1 depends on role 0
-    assert 0 in output["roles"][1].get("blockedBy", []), (
-        "Role 1 should be blocked by role 0"
-    )
-
-
-def _test_worker_pool(script_path: str, plan_path: str) -> None:
-    """Test worker-pool command."""
-    output = _run_command(script_path, ["worker-pool", plan_path])
-    assert output.get("ok") is True, f"worker-pool failed: {output}"
-    assert "totalWorkers" in output, "worker-pool missing totalWorkers"
-    # Only role 0 is runnable (role 1 depends on it)
-    assert output["totalWorkers"] >= 1, (
-        "worker-pool should find at least 1 runnable worker"
-    )
-
-
-def _test_retry_candidates(script_path: str, plan_path: str) -> None:
-    """Test retry-candidates command."""
-    output = _run_command(script_path, ["retry-candidates", plan_path])
-    assert output.get("ok") is True, f"retry-candidates failed: {output}"
-    assert "retryable" in output, "retry-candidates missing retryable field"
-    assert len(output["retryable"]) == 1, "Should find 1 retryable role (failed role 0)"
-
-
-def _test_circuit_breaker(script_path: str, plan_path: str) -> None:
-    """Test circuit-breaker command."""
-    output = _run_command(script_path, ["circuit-breaker", plan_path])
-    assert output.get("ok") is True, f"circuit-breaker failed: {output}"
-    assert "shouldAbort" in output, "circuit-breaker missing shouldAbort field"
-    assert isinstance(output["shouldAbort"], bool), "shouldAbort must be bool"
-
-
-def _test_memory_search(script_path: str, memory_path: str) -> None:
-    """Test memory-search command."""
-    output = _run_command(
-        script_path, ["memory-search", memory_path, "--goal", "api rest"]
-    )
-    assert output.get("ok") is True, f"memory-search failed: {output}"
-    assert "memories" in output, "memory-search missing memories field"
-    assert len(output["memories"]) > 0, "memory-search should find at least 1 match"
-
-
-def _test_memory_add(script_path: str, memory_path: str) -> None:
-    """Test memory-add command."""
-    output = _run_command(
-        script_path,
-        [
-            "memory-add",
-            memory_path,
-            "--category",
-            "pattern",
-            "--keywords",
-            "test,self-test",
-            "--content",
-            "Self-test validates all commands",
-            "--importance",
-            "5",
-        ],
-    )
-    assert output.get("ok") is True, f"memory-add failed: {output}"
-    assert "id" in output, "memory-add missing id field"
-
-    # Verify entry was actually added
-    with open(memory_path) as f:
-        lines = f.readlines()
-    last_entry = json.loads(lines[-1])
-    assert last_entry["content"] == "Self-test validates all commands", (
-        "Memory entry not added correctly"
-    )
-
-
 def _test_memory_boost(script_path: str, memory_path: str) -> None:
     """Test memory-add --boost command."""
     output = _run_command(
@@ -4053,339 +3845,6 @@ def _test_memory_decay(script_path: str, memory_path: str) -> None:
     assert output.get("ok") is True, f"memory-add --decay failed: {output}"
     assert output.get("importance") == 7, (
         f"Expected importance 7 (8-1), got {output.get('importance')}"
-    )
-
-
-def _test_memory_summary(script_path: str, memory_path: str) -> None:
-    """Test memory-summary command."""
-    output = _run_command(script_path, ["memory-summary", memory_path, "--goal", "api"])
-    assert output.get("ok") is True, f"memory-summary failed: {output}"
-    assert "count" in output, "memory-summary missing count field"
-    assert "entries" in output, "memory-summary missing entries field"
-
-
-def _test_memory_review(script_path: str, memory_path: str) -> None:
-    """Test memory-review command."""
-    output = _run_command(
-        script_path, ["memory-review", memory_path, "--category", "pattern"]
-    )
-    assert output.get("ok") is True, f"memory-review failed: {output}"
-    assert "memories" in output, "memory-review missing memories field"
-    # All returned memories should have category=pattern
-    for mem in output["memories"]:
-        assert mem.get("category") == "pattern", (
-            f"Expected category=pattern, got {mem.get('category')}"
-        )
-
-
-def _test_reflection_add(script_path: str, reflection_path: str) -> None:
-    """Test reflection-add command."""
-    evaluation = {
-        "whatWorked": ["Good planning"],
-        "whatFailed": ["Time estimates"],
-        "doNextTime": ["Buffer more time"],
-    }
-
-    output = _run_command(
-        script_path,
-        [
-            "reflection-add",
-            reflection_path,
-            "--skill",
-            "execute",
-            "--goal",
-            "Test goal",
-            "--outcome",
-            "completed",
-            "--goal-achieved",
-            "true",
-        ],
-        stdin_data=json.dumps(evaluation),
-    )
-    assert output.get("ok") is True, f"reflection-add failed: {output}"
-    assert "id" in output, "reflection-add missing id field"
-
-
-def _test_reflection_search(script_path: str, reflection_path: str) -> None:
-    """Test reflection-search command."""
-    output = _run_command(
-        script_path, ["reflection-search", reflection_path, "--skill", "execute"]
-    )
-    assert output.get("ok") is True, f"reflection-search failed: {output}"
-    assert "reflections" in output, "reflection-search missing reflections field"
-    # All returned reflections should have skill=execute
-    for refl in output["reflections"]:
-        assert refl.get("skill") == "execute", (
-            f"Expected skill=execute, got {refl.get('skill')}"
-        )
-
-
-def _test_reflection_validate(script_path: str) -> None:
-    """Test reflection-validate command."""
-    valid_evaluation = {
-        "whatWorked": ["Good"],
-        "whatFailed": ["Bad"],
-        "doNextTime": ["Better"],
-    }
-
-    output = _run_command(
-        script_path, ["reflection-validate"], stdin_data=json.dumps(valid_evaluation)
-    )
-    assert output.get("ok") is True, (
-        f"reflection-validate failed with valid input: {output}"
-    )
-    assert output.get("valid") is True, "reflection-validate should report valid=True"
-
-    # Test invalid input
-    invalid_evaluation = {"incomplete": "data"}
-    output = _run_command(
-        script_path, ["reflection-validate"], stdin_data=json.dumps(invalid_evaluation)
-    )
-    assert output.get("ok") is False, "reflection-validate should reject invalid input"
-
-
-def _test_research_validate(script_path: str, research_path: str) -> None:
-    """Test research-validate command."""
-    output = _run_command(script_path, ["research-validate", research_path])
-    assert output.get("ok") is True, f"research-validate failed: {output}"
-    assert output.get("validated") is True, (
-        "research-validate should report validated=True"
-    )
-    assert "recommendationCount" in output, (
-        "research-validate missing recommendationCount field"
-    )
-
-
-def _test_research_summary(script_path: str, research_path: str) -> None:
-    """Test research-summary command."""
-    output = _run_command(script_path, ["research-summary", research_path])
-    assert output.get("ok") is True, f"research-summary failed: {output}"
-    assert "recommendationCount" in output, (
-        "research-summary missing recommendationCount field"
-    )
-    assert "sectionCount" in output, "research-summary missing sectionCount field"
-    assert "verdict" in output, "research-summary missing verdict field"
-
-
-def _test_validate_checks_valid(script_path: str, plan_path: str) -> None:
-    """Test validate-checks command with valid plan."""
-    output = _run_command(script_path, ["validate-checks", plan_path])
-    assert output.get("ok") is True, f"validate-checks failed on valid plan: {output}"
-    assert "results" in output, "validate-checks missing results field"
-
-
-def _test_validate_checks_invalid(script_path: str, plan_path: str) -> None:
-    """Test validate-checks command with invalid Python syntax."""
-    output = _run_command(script_path, ["validate-checks", plan_path])
-    assert output.get("ok") is False, (
-        "validate-checks should fail on plan with bad syntax"
-    )
-    assert "results" in output, "validate-checks missing results field"
-    # Should find at least one invalid check
-    invalid_checks = [r for r in output["results"] if not r.get("valid")]
-    assert len(invalid_checks) > 0, "Should detect at least one invalid check"
-
-
-def _test_validate_auxiliary_report(script_path: str, tmp_dir: str) -> None:
-    """Test validate-auxiliary-report command."""
-    # Test challenger schema
-    challenger_report = {
-        "issues": [
-            {
-                "category": "scope-gap",
-                "severity": "blocking",
-                "description": "Test issue",
-                "affectedRoles": ["role1"],
-                "recommendation": "Fix it",
-            }
-        ],
-        "summary": "Test summary",
-    }
-    challenger_path = os.path.join(tmp_dir, "challenger-report.json")
-    with open(challenger_path, "w") as f:
-        json.dump(challenger_report, f)
-
-    output = _run_command(
-        script_path,
-        ["validate-auxiliary-report", challenger_path, "--type", "challenger"],
-    )
-    assert output.get("ok") is True, f"validate-auxiliary-report failed: {output}"
-    assert output.get("valid") is True, (
-        "validate-auxiliary-report should report valid=True"
-    )
-    assert "artifactSummary" in output, "Missing artifactSummary in output"
-    assert output["artifactSummary"]["issueCount"] == 1, "Issue count mismatch"
-
-    # Test invalid schema
-    bad_report = {"bad": "data"}
-    bad_path = os.path.join(tmp_dir, "bad-report.json")
-    with open(bad_path, "w") as f:
-        json.dump(bad_report, f)
-
-    output = _run_command(
-        script_path, ["validate-auxiliary-report", bad_path, "--type", "challenger"]
-    )
-    assert output.get("ok") is False, (
-        "validate-auxiliary-report should reject invalid schema"
-    )
-
-
-def _test_worker_completion_validate(script_path: str) -> None:
-    """Test worker-completion-validate command."""
-    # Test valid completion report
-    valid_report = {
-        "role": "test-role",
-        "achieved": True,
-        "filesChanged": ["file1.py", "file2.py"],
-        "acceptanceCriteria": [
-            {"criterion": "Test passes", "passed": True, "evidence": "exit code 0"}
-        ],
-        "keyDecisions": ["Decision 1"],
-        "contextForDependents": "Context text",
-    }
-
-    output = _run_command(
-        script_path,
-        ["worker-completion-validate"],
-        stdin_data=json.dumps(valid_report),
-    )
-    assert output.get("ok") is True, (
-        f"worker-completion-validate failed with valid input: {output}"
-    )
-    assert output.get("valid") is True, (
-        "worker-completion-validate should report valid=True"
-    )
-
-    # Test invalid report (missing required fields)
-    invalid_report = {"role": "test"}
-
-    output = _run_command(
-        script_path,
-        ["worker-completion-validate"],
-        stdin_data=json.dumps(invalid_report),
-    )
-    assert output.get("ok") is False, (
-        "worker-completion-validate should reject incomplete report"
-    )
-
-
-def _test_expert_validate(script_path: str, artifact_path: str) -> None:
-    """Test expert-validate command."""
-    output = _run_command(script_path, ["expert-validate", artifact_path])
-    assert output.get("ok") is True, f"expert-validate failed: {output}"
-    assert output.get("valid") is True, (
-        "expert-validate should report valid=True for valid artifact"
-    )
-
-
-def _test_update_status(script_path: str, plan_path: str) -> None:
-    """Test update-status command."""
-    updates = [{"roleIndex": 0, "status": "in_progress"}]
-
-    output = _run_command(
-        script_path, ["update-status", plan_path], stdin_data=json.dumps(updates)
-    )
-    assert output.get("ok") is True, f"update-status failed: {output}"
-    assert 0 in output.get("updated", []), "Role 0 should be in updated list"
-
-    # Verify the change was persisted
-    with open(plan_path) as f:
-        plan = json.load(f)
-    assert plan["roles"][0]["status"] == "in_progress", "Role 0 status was not updated"
-
-
-def _test_resume_reset(script_path: str, plan_path: str) -> None:
-    """Test resume-reset command."""
-    output = _run_command(script_path, ["resume-reset", plan_path])
-    assert output.get("ok") is True, f"resume-reset failed: {output}"
-    assert "resetRoles" in output, "resume-reset missing resetRoles field"
-
-    # Verify role was reset
-    with open(plan_path) as f:
-        plan = json.load(f)
-    assert plan["roles"][0]["status"] == "pending", "Role 0 should be reset to pending"
-    assert plan["roles"][0]["attempts"] == 1, "Role 0 attempts should be incremented"
-
-
-def _test_finalize(script_path: str, plan_path: str) -> None:
-    """Test finalize command."""
-    output = _run_command(script_path, ["finalize", plan_path])
-    assert output.get("ok") is True, f"finalize failed: {output}"
-    assert output.get("validated") is True, "finalize should report validated=True"
-
-    # Verify plan was enriched
-    with open(plan_path) as f:
-        plan = json.load(f)
-    assert "status" in plan["roles"][0], "finalize should add status field"
-    assert "directoryOverlaps" in plan["roles"][0], (
-        "finalize should add directoryOverlaps"
-    )
-
-
-def _test_health_check(script_path: str, design_dir: str) -> None:
-    """Test health-check command."""
-    output = _run_command(script_path, ["health-check", design_dir])
-    assert output.get("ok") is True, f"health-check failed: {output}"
-    assert "healthy" in output, "health-check missing healthy field"
-
-
-def _test_plan_diff(script_path: str, plan_a: str, plan_b: str) -> None:
-    """Test plan-diff command."""
-    output = _run_command(script_path, ["plan-diff", plan_a, plan_b])
-    assert output.get("ok") is True, f"plan-diff failed: {output}"
-    assert "summary" in output, "plan-diff missing summary field"
-    assert "modifiedRoles" in output, "plan-diff missing modifiedRoles field"
-
-
-def _test_plan_health_summary(script_path: str, design_dir: str) -> None:
-    """Test plan-health-summary command."""
-    output = _run_command(script_path, ["plan-health-summary", design_dir])
-    assert output.get("ok") is True, f"plan-health-summary failed: {output}"
-    assert "reflections" in output, "plan-health-summary missing reflections field"
-    assert "recentRuns" in output, "plan-health-summary missing recentRuns field"
-
-
-def _test_sync_check(script_path: str, skills_dir: str) -> None:
-    """Test sync-check command."""
-    result = _run_command(script_path, ["sync-check", skills_dir])
-
-    assert "ok" in result, f"sync-check missing ok field: {result}"
-    assert "synced" in result
-    assert "drifted" in result
-    assert "skills_checked" in result
-
-    # Should detect all 3 shared blocks (synced or drifted)
-    total_blocks = len(result["synced"]) + len(result["drifted"])
-    assert total_blocks >= 3, (
-        f"Should detect at least 3 shared blocks, found {total_blocks}"
-    )
-
-    # Each block should report which skills it checked
-    all_blocks = result["synced"] + result["drifted"]
-    for block in all_blocks:
-        assert "block" in block, f"Block missing name: {block}"
-        assert "skills" in block, f"Block missing skills list: {block}"
-
-
-def _test_archive(script_path: str, archive_dir: str) -> None:
-    """Test archive command."""
-    output = _run_command(script_path, ["archive", archive_dir])
-    assert output.get("ok") is True, f"archive failed: {output}"
-    assert "archivedTo" in output or "message" in output, (
-        "archive missing archivedTo or message field"
-    )
-
-    # Verify persistent files remain
-    assert os.path.exists(os.path.join(archive_dir, "memory.jsonl")), (
-        "memory.jsonl should not be archived"
-    )
-    assert os.path.exists(os.path.join(archive_dir, "research.json")), (
-        "research.json should not be archived"
-    )
-
-    # Verify non-persistent files were moved
-    assert not os.path.exists(os.path.join(archive_dir, "plan.json")), (
-        "plan.json should be archived"
     )
 
 
@@ -4501,113 +3960,6 @@ def _test_trace_add_skill_start(script_path: str, tmp_dir: str) -> None:
         ],
     )
     assert output.get("ok") is True, f"skill-start without agent failed: {output}"
-
-
-def _test_trace_search_session(script_path: str, trace_file: str) -> None:
-    """Test trace-search filters by session-id."""
-    output = _run_command(
-        script_path,
-        ["trace-search", trace_file, "--session-id", "session-a"],
-    )
-    assert output.get("ok") is True, f"trace-search failed: {output}"
-    assert output["count"] == 3, (
-        f"Expected 3 events for session-a, got {output['count']}"
-    )
-    for ev in output["events"]:
-        assert ev["sessionId"] == "session-a", f"Wrong session: {ev['sessionId']}"
-
-
-def _test_trace_search_event(script_path: str, trace_file: str) -> None:
-    """Test trace-search filters by event type."""
-    output = _run_command(
-        script_path,
-        ["trace-search", trace_file, "--event", "spawn"],
-    )
-    assert output.get("ok") is True, f"trace-search failed: {output}"
-    assert output["count"] == 2, f"Expected 2 spawn events, got {output['count']}"
-    for ev in output["events"]:
-        assert ev["eventType"] == "spawn", f"Wrong event type: {ev['eventType']}"
-
-
-def _test_trace_search_missing(script_path: str, tmp_dir: str) -> None:
-    """Test trace-search returns empty list for missing file."""
-    output = _run_command(
-        script_path,
-        ["trace-search", os.path.join(tmp_dir, "nonexistent.jsonl")],
-    )
-    assert output.get("ok") is True, f"trace-search failed: {output}"
-    assert output["events"] == [], f"Expected empty events, got {output['events']}"
-    assert output["count"] == 0, f"Expected count 0, got {output['count']}"
-
-
-def _test_trace_summary_all(script_path: str, trace_file: str) -> None:
-    """Test trace-summary aggregates across all sessions."""
-    output = _run_command(script_path, ["trace-summary", trace_file])
-    assert output.get("ok") is True, f"trace-summary failed: {output}"
-    assert output["sessionCount"] == 2, (
-        f"Expected 2 sessions, got {output['sessionCount']}"
-    )
-    assert output["eventsByType"].get("spawn", 0) >= 2, (
-        f"Expected >=2 spawn events: {output['eventsByType']}"
-    )
-    assert output["agentCount"] >= 2, f"Expected >=2 agents, got {output['agentCount']}"
-
-
-def _test_trace_summary_session(script_path: str, trace_file: str) -> None:
-    """Test trace-summary filters to a single session."""
-    output = _run_command(
-        script_path,
-        ["trace-summary", trace_file, "--session-id", "session-a"],
-    )
-    assert output.get("ok") is True, f"trace-summary failed: {output}"
-    assert output["sessionCount"] == 1, (
-        f"Expected 1 session, got {output['sessionCount']}"
-    )
-    assert output["latestSession"] is not None, "Missing latestSession"
-    assert output["latestSession"]["sessionId"] == "session-a"
-
-
-def _test_trace_validate_valid(script_path: str, trace_file: str) -> None:
-    """Test trace-validate on valid file."""
-    output = _run_command(script_path, ["trace-validate", trace_file])
-    assert output.get("ok") is True, f"trace-validate failed: {output}"
-    assert output["warnings"] == [], f"Unexpected warnings: {output['warnings']}"
-    assert output["entryCount"] == 4, f"Expected 4 entries, got {output['entryCount']}"
-
-
-def _test_trace_validate_malformed(script_path: str, tmp_dir: str) -> None:
-    """Test trace-validate reports warnings for malformed entries."""
-    malformed_path = os.path.join(tmp_dir, "malformed_trace.jsonl")
-    with open(malformed_path, "w") as f:
-        f.write(
-            '{"id":"ok","timestamp":"t","sessionId":"s","skill":"design","eventType":"spawn","payload":{}}\n'
-        )
-        f.write('{"malformed": true}\n')
-        f.write("not json at all\n")
-    output = _run_command(script_path, ["trace-validate", malformed_path])
-    assert output.get("ok") is True, f"trace-validate failed: {output}"
-    assert len(output["warnings"]) >= 2, (
-        f"Expected >=2 warnings, got {output['warnings']}"
-    )
-
-
-def _test_archive_preserves_trace(script_path: str, archive_dir: str) -> None:
-    """Test archive command preserves trace.jsonl."""
-    output = _run_command(script_path, ["archive", archive_dir])
-    assert output.get("ok") is True, f"archive failed: {output}"
-    assert os.path.exists(os.path.join(archive_dir, "trace.jsonl")), (
-        "trace.jsonl should not be archived"
-    )
-    assert not os.path.exists(os.path.join(archive_dir, "plan.json")), (
-        "plan.json should be archived"
-    )
-
-
-def _test_health_check_trace(script_path: str, design_dir: str) -> None:
-    """Test health-check validates trace.jsonl when present."""
-    output = _run_command(script_path, ["health-check", design_dir])
-    assert output.get("ok") is True, f"health-check failed: {output}"
-    assert output.get("healthy") is True, f"health-check should be healthy: {output}"
 
 
 # ============================================================================
