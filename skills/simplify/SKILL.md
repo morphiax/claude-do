@@ -330,7 +330,7 @@ Memories applied: {count or "none"}
 Run /do:execute to begin simplification.
 ```
 
-5. **Self-reflection** — Assess: (a) Analysts well-chosen? (b) Cascade analysis depth sufficient? (c) Organizational context handling worked? (d) What differently next time?
+5. **Self-reflection** — Assess: (a) Analysts well-chosen? (b) Cascade analysis depth sufficient? (c) Organizational context handling worked? (d) What differently next time? Be honest — this reflection feeds future runs via memory curation.
 
 ```bash
 echo '{"targetType":"<code|text|mixed>","analystQuality":"<which analysts contributed most/least>","cascadeDepth":"<deep structural|mostly surface>","preservationConfidence":"<high|medium|low>","organizationalContextItems":<count>,"whatWorked":["<item>"],"whatFailed":["<item>"],"doNextTime":["<item>"]}' | python3 $PLAN_CLI reflection-add .design/reflection.jsonl --skill simplify --goal "<the target>" --outcome "<completed|partial|failed|aborted>" --goal-achieved <true|false>

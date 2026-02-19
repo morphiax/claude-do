@@ -1910,9 +1910,9 @@ def cmd_reflection_add(args: argparse.Namespace) -> NoReturn:
     outcome = args.outcome
     goal_achieved = args.goal_achieved
 
-    if skill not in ("design", "execute", "reflect", "research", "simplify"):
+    if skill not in ("design", "execute", "research", "simplify"):
         error_exit(
-            f"Invalid skill '{skill}'. Must be one of: design, execute, reflect, research, simplify"
+            f"Invalid skill '{skill}'. Must be one of: design, execute, research, simplify"
         )
 
     if outcome not in ("completed", "partial", "failed", "aborted"):
@@ -1985,9 +1985,7 @@ _VALID_TRACE_EVENT_TYPES = frozenset(
     {"spawn", "completion", "failure", "respawn", "skill-start", "skill-complete"}
 )
 _LEAD_LEVEL_EVENT_TYPES = frozenset({"skill-start", "skill-complete"})
-_VALID_TRACE_SKILLS = frozenset(
-    {"design", "execute", "research", "reflect", "simplify"}
-)
+_VALID_TRACE_SKILLS = frozenset({"design", "execute", "research", "simplify"})
 
 
 def _parse_trace_payload(payload_str: str | None) -> dict[str, Any]:

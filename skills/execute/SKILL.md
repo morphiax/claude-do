@@ -223,7 +223,7 @@ Acceptance Results: {per-role: criterion → pass/fail}
 Integration: {PASS|FAIL|SKIPPED — with details}
 
 {if failures: "Recommended: /do:execute to retry failed roles, or /do:design to redesign."}
-{if all passed: "Run /do:reflect to analyze patterns across runs."}
+{if all passed: "All roles complete. Review reflection.jsonl for patterns across runs."}
 ```
 2. **Self-reflection** — Assess: (a) Roles delivered goal end-to-end? (b) What worked well? (c) What failed/suboptimal? (d) What differently next time?
 

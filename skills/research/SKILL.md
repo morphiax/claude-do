@@ -184,7 +184,7 @@ To act on this research: /do:design {designGoal from primary adopt/adapt recomme
 
 ### 6. Reflection
 
-1. **Self-reflection** — Evaluate this research run:
+1. **Self-reflection** — Evaluate this research run. Be honest — this reflection feeds future runs via memory curation.
 
 ```bash
 echo '{"researchQuality":"<assessment>","sectionCoverage":"<complete|partial>","scopeDiscipline":"<stayed focused|drifted>","researchersSpawned":N,"findingsCount":N,"recommendationsProduced":N,"contradictionsFound":N,"whatWorked":["<item>"],"whatFailed":["<item>"],"doNextTime":["<item>"]}' | python3 $PLAN_CLI reflection-add .design/reflection.jsonl --skill research --goal "<the investigated topic>" --outcome "<completed|partial|failed|aborted>" --goal-achieved <true|false>

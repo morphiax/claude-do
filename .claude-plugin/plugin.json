@@ -1,7 +1,7 @@
 {
   "name": "do",
   "version": "2.22.0",
-  "description": "Structured planning, dependency-graph execution, comprehensive knowledge research, cascade simplification for code and text, and reflection-driven optimization for Claude Code — /do:design, /do:execute, /do:research, /do:simplify, and /do:reflect",
+  "description": "Structured planning, dependency-graph execution, comprehensive knowledge research, and cascade simplification for code and text — /do:design, /do:execute, /do:research, and /do:simplify. All four skills self-monitor and write episodic observations to .design/.",
   "author": {
     "name": "morphiax",
     "url": "https://github.com/morphiax"

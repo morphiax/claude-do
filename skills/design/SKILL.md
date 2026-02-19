@@ -335,7 +335,7 @@ Memories applied: {count or "none"}
 Run /do:execute to begin.
 ```
 
-5. **Self-reflection** — Assess: (a) Plan captured goal effectively? (b) Experts well-chosen? (c) Cross-review added value? (d) What differently next time?
+5. **Self-reflection** — Assess: (a) Plan captured goal effectively? (b) Experts well-chosen? (c) Cross-review added value? (d) What differently next time? Be honest — this reflection feeds future runs via memory curation.
 
    ```bash
    echo '{"expertQuality":"<which experts contributed most/least>","crossReviewValue":"<useful|redundant|skipped>","planCompleteness":"<assessment>","whatWorked":["<item>"],"whatFailed":["<item>"],"doNextTime":["<item>"]}' | python3 $PLAN_CLI reflection-add .design/reflection.jsonl --skill design --goal "<the goal>" --outcome "<completed|partial|failed|aborted>" --goal-achieved <true|false>

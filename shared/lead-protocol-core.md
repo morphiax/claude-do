@@ -3,8 +3,7 @@
 #
 # Core lead behavior for all do: skills (design, execute, research, simplify).
 # Defines: boundaries, no-polling, trace emission, memory injection, lifecycle context,
-# phase announcements, and insight handling.
-# Reflect does NOT consume this file.
+# phase announcements, insight handling, and self-monitoring.
 #
 # Companion file: lead-protocol-teams.md (TeamCreate, liveness pipeline, team patterns).
 # Skills that use teams (design, execute, simplify) should read BOTH files.
@@ -104,3 +103,19 @@ python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event
 Announce each major phase to user for visibility. Minimum: pre-flight, agent spawning, synthesis/execution, completion. Format: brief one-liner stating what's happening next.
 
 **Insight surfacing**: When an agent sends a message prefixed with `INSIGHT:`, display it to the user immediately: "Insight from {agent}: {finding}". Do NOT count INSIGHT messages as completion signals — continue waiting for the full report or artifact. An INSIGHT message is a partial update, not a completion report.
+
+---
+
+## Self-Monitoring
+
+Every skill MUST call `reflection-add` at end of each run. Record what could be improved about *how the skill executed* — only observations that make the next run better. Be specific (names, data, decisions). 79% of failures are specification and coordination issues — weight observations there.
+
+```bash
+echo '{"whatWorked":["..."],"whatFailed":["..."],"doNextTime":["..."]}' \
+  | python3 $PLAN_CLI reflection-add .design/reflection.jsonl \
+    --skill {skill} --goal "<goal>" --outcome "<completed|partial|failed|aborted>" --goal-achieved <true|false>
+```
+
+Required base fields: `whatWorked`, `whatFailed`, `doNextTime` (arrays). Each skill adds skill-specific fields in its SKILL.md.
+
+Ordering rules: `reflection-add` before `trace-add skill-complete`. `doNextTime` is the primary improvement signal — memory curator reads it first. Rich evaluations produce high-quality memories. Non-fatal: if reflection-add fails, proceed.
