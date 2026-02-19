@@ -1750,11 +1750,11 @@ def _validate_memory_input(category: str, content: str, keywords_str: str) -> li
     return keywords
 
 
-def _ensure_memory_dir(memory_path: str) -> None:
-    """Create parent directory for memory file if needed."""
-    memory_dir = os.path.dirname(memory_path)
-    if memory_dir and not os.path.exists(memory_dir):
-        os.makedirs(memory_dir)
+def _ensure_parent_dir(path: str) -> None:
+    """Create parent directory for a file if it does not exist."""
+    parent = os.path.dirname(path)
+    if parent and not os.path.exists(parent):
+        os.makedirs(parent)
 
 
 def _update_memory_importance(memory_path: str, entry_id: str, boost: bool) -> NoReturn:
@@ -1787,7 +1787,7 @@ def _update_memory_importance(memory_path: str, entry_id: str, boost: bool) -> N
 
     # Rewrite file
     try:
-        _ensure_memory_dir(memory_path)
+        _ensure_parent_dir(memory_path)
         with open(memory_path, "w") as f:
             for e in entries:
                 f.write(json.dumps(e) + "\n")
@@ -1832,7 +1832,7 @@ def _add_new_memory_entry(
     }
 
     try:
-        _ensure_memory_dir(memory_path)
+        _ensure_parent_dir(memory_path)
         with open(memory_path, "a") as f:
             f.write(json.dumps(entry) + "\n")
     except OSError as e:
@@ -1931,9 +1931,7 @@ def cmd_reflection_add(args: argparse.Namespace) -> NoReturn:
 
     # Append to JSONL file
     try:
-        reflection_dir = os.path.dirname(reflection_path)
-        if reflection_dir and not os.path.exists(reflection_dir):
-            os.makedirs(reflection_dir)
+        _ensure_parent_dir(reflection_path)
         with open(reflection_path, "a") as f:
             f.write(json.dumps(entry) + "\n")
     except OSError as e:
@@ -2017,9 +2015,7 @@ def _validate_trace_args(event_type: str, skill: str, agent_name: str | None) ->
 
 def _write_trace_entry(trace_path: str, entry: dict[str, Any]) -> None:
     """Append entry to trace.jsonl. Raises OSError on failure."""
-    trace_dir = os.path.dirname(trace_path)
-    if trace_dir and not os.path.exists(trace_dir):
-        os.makedirs(trace_dir)
+    _ensure_parent_dir(trace_path)
     with open(trace_path, "a") as f:
         f.write(json.dumps(entry) + "\n")
 
@@ -2269,21 +2265,13 @@ def cmd_reflection_validate(args: argparse.Namespace) -> NoReturn:
     except json.JSONDecodeError as e:
         error_exit(f"Invalid JSON in evaluation: {e}")
 
-    # Check required fields
-    missing = []
-    for field in ["whatWorked", "whatFailed", "doNextTime"]:
-        if field not in evaluation:
-            missing.append(field)
-
+    # Check required fields and that each is an array in one pass
+    fields = ["whatWorked", "whatFailed", "doNextTime"]
+    missing = [f for f in fields if f not in evaluation]
     if missing:
         error_exit(f"Missing required fields: {', '.join(missing)}")
 
-    # Validate all required fields are arrays
-    invalid = []
-    for field in ["whatWorked", "whatFailed", "doNextTime"]:
-        if not isinstance(evaluation.get(field), list):
-            invalid.append(field)
-
+    invalid = [f for f in fields if not isinstance(evaluation.get(f), list)]
     if invalid:
         error_exit(f"Fields must be arrays: {', '.join(invalid)}")
 
@@ -2368,62 +2356,67 @@ def _validate_challenger_issues(data: dict[str, Any]) -> list[str]:
     return errors
 
 
+def _validate_aux_challenger(data: dict[str, Any]) -> list[str]:
+    errors = _validate_json_schema(
+        data, ["issues", "summary"], {"issues": list, "summary": str}
+    )
+    if not errors:
+        errors.extend(_validate_challenger_issues(data))
+    return errors
+
+
+def _validate_aux_integration_verifier(data: dict[str, Any]) -> list[str]:
+    errors = _validate_json_schema(
+        data,
+        [
+            "status",
+            "acceptanceCriteria",
+            "crossRoleIssues",
+            "testResults",
+            "endToEndVerification",
+            "summary",
+        ],
+        {
+            "status": str,
+            "acceptanceCriteria": list,
+            "crossRoleIssues": list,
+            "testResults": dict,
+            "endToEndVerification": dict,
+            "summary": str,
+        },
+    )
+    if not errors and "status" in data and data["status"] not in {"PASS", "FAIL"}:
+        errors.append(f"status must be 'PASS' or 'FAIL', got '{data['status']}'")
+    return errors
+
+
+_AUX_VALIDATORS: dict[str, Any] = {
+    "challenger": _validate_aux_challenger,
+    "scout": lambda d: _validate_json_schema(
+        d,
+        ["scopeAreas", "discrepancies", "summary"],
+        {"scopeAreas": list, "discrepancies": list, "summary": str},
+    ),
+    "integration-verifier": _validate_aux_integration_verifier,
+    "regression-checker": lambda d: _validate_json_schema(
+        d,
+        ["passed", "changes", "regressions", "summary"],
+        {"passed": bool, "changes": list, "regressions": list, "summary": str},
+    ),
+    "memory-curator": lambda d: _validate_json_schema(
+        d, ["memories", "summary"], {"memories": list, "summary": str}
+    ),
+}
+
+
 def _validate_auxiliary_by_type(aux_type: str, data: dict[str, Any]) -> list[str]:
     """Dispatch validation based on auxiliary type."""
-    if aux_type == "challenger":
-        errors = _validate_json_schema(
-            data, ["issues", "summary"], {"issues": list, "summary": str}
-        )
-        if not errors:
-            errors.extend(_validate_challenger_issues(data))
-        return errors
-
-    if aux_type == "scout":
-        return _validate_json_schema(
-            data,
-            ["scopeAreas", "discrepancies", "summary"],
-            {"scopeAreas": list, "discrepancies": list, "summary": str},
-        )
-
-    if aux_type == "integration-verifier":
-        errors = _validate_json_schema(
-            data,
-            [
-                "status",
-                "acceptanceCriteria",
-                "crossRoleIssues",
-                "testResults",
-                "endToEndVerification",
-                "summary",
-            ],
-            {
-                "status": str,
-                "acceptanceCriteria": list,
-                "crossRoleIssues": list,
-                "testResults": dict,
-                "endToEndVerification": dict,
-                "summary": str,
-            },
-        )
-        if not errors and "status" in data and data["status"] not in {"PASS", "FAIL"}:
-            errors.append(f"status must be 'PASS' or 'FAIL', got '{data['status']}'")
-        return errors
-
-    if aux_type == "regression-checker":
-        return _validate_json_schema(
-            data,
-            ["passed", "changes", "regressions", "summary"],
-            {"passed": bool, "changes": list, "regressions": list, "summary": str},
-        )
-
-    if aux_type == "memory-curator":
-        return _validate_json_schema(
-            data, ["memories", "summary"], {"memories": list, "summary": str}
-        )
-
-    return [
-        f"Unknown auxiliary type: {aux_type}. Valid types: challenger, scout, integration-verifier, regression-checker, memory-curator"
-    ]
+    validator = _AUX_VALIDATORS.get(aux_type)
+    if validator is None:
+        return [
+            f"Unknown auxiliary type: {aux_type}. Valid types: {', '.join(sorted(_AUX_VALIDATORS))}"
+        ]
+    return validator(data)
 
 
 def _build_artifact_summary(aux_type: str, data: dict[str, Any]) -> dict[str, Any]:
@@ -2585,30 +2578,22 @@ def _validate_research_recommendation(rec: dict[str, Any], index: int) -> None:
     if missing:
         error_exit(f"Recommendation {index}: missing fields {', '.join(missing)}")
 
-    action = rec.get("action")
-    if action not in valid_actions:
-        error_exit(
-            f"Recommendation {index}: invalid action '{action}'. "
-            f"Must be one of: {', '.join(sorted(valid_actions))}"
-        )
+    for field, valid_set in [
+        ("action", valid_actions),
+        ("confidence", valid_confidence),
+        ("effort", valid_effort),
+    ]:
+        value = rec.get(field)
+        if value not in valid_set:
+            error_exit(
+                f"Recommendation {index}: invalid {field} '{value}'. "
+                f"Must be one of: {', '.join(sorted(valid_set))}"
+            )
 
+    action = rec.get("action")
     if action in ("adopt", "adapt") and not rec.get("designGoal"):
         error_exit(
             f"Recommendation {index}: designGoal is required when action is '{action}'"
-        )
-
-    confidence = rec.get("confidence")
-    if confidence not in valid_confidence:
-        error_exit(
-            f"Recommendation {index}: invalid confidence '{confidence}'. "
-            f"Must be one of: {', '.join(sorted(valid_confidence))}"
-        )
-
-    effort = rec.get("effort")
-    if effort not in valid_effort:
-        error_exit(
-            f"Recommendation {index}: invalid effort '{effort}'. "
-            f"Must be one of: {', '.join(sorted(valid_effort))}"
         )
 
 
