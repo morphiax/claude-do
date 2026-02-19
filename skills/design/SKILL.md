@@ -27,7 +27,7 @@ Before starting the Flow, Read `lead-protocol-core.md` and `lead-protocol-teams.
 
 ### 1. Pre-flight
 
-1. **Lifecycle context**: Run `python3 $PLAN_CLI plan-health-summary .design` and display to user: "Recent runs: {reflection summaries}. {plan status}." Skip if all fields empty. Then: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event skill-start --skill design || true`
+1. **Lifecycle context**: Run Lifecycle Context protocol (see lead-protocol-core.md).
 2. **Check for ambiguity**: If the goal has multiple valid interpretations per the Clarification Protocol, use `AskUserQuestion` before proceeding.
 3. If >5 roles likely needed, suggest phases. Design only phase 1.
 4. Check existing plan: `python3 $PLAN_CLI status .design/plan.json`. If `ok` and `isResume`: ask user "Existing plan has {counts} roles. Overwrite?" If declined, stop.

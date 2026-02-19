@@ -14,20 +14,6 @@ Before starting the Flow, Read `lead-protocol-core.md` and `lead-protocol-teams.
 
 **Progress reporting**: After the initial summary, output brief progress updates for significant events. Keep updates to one line each. Suppress intermediate worker tool calls and chatter.
 
-### Script Setup
-
-Resolve plugin root. All script calls: `python3 $PLAN_CLI <command> [args]` via Bash. JSON output: `{"ok": true/false, ...}`.
-
-```bash
-PLAN_CLI={plugin_root}/skills/execute/scripts/plan.py
-TEAM_NAME=$(python3 $PLAN_CLI team-name execute | python3 -c "import sys,json;print(json.load(sys.stdin)['teamName'])")
-SESSION_ID=$TEAM_NAME
-```
-
-### Trace Emission
-
-After each agent lifecycle event: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event {event} --skill execute [--agent "{name}"] [--payload '{"key":"val"}'] || true`. Events: skill-start, skill-complete, spawn, completion, failure, respawn. Use `--payload` for extras. Failures are non-blocking (`|| true`).
-
 ---
 
 ## Worker Protocol (Inline)
@@ -40,7 +26,7 @@ This protocol is included directly in each worker's spawn prompt below (no separ
 
 ### 1. Setup
 
-1. **Lifecycle context**: Run `python3 $PLAN_CLI plan-health-summary .design` and display to user: "Recent runs: {reflection summaries}. {plan status}." Skip if all fields empty. Then: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event skill-start --skill execute || true`
+1. **Lifecycle context**: Run Lifecycle Context protocol (see lead-protocol-core.md).
 2. Validate: `python3 $PLAN_CLI status .design/plan.json`. On failure: `not_found` = "No plan found. Run `/do:design <goal>` first." and stop; `bad_schema` = unsupported schema, stop; `empty_roles` = no roles, stop.
 3. Resume detection: If `isResume`: run `python3 $PLAN_CLI resume-reset .design/plan.json`. If `noWorkRemaining`: "All roles already resolved." and stop.
 4. Create team: `TeamDelete(team_name: $TEAM_NAME)` (ignore errors), then `TeamCreate(team_name: $TEAM_NAME)`. If TeamCreate fails, tell user Agent Teams is required and stop. Health check: verify team state via `ls ~/.claude/teams/$TEAM_NAME/config.json`. If missing, delete and retry: `TeamDelete(team_name: $TEAM_NAME)`, `TeamCreate(team_name: $TEAM_NAME)`. If retry fails, abort with error message.

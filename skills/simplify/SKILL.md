@@ -30,7 +30,7 @@ Before starting the Flow, Read `lead-protocol-core.md` and `lead-protocol-teams.
 
 ### 1. Pre-flight
 
-1. **Lifecycle context**: Run `python3 $PLAN_CLI plan-health-summary .design` and display to user: "Recent runs: {reflection summaries}." Skip if all fields empty. Then: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event skill-start --skill simplify || true`
+1. **Lifecycle context**: Run Lifecycle Context protocol (see lead-protocol-core.md).
 2. **Check for ambiguity**: If the target has multiple valid interpretations per the Clarification Protocol, use `AskUserQuestion` before proceeding.
 3. **Parse scope argument**:
    - No args: hotspot-prioritized full scan (git churn x complexity heuristic)
