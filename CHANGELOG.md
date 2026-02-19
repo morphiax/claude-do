@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.20.0] - 2026-02-19
+
+### Changed
+
+- **BREAKING**: `/do:improve` retired — `/do:simplify` now handles both code and text targets, subsuming improve's functionality with cascade thinking applied to prompts, constraints, and protocol text
+- `/do:simplify` generalized: target type detection (code/text/mixed) drives analyst variant selection. Text targets get token weight, dead rules, and redundancy analysis. SKILL.md exclusion removed
+- Anti-pattern guards from improve merged into simplify: token budget tracking, circular simplification detection, regression safety
+- Text-specific worked example added (Liveness Protocol Unification — 5 separate pipeline descriptions → 1 shared protocol table)
+- Plugin description and docs updated to reflect five-skill plugin (design, execute, research, simplify, reflect)
+
+### Removed
+
+- `skills/improve/` directory — SKILL.md and scripts/plan.py symlink
+- All `/do:improve` references from CLAUDE.md, README.md, plan.py help strings, and plugin.json
+- "improve" from valid skill lists in plan.py (reflection-add, trace-add, sync-check, _load_skill_paths)
+
 ## [2.19.0] - 2026-02-19
 
 ### Added

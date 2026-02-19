@@ -1894,9 +1894,9 @@ def cmd_reflection_add(args: argparse.Namespace) -> NoReturn:
     outcome = args.outcome
     goal_achieved = args.goal_achieved
 
-    if skill not in ("design", "execute", "improve", "reflect", "research"):
+    if skill not in ("design", "execute", "reflect", "research", "simplify"):
         error_exit(
-            f"Invalid skill '{skill}'. Must be one of: design, execute, improve, reflect, research"
+            f"Invalid skill '{skill}'. Must be one of: design, execute, reflect, research, simplify"
         )
 
     if outcome not in ("completed", "partial", "failed", "aborted"):
@@ -1975,7 +1975,7 @@ _VALID_TRACE_EVENT_TYPES = frozenset(
 )
 _LEAD_LEVEL_EVENT_TYPES = frozenset({"skill-start", "skill-complete"})
 _VALID_TRACE_SKILLS = frozenset(
-    {"design", "execute", "research", "improve", "reflect", "simplify"}
+    {"design", "execute", "research", "reflect", "simplify"}
 )
 
 
@@ -2980,7 +2980,7 @@ def cmd_memory_review(args: argparse.Namespace) -> NoReturn:
 # ============================================================================
 
 
-_SKILL_NAMES_PATTERN = "design|execute|improve|research|reflect|simplify"
+_SKILL_NAMES_PATTERN = "design|execute|research|reflect|simplify"
 
 # Shared block patterns: section name → regex to extract the block content.
 # Content is normalized by _normalize_block before fingerprinting.
@@ -3009,7 +3009,6 @@ def _load_skill_paths(skills_dir: str) -> dict[str, str]:
     expected_skills = [
         "design",
         "execute",
-        "improve",
         "research",
         "reflect",
         "simplify",
@@ -3796,7 +3795,7 @@ TEAM_NAME=$(python3 $PLAN_CLI team-name {SKILL}).teamName
 1. Fix validation errors and re-run finalize.
 2. If structure is fundamentally broken: rebuild plan inline."""
 
-    for skill in ["design", "execute", "improve", "research", "reflect", "simplify"]:
+    for skill in ["design", "execute", "research", "reflect", "simplify"]:
         skill_dir = os.path.join(skills_dir, skill)
         os.makedirs(skill_dir, exist_ok=True)
         skill_md = os.path.join(skill_dir, "SKILL.md")
@@ -6409,7 +6408,9 @@ def main() -> None:
     p = subparsers.add_parser(
         "team-name", help="Generate project-unique team name for a skill"
     )
-    p.add_argument("skill", help="Skill name (design|execute|improve)")
+    p.add_argument(
+        "skill", help="Skill name (design|execute|research|reflect|simplify)"
+    )
     p.set_defaults(func=cmd_team_name)
 
     p = subparsers.add_parser("status", help="Validate plan and return status counts")
@@ -6492,7 +6493,11 @@ def main() -> None:
     # Reflection commands
     p = subparsers.add_parser("reflection-add", help="Add a self-reflection entry")
     p.add_argument("reflection_path", nargs="?", default=".design/reflection.jsonl")
-    p.add_argument("--skill", required=True, help="Skill name (design|execute|improve)")
+    p.add_argument(
+        "--skill",
+        required=True,
+        help="Skill name (design|execute|research|reflect|simplify)",
+    )
     p.add_argument("--goal", required=True, help="The goal that was pursued")
     p.add_argument(
         "--outcome",
@@ -6597,7 +6602,7 @@ def main() -> None:
     p.add_argument(
         "--skill",
         required=True,
-        help="Skill name (design|execute|research|improve|reflect)",
+        help="Skill name (design|execute|research|reflect|simplify)",
     )
     p.add_argument(
         "--agent", help="Agent name (optional for skill-start/skill-complete)"

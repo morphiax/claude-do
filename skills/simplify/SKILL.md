@@ -1,16 +1,18 @@
 ---
 name: simplify
-description: "Analyze a codebase for simplification opportunities using cascade thinking and produce a plan with preservation-focused worker roles."
+description: "Analyze code or text for simplification opportunities using cascade thinking and produce a plan with preservation-focused worker roles."
 argument-hint: "<target-path> [--scope <pattern>]"
 ---
 
 # Simplify
 
-Analyze a codebase for simplification opportunities using cascade thinking — one insight eliminates multiple components — and produce `.design/plan.json` with preservation-focused worker roles executable via `/do:execute`.
+Analyze code or text for simplification opportunities using cascade thinking — one insight eliminates multiple components — and produce `.design/plan.json` with preservation-focused worker roles executable via `/do:execute`.
+
+Works on any target: application code, scripts, SKILL.md prompts, configuration files, documentation. The cascade framework applies equally to code duplication and prose redundancy.
 
 **PROTOCOL REQUIREMENT: Do NOT answer the goal directly. Your FIRST action after reading the target MUST be the pre-flight check. Follow the Flow step-by-step.**
 
-**CRITICAL BOUNDARY: /do:simplify analyzes and plans — it does NOT execute simplifications. Output is `.design/plan.json` for `/do:execute`. This skill is NOT `/do:design` (which decomposes arbitrary goals) and NOT `/do:improve` (which analyzes SKILL.md prompt quality). SKILL.md files are ALWAYS excluded from simplify scope.**
+**CRITICAL BOUNDARY: /do:simplify analyzes and plans — it does NOT execute simplifications. Output is `.design/plan.json` for `/do:execute`. This skill is NOT `/do:design` (which decomposes arbitrary goals).**
 
 **Do NOT use `EnterPlanMode`** — this skill IS the plan.
 
@@ -26,7 +28,7 @@ Analyze a codebase for simplification opportunities using cascade thinking — o
 |---|---|
 | Scope is unbounded with no project context | Any scope is specified |
 | Multiple unrelated codebases in workspace | Project has clear boundaries |
-| User intent unclear (code cleanup vs architectural simplification vs config reduction) | Recent changes provide natural scope |
+| User intent unclear (code cleanup vs architectural simplification vs config reduction vs prompt tightening) | Recent changes provide natural scope |
 
 ### Script Setup
 
@@ -54,7 +56,7 @@ After each agent lifecycle event: `python3 $PLAN_CLI trace-add .design/trace.jso
    - No args: hotspot-prioritized full scan (git churn x complexity heuristic)
    - `--recent`: recently-modified files only
    - Explicit path: narrow analysis to specified directories/files
-   - **Always exclude**: SKILL.md files, `.design/` directory, `node_modules/`, `.git/`
+   - **Always exclude**: `.design/` directory, `node_modules/`, `.git/`
 4. Check existing plan: `python3 $PLAN_CLI status .design/plan.json`. If `ok` and `isResume`: ask user "Existing plan has {counts} roles. Overwrite?" If declined, stop.
 5. Archive stale artifacts: `python3 $PLAN_CLI archive .design`
 
@@ -62,9 +64,20 @@ After each agent lifecycle event: `python3 $PLAN_CLI trace-add .design/trace.jso
 
 1. Scan project metadata (CLAUDE.md, package.json, README) via Bash to understand stack and conventions.
 2. Set `context` fields: `stack`, `conventions`, `testCommand`, `buildCommand`.
-3. **Architecture-reviewer trigger**: Check whether scope crosses service/package boundaries (heuristic: >3 top-level directories in scope or multiple `package.json`/`go.mod`/`Cargo.toml`). If yes, spawn architecture-reviewer as third analyst.
-4. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "simplify {target}" --keywords "simplification,cascade,preservation"`. If `ok: false` or no memories, proceed without injection. Otherwise inject top 3-5 into analyst prompts. **Show user**: "Memory: injecting {count} past learnings — {keyword summaries}."
-5. **Announce to user**: "Simplify: analyzing {scope description}. Spawning {N} analysts ({names}). Auxiliaries: challenger, scout, integration-verifier, memory-curator."
+3. **Target type detection**: Classify the target to select analyst variants:
+
+| Target type | Detected when | Analysts |
+|---|---|---|
+| **Code** | `.py`, `.js`, `.ts`, `.go`, `.rs`, etc. — or directories containing source files | complexity-analyst (code), pattern-recognizer |
+| **Text** | `.md`, `SKILL.md`, `.txt`, `.yaml`, `.json` config — or prompt/doc files | complexity-analyst (text), pattern-recognizer |
+| **Mixed** | Directory containing both code and text targets | complexity-analyst (code), pattern-recognizer, plus text findings included |
+
+4. **Architecture-reviewer trigger** (code targets only): Check whether scope crosses service/package boundaries (heuristic: >3 top-level directories in scope or multiple `package.json`/`go.mod`/`Cargo.toml`). If yes, spawn architecture-reviewer as third analyst.
+5. **Anti-pattern guards** (text targets — snapshot for regression check):
+   - Copy target file(s) to `.design/skill-snapshot.md` (or `.design/text-snapshot/`) via Bash for baseline comparison.
+   - **Circular simplification detection**: Check `.design/history/` for recent simplify runs targeting the same files: `ls .design/history/*/expert-*.json 2>/dev/null | tail -5`. If found, warn user: "Previous simplify runs detected. Review history to avoid circular changes."
+6. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "simplify {target}" --keywords "simplification,cascade,preservation"`. If `ok: false` or no memories, proceed without injection. Otherwise inject top 3-5 into analyst prompts. **Show user**: "Memory: injecting {count} past learnings — {keyword summaries}."
+7. **Announce to user**: "Simplify ({target type}): analyzing {scope description}. Spawning {N} analysts ({names}). Auxiliaries: challenger, scout, integration-verifier, memory-curator."
 
 ### 3. Spawn Analysts
 
@@ -83,29 +96,47 @@ Create the team and spawn analysts in parallel.
 
 All analyst prompts MUST include these 5 mandatory constraints in order:
 
-1. **PRESERVATION FIRST**: Never change behavior, only how it's achieved. Test suite must pass before and after every change.
+1. **PRESERVATION FIRST**: Never change behavior, only how it's achieved. Test suite must pass before and after every change. For text targets: all original capabilities, instructions, and behavioral outcomes must remain intact.
 2. **SYMPTOM-FIRST**: Identify complexity signals before proposing removals. Evidence before recommendation.
-3. **BALANCE WARNING**: Simplification that reduces clarity is NOT simplification. Reducing cyclomatic complexity by obscuring logic is a failure.
+3. **BALANCE WARNING**: Simplification that reduces clarity is NOT simplification. Reducing cyclomatic complexity by obscuring logic is a failure. Tightening prose by losing nuance is a failure.
 4. **ORGANIZATIONAL CONTEXT**: Flag items where you cannot determine if complexity is intentional. Mark as `organizationalContextNeeded: yes` rather than recommending removal.
 5. **CASCADE THINKING**: For every simplification opportunity, ask "If this is true, what else becomes unnecessary?" Report the elimination chain.
 
 Additional constraint for all analysts: **SKIP recursive algorithms — 42% LLM success rate is too risky for autonomous simplification. Flag and report instead.**
 
-**Complexity-Analyst** — Hotspot analysis, cognitive complexity, dead code, duplication.
+---
+
+#### Code Target Analysts
+
+**Complexity-Analyst (code)** — Hotspot analysis, cognitive complexity, dead code, duplication.
 - **Tools granted**: Read, Grep, Glob, Bash (for git log, build/test commands, dependency analysis).
 - **Tools denied**: Edit, Write, WebSearch, WebFetch.
 - Git hotspot heuristic: `git log --format=format: --name-only --since=12.month | sort | uniq -c | sort -nr | head -20`
 - Cross-reference git churn with cyclomatic complexity. Report areas with HIGH churn AND HIGH complexity.
 - Run the 5-step cascade process on each hotspot found.
-- **Scope exclusion**: SKILL.md files are NEVER in scope.
 - Report findings as structured JSON with: `cascadeOpportunities[]`, `hotspots[]`, `deadCode[]`.
+
+---
+
+#### Text Target Analysts
+
+**Complexity-Analyst (text)** — Token weight, dead rules, information density, redundancy.
+- **Tools granted**: Read, Grep, Glob, Bash (for wc, diff, git log).
+- **Tools denied**: Edit, Write, WebSearch, WebFetch.
+- Measure total line count and estimate token weight of each major section.
+- Identify: dead rules (instructions that can never trigger), redundant constraints (same thing stated differently in multiple places), verbose prose that could be a table, sections that repeat information available elsewhere.
+- For SKILL.md targets: check whether referenced plan.py commands exist (`python3 $PLAN_CLI <command> --help`), whether protocol steps have clear success/failure handling, whether constraints are enforceable or merely aspirational.
+- Report findings as structured JSON with: `cascadeOpportunities[]`, `heavySections[]`, `deadRules[]`, `redundancies[]`.
+
+---
+
+#### Universal Analyst (both target types)
 
 **Pattern-Recognizer** — Cascade opportunities, over-engineering, unused abstractions.
 - **Tools granted**: Read, Grep, Glob, Bash.
 - **Tools denied**: Edit, Write.
 - Apply the symptom table as primary analytical lens. For EVERY symptom found, run the 5-step process. Report cascade opportunities with eliminationCount.
-- **Scope exclusion**: SKILL.md files are NEVER in scope.
-- **PRIMARY LENS: "Everything is a special case of..."** — This is the core collapse mechanism. Before analyzing any code, ask: what's the unifying principle that makes multiple components unnecessary? One powerful abstraction > ten clever hacks. The pattern is usually already there, just needs recognition.
+- **PRIMARY LENS: "Everything is a special case of..."** — This is the core collapse mechanism. Before analyzing any target, ask: what's the unifying principle that makes multiple components unnecessary? One powerful abstraction > ten clever hacks. The pattern is usually already there, just needs recognition.
 - Core question: **"What if they're all the same thing underneath?"**
 - Ambition calibration: Seek 10x wins (structural collapses), not 10% improvements. Measure in "how many things can we delete?"
 
@@ -115,10 +146,12 @@ Include in pattern-recognizer prompt:
 
 | Symptom | Cascade |
 |---|---|
-| Same thing implemented 5+ ways | Abstract the common pattern |
+| Same thing implemented/stated 5+ ways | Abstract the common pattern |
 | Growing special case list | Find the general case |
 | Complex rules with exceptions | Find the rule that has no exceptions |
 | Excessive config options | Find defaults that work for 95% |
+| Same instruction repeated across sections (text) | State once, reference elsewhere |
+| Verbose prose describing what a table could show (text) | Replace with structured table |
 
 **Red flags** (verbal patterns signaling cascade opportunity):
 - "We just need to add one more case..." (repeating forever)
@@ -128,7 +161,7 @@ Include in pattern-recognizer prompt:
 - "Don't touch that, it's complicated" (complexity hiding pattern)
 
 **5-Step Cascade Process**:
-1. List the variations — What's implemented multiple ways?
+1. List the variations — What's implemented/stated multiple ways?
 2. Find the essence — What's the same underneath?
 3. Extract abstraction — What's the domain-independent pattern?
 4. Test it — Do all cases fit cleanly?
@@ -140,24 +173,30 @@ Include in pattern-recognizer prompt:
 |---|---|
 | Name a unifying insight that eliminates 2+ components | Report "remove unused imports" as a cascade finding |
 | Provide file paths and elimination counts | Give abstract descriptions without evidence |
-| Flag organizational context uncertainty | Recommend removal of code you can't explain |
+| Flag organizational context uncertainty | Recommend removal of code/text you can't explain |
 | Skip recursive algorithms (42% success rate) | Attempt to simplify recursive algorithms |
 | Report cascade chains with concrete evidence | Conflate line-level cleanup with structural cascades |
 | Test whether ALL variations fit the abstraction | Propose partial unifications as complete cascades |
 
-**Worked Example 1: Stream Abstraction**
+**Worked Example 1: Stream Abstraction (code)**
 - Before: Separate handlers for batch/real-time/file/network data
 - Insight: All inputs are streams — just different sources
 - After: One stream processor, multiple stream sources
 - Eliminated: 4 separate handler implementations (eliminationCount: 4)
 
-**Worked Example 2: Resource Governance**
+**Worked Example 2: Resource Governance (code)**
 - Before: Session tracking, rate limiting, file validation, connection pooling as separate systems
 - Insight: All are per-entity resource limits
 - After: One ResourceGovernor with 4 resource types
 - Eliminated: 4 custom enforcement systems (eliminationCount: 4)
 
-**Worked Example 3: Immutability (Paradigm-Level Cascade)**
+**Worked Example 3: Liveness Protocol Unification (text)**
+- Before: 6 SKILL.md files each define their own liveness pipeline with identical timeout/re-spawn/proceed rules copied verbatim
+- Insight: All liveness pipelines are the same protocol — just different agent names
+- After: One shared "Liveness Pipeline" reference section, each skill references it
+- Eliminated: 5 redundant liveness pipeline definitions (eliminationCount: 5)
+
+**Worked Example 4: Immutability (paradigm-level cascade)**
 - Before: Defensive copying, locking, cache invalidation, temporal coupling — all separate synchronization mechanisms
 - Insight: Treat everything as immutable data + transformations — the paradigm shift eliminates entire classes of problems
 - After: Functional programming patterns with immutable data structures
@@ -168,7 +207,7 @@ Each analyst finding must include:
 ```json
 {
   "type": "eliminate|unify|clarify",
-  "scope": "code|architecture|config|docs",
+  "scope": "code|architecture|config|text|prompt",
   "target": "specific component or pattern",
   "cascade": "what else becomes unnecessary",
   "eliminationCount": 0,
@@ -178,7 +217,7 @@ Each analyst finding must include:
 }
 ```
 
-**Architecture-Reviewer** (conditional — only when scope crosses service boundaries):
+**Architecture-Reviewer** (conditional — code targets only, when scope crosses service boundaries):
 - **Tools granted**: Read, Grep, Glob, Bash.
 - **Tools denied**: Edit, Write.
 - Focus: component count reduction, interface seam elimination, cross-boundary unification.
@@ -225,7 +264,7 @@ If ALL findings are `organizationalContextNeeded: yes` with no actionable simpli
 5. **Map cascades to roles**: One role per cascade chain. A cascade chain is a single unifying insight and all the eliminations it enables. Use dependency ordering: abstraction-first, elimination-after. Example: Role 0 implements new abstraction, Role 1 eliminates old implementation A (depends on Role 0), Role 2 eliminates old implementation B (depends on Role 0).
 6. **Write plan.json** with role briefs. For every role:
    - `constraints[0]` MUST be: "PRESERVATION FIRST: Never change behavior, only how it's achieved. All original features, outputs, and behaviors must remain intact."
-   - `acceptanceCriteria[0]` MUST be: `{"criterion": "All existing tests pass", "check": "{context.testCommand}"}` — test-suite-pass is always first and mandatory.
+   - `acceptanceCriteria[0]` MUST be: `{"criterion": "All existing tests pass", "check": "{context.testCommand}"}` — test-suite-pass is always first and mandatory. For text-only targets without a test command, use a structural check instead (e.g., YAML frontmatter parses, referenced commands exist).
    - Include `expertContext[]` referencing analyst artifacts with relevance notes.
    - Include rollbackTriggers: test failure, security path detection, organizational context gap.
    - Add constraint: "SKIP recursive algorithms — flag and report instead."
@@ -237,8 +276,13 @@ If ALL findings are `organizationalContextNeeded: yes` with no actionable simpli
    - `cmd || echo "fallback"` or `cmd || true` — always exits 0, masks failures
    - `cmd | tail -N` — pipe may mask exit code
 
-7. **Validate checks**: `python3 $PLAN_CLI validate-checks .design/plan.json`. If errors found, fix obvious syntax errors. Non-blocking — proceed even if some checks remain unfixable, but flag to user.
-8. Add `auxiliaryRoles[]`:
+7. **Anti-pattern guards** (CRITICAL — do NOT proceed to finalize if any guard triggers without user approval):
+   - **Token budget** (text targets): Calculate net token delta for proposed changes. If total would increase target beyond its current size, ask user to approve flagged changes explicitly.
+   - **Circular simplification**: If `.design/history/` contains a previous simplify run, check whether any proposed change reverses a previous simplification. If found, ask user to review before proceeding.
+   - **Regression safety**: No capability may be lost. For text targets: no behavioral instruction may be removed without replacement. If a change tightens one area but risks losing nuance in another, note the trade-off and ask user to approve.
+8. **Validate checks**: `python3 $PLAN_CLI validate-checks .design/plan.json`. If errors found, fix obvious syntax errors. Non-blocking — proceed even if some checks remain unfixable, but flag to user.
+9. If simplification requires updating CLAUDE.md or README.md to stay in sync (per pre-commit checklist), add a `docs-updater` role.
+10. Add `auxiliaryRoles[]`:
 
 ```json
 [
@@ -259,7 +303,7 @@ If ALL findings are `organizationalContextNeeded: yes` with no actionable simpli
   {
     "name": "integration-verifier",
     "type": "post-execution",
-    "goal": "Run full test suite. Check cross-role contracts. Validate all acceptanceCriteria. Verify behavioral preservation end-to-end.",
+    "goal": "Run full test suite. Check cross-role contracts. Validate all acceptanceCriteria. Verify behavioral preservation end-to-end. For text targets: verify YAML frontmatter, internal references, and that referenced commands still exist.",
     "model": "sonnet",
     "trigger": "after-all-roles-complete"
   },
@@ -273,11 +317,11 @@ If ALL findings are `organizationalContextNeeded: yes` with no actionable simpli
 ]
 ```
 
-9. **Finalize**: `python3 $PLAN_CLI finalize .design/plan.json`. Validates structure, computes directory overlaps, computes checksums. If finalize fails, fix validation errors and retry (max 2 attempts). If still failing, ask user for help.
-10. **Draft plan review**: Display draft plan to user:
+11. **Finalize**: `python3 $PLAN_CLI finalize .design/plan.json`. Validates structure, computes directory overlaps, computes checksums. If finalize fails, fix validation errors and retry (max 2 attempts). If still failing, ask user for help.
+12. **Draft plan review**: Display draft plan to user:
 
 ```
-Simplification Plan ({roleCount} roles):
+Simplification Plan ({roleCount} roles, target type: {code|text|mixed}):
 - Role 0: {name} — {goal one-line} [{model}]
 - Role 1: {name} — {goal one-line} [{model}] [after: {dependencies}]
 ...
@@ -295,6 +339,7 @@ Organizational context items: {approved count}/{total count}
 
 ```
 Simplification Analysis Complete: {target}
+Target type: {code|text|mixed}
 
 Roles ({roleCount}):
   - Role 0: {name} ({model}) — {goal one-line}
@@ -314,11 +359,15 @@ Run /do:execute to begin simplification.
 5. **Self-reflection** — Assess: (a) Analysts well-chosen? (b) Cascade analysis depth sufficient? (c) Organizational context handling worked? (d) What differently next time?
 
 ```bash
-echo '{"analystQuality":"<which analysts contributed most/least>","cascadeDepth":"<deep structural|mostly surface>","preservationConfidence":"<high|medium|low>","organizationalContextItems":<count>,"whatWorked":["<item>"],"whatFailed":["<item>"],"doNextTime":["<item>"]}' | python3 $PLAN_CLI reflection-add .design/reflection.jsonl --skill simplify --goal "<the target>" --outcome "<completed|partial|failed|aborted>" --goal-achieved <true|false>
+echo '{"targetType":"<code|text|mixed>","analystQuality":"<which analysts contributed most/least>","cascadeDepth":"<deep structural|mostly surface>","preservationConfidence":"<high|medium|low>","organizationalContextItems":<count>,"whatWorked":["<item>"],"whatFailed":["<item>"],"doNextTime":["<item>"]}' | python3 $PLAN_CLI reflection-add .design/reflection.jsonl --skill simplify --goal "<the target>" --outcome "<completed|partial|failed|aborted>" --goal-achieved <true|false>
 python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event skill-complete --skill simplify || true
 ```
 
 On failure: proceed (not blocking).
+
+**Fallback** (if finalize fails):
+1. Fix validation errors and re-run finalize.
+2. If structure is fundamentally broken: rebuild plan inline from analyst findings, one role at a time.
 
 ---
 
@@ -334,7 +383,7 @@ Output follows the standard plan.json contract — same schema as `/do:design` o
 
 **Simplification-specific role constraints**:
 - `constraints[0]` is always PRESERVATION FIRST
-- `acceptanceCriteria[0]` is always test-suite-pass
+- `acceptanceCriteria[0]` is always test-suite-pass (or structural check for text-only targets)
 - Recursive algorithms are always flagged, never simplified
 - Dependencies follow abstraction-first ordering (new abstraction before old eliminations)
 
@@ -342,5 +391,6 @@ Output follows the standard plan.json contract — same schema as `/do:design` o
 
 Preserved in `.design/` for execute workers:
 - `expert-{name}.json` — per-analyst findings (structured JSON with cascade opportunities, hotspots, evidence)
+- `skill-snapshot.md` or `text-snapshot/` — baseline copy of text targets for regression comparison (text targets only)
 
 **Target**: $ARGUMENTS

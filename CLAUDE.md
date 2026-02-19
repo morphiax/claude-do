@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-`claude-do` is a Claude Code plugin providing six skills: `/do:design` (team-based goal decomposition into `.design/plan.json`), `/do:execute` (dependency-graph execution with worker teammates), `/do:research` (comprehensive knowledge research producing actionable research.json with recommendations), `/do:simplify` (codebase simplification via cascade thinking — one insight eliminates multiple components — producing plan.json with preservation-focused worker roles), `/do:improve` (static analysis of prompt quality across 7 dimensions), and `/do:reflect` (evidence-based improvement from execution reflections). It leverages Claude Code's native Agent Teams and Tasks features for multi-agent collaboration. All skills use the main conversation as team lead with teammates for analytical/execution work. Skills are implemented as SKILL.md prompts augmented with python3 helper scripts for deterministic operations.
+`claude-do` is a Claude Code plugin providing five skills: `/do:design` (team-based goal decomposition into `.design/plan.json`), `/do:execute` (dependency-graph execution with worker teammates), `/do:research` (comprehensive knowledge research producing actionable research.json with recommendations), `/do:simplify` (cascade simplification for code and text — one insight eliminates multiple components — producing plan.json with preservation-focused worker roles), and `/do:reflect` (evidence-based improvement from execution reflections). It leverages Claude Code's native Agent Teams and Tasks features for multi-agent collaboration. All skills use the main conversation as team lead with teammates for analytical/execution work. Skills are implemented as SKILL.md prompts augmented with python3 helper scripts for deterministic operations.
 
 ## Testing
 
@@ -19,7 +19,7 @@ claude --plugin-dir /path/to/claude-do
 /do:execute
 ```
 
-All six skills must be tested end-to-end. Changes to design, execute, research, simplify, improve, or reflect may affect the others since they share the `.design/plan.json` contract (or `.design/research.json` for research) and persistent files (`memory.jsonl`, `reflection.jsonl`).
+All five skills must be tested end-to-end. Changes to design, execute, research, simplify, or reflect may affect the others since they share the `.design/plan.json` contract (or `.design/research.json` for research) and persistent files (`memory.jsonl`, `reflection.jsonl`).
 
 ## Architecture
 
@@ -34,8 +34,6 @@ All six skills must be tested end-to-end. Changes to design, execute, research, 
 - `skills/execute/scripts/plan.py` — Symlink → `../../../scripts/plan.py`
 - `skills/research/SKILL.md` — `/do:research` skill definition
 - `skills/research/scripts/plan.py` — Symlink → `../../../scripts/plan.py`
-- `skills/improve/SKILL.md` — `/do:improve` skill definition
-- `skills/improve/scripts/plan.py` — Symlink → `../../../scripts/plan.py`
 - `skills/reflect/SKILL.md` — `/do:reflect` skill definition
 - `skills/reflect/scripts/plan.py` — Symlink → `../../../scripts/plan.py`
 - `skills/simplify/SKILL.md` — `/do:simplify` skill definition
@@ -65,7 +63,7 @@ Scripts use python3 stdlib only (no dependencies), support Python 3.8+, and foll
 
 Skills communicate through structured JSON files in `.design/` (gitignored). Two primary contracts:
 
-**`.design/plan.json` (schemaVersion 4)** — used by design, execute, improve, and reflect for role-based execution:
+**`.design/plan.json` (schemaVersion 4)** — used by design, execute, simplify, and reflect for role-based execution:
 
 Key points:
 
@@ -130,7 +128,7 @@ Research produces structured knowledge across 5 sections with ranked recommendat
 
 ### Verification Specs Protocol
 
-Verification specs are broad, property-based tests that workers must satisfy. They codify expert-provided properties as executable tests without constraining implementation creativity. Both `/do:design` and `/do:improve` can generate verification specs in their optional Step 4.5.
+Verification specs are broad, property-based tests that workers must satisfy. They codify expert-provided properties as executable tests without constraining implementation creativity. `/do:design` can generate verification specs in its optional Step 4.5.
 
 **When to generate specs:**
 - **Mandatory** for complex goals: 4+ roles, new skills, API integration
@@ -171,7 +169,7 @@ Run `python3 $PLAN_CLI finalize .design/plan.json` to validate structure, comput
 
 ### Execution Model
 
-All six skills use the **main conversation as team lead** with Agent Teams (or Task for single-agent skills). Runtime behavior is defined in each SKILL.md file — this section covers structural facts only.
+All five skills use the **main conversation as team lead** with Agent Teams (or Task for single-agent skills). Runtime behavior is defined in each SKILL.md file — this section covers structural facts only.
 
 - **Lead** (main conversation): orchestration only via `TeamCreate`, `SendMessage`, `TaskCreate`/`TaskUpdate`/`TaskList`, `Bash` (scripts, git, verification), `AskUserQuestion`. Never reads project source files.
 - **Teammates**: specialist agents spawned into the team. Discover lead name via `~/.claude/teams/{team-name}/config.json`.
@@ -234,30 +232,10 @@ All six skills use the **main conversation as team lead** with Agent Teams (or T
 - Self-reflection: writes structured self-evaluation to `.design/reflection.jsonl` at end of run using `reflection-add`
 - End-of-run summary: displays recommendation count, knowledge sections completed, research gaps identified, and findings analyzed
 
-**`/do:improve`** — team name: `do-improve-{project}-{hash}` (generated by `team-name` command)
-- Protocol guardrail: lead must follow the flow step-by-step, starting with pre-flight (skill snapshot, archive check, circular improvement detection)
-- Phase announcements: lead announces each major phase (pre-flight, analysis mode selection, expert spawning, synthesis, guards) for user visibility
-- Lifecycle context: runs `plan-health-summary` to display recent reflections at skill start
-- TeamCreate health check: verifies team is reachable, retries once on failure
-- Complexity-aware team usage: team-based analysis with 2-3 experts (protocol analyst, prompt engineer, coordination analyst) for general analysis; single Task agent for targeted improvements
-- Memory injection: lead searches .design/memory.jsonl for relevant past learnings about skill improvement patterns with transparency. Memory search failures gracefully fallback to empty results
-- Quality evaluation: experts score 7 dimensions (Protocol Clarity, Constraint Enforcement, Error Handling, Agent Coordination, Information Flow, Prompt Economy, Verifiability) on 1-5 scale with evidence. Scoring rubric uses anchor descriptions (1/3/5 only) for token efficiency
-- Evidence types: historical execution artifacts from `.design/history/` (high confidence) or behavioral simulation (lower confidence fallback)
-- Expert liveness pipeline: completion checklist tracking which experts have reported, turn-based timeout (3 turns then re-spawn), re-spawn ceiling (max 2 attempts then proceed with available artifacts)
-- Cross-review: perspective resolution when >=2 experts analyze the same skill, maximum 2 rounds. Lead must not perform cross-review solo — requires actual SendMessage calls to experts. Never writes expert artifacts directly
-- Lead synthesizes findings into improvement roles with testable hypotheses (predicted behavioral impact + verification method)
-- Anti-pattern guards: CRITICAL enforcement (mandatory user gates before proceeding), token budget tracking, circular improvement detection, regression safety (no dimension may degrade). Guards run after role creation to ensure executability
-- Expert coordination: explicit completion tracking for all spawned experts, artifact validation via `expert-validate` command (existence + JSON schema) before cross-review
-- Finalize fallback: max 2 retries for validation failures, user escalation if retries exhausted
-- Auxiliary roles: challenger (pre-execution with adversarial traits), regression-checker (post-execution structural verification), integration-verifier (post-execution), memory-curator (post-execution with strict quality persona)
-- Optional verification specs generation (Step 4.5): experts provide verificationProperties, lead or spec-writer generates property-based test specs in `.design/specs/`, finalize computes SHA256 checksums for tamper detection
-- Output: always produces `.design/plan.json` (schemaVersion 4) for `/do:execute` — improve never writes source files directly
-- End-of-run summary: displays improvement roles created, quality dimension scores, anti-pattern guard results, and verification specs generated
-
 **`/do:reflect`** — no team (direct Bash-based analysis)
 - Phase announcements: lead announces each major phase (pre-flight, reflection analysis, hypothesis generation, user selection) for user visibility
 - Lifecycle context: runs `plan-health-summary` to display recent reflections at skill start
-- Evidence-based improvement using execution reflections (`.design/reflection.jsonl`) as optimization signal — contrasts with improve's static prompt quality analysis
+- Evidence-based improvement using execution reflections (`.design/reflection.jsonl`) as optimization signal
 - Requires minimum 2 reflection entries to identify patterns (configurable via `--min-runs`). Uses `reflection-search` command to filter reflections by skill
 - Direct Bash-based analysis (no Task agent): lead gathers data via plan.py commands (reflection-search, memory-search), computes metrics via python3, formulates hypotheses directly, and writes artifact — eliminates hallucination risk from unreliable Task agents
 - Temporal resolution tracking: recurring failures classified as active (appears in recent 3 runs), likely_resolved (absent from recent runs), or confirmed_resolved (memory.jsonl has resolution record). Non-active patterns skipped during hypothesis generation
@@ -274,8 +252,10 @@ All six skills use the **main conversation as team lead** with Agent Teams (or T
 - Phase announcements: lead announces each major phase (pre-flight, analyst spawning, cascade synthesis, finalization) for user visibility
 - Lifecycle context: runs `plan-health-summary` to display recent reflections at skill start
 - TeamCreate health check: verifies team is reachable, retries once on failure
-- Spawns 2 analysts (pattern-recognizer, preservation-guardian) with behavioral trait instructions
+- Target type detection: code (.py/.js/.ts etc), text (.md/SKILL.md/.yaml etc), or mixed — drives which analyst variant spawns
+- Spawns 2 analysts (pattern-recognizer, complexity-analyst) with target-type-aware behavioral trait instructions. Text targets get token weight, dead rules, and redundancy analysis instead of git churn/cyclomatic complexity
 - Cascade thinking: analysts seek simplification opportunities where one insight eliminates multiple components, reducing cognitive overhead without sacrificing capability
+- Anti-pattern guards from improve merged in: token budget tracking, circular simplification detection, regression safety
 - Memory injection: lead searches .design/memory.jsonl for relevant past learnings and injects top 3 into analyst prompts with transparency. Memory search failures gracefully fallback to empty results
 - Analyst liveness pipeline: completion checklist tracking which analysts have reported, turn-based timeout (3 turns then re-spawn), re-spawn ceiling (max 2 attempts then proceed with available findings)
 - Lead synthesizes cascade opportunities into preservation-focused worker roles: roles that remove/restructure code preserve semantics, not just delete
