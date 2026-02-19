@@ -263,18 +263,21 @@ def cmd_team_name(args: argparse.Namespace) -> NoReturn:
     output_json({"ok": True, "teamName": team_name})
 
 
+def _load_plan_for_status(plan_path: str) -> dict[str, Any]:
+    """Load plan.json with machine-parseable error tokens for execute pre-flight."""
+    if not os.path.exists(plan_path):
+        error_exit("not_found")
+    try:
+        with open(plan_path) as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        error_exit("invalid_json")
+
+
 def cmd_status(args: argparse.Namespace) -> NoReturn:
     """Validate plan and return status counts."""
     plan_path = args.plan_path
-
-    if not os.path.exists(plan_path):
-        error_exit("not_found")
-
-    try:
-        with open(plan_path) as f:
-            plan = json.load(f)
-    except (json.JSONDecodeError, OSError):
-        error_exit("invalid_json")
+    plan = _load_plan_for_status(plan_path)
 
     schema_version = plan.get("schemaVersion")
     if schema_version != 4:
@@ -371,8 +374,8 @@ def _compute_overlaps(
         i_closure = set(_transitive_closure(dep_indices, i))
         overlaps: list[int] = []
         for j in range(len(roles)):
-            if i == j or j <= i:
-                continue  # Skip self and enforce j>i rule
+            if j <= i:
+                continue  # Enforce j>i rule to prevent bidirectional deadlocks
             j_closure = set(_transitive_closure(dep_indices, j))
             if (
                 j not in i_closure
@@ -1379,13 +1382,14 @@ def _check_plan_json(design_dir: str) -> list[str]:
 
 def _check_jsonl_file(
     file_path: str, required_fields: set[str], file_label: str
-) -> tuple[list[str], list[str]]:
-    """Check JSONL file validity. Returns (issues, warnings)."""
+) -> tuple[list[str], list[str], int]:
+    """Check JSONL file validity. Returns (issues, warnings, count)."""
     issues = []
     warnings = []
+    count = 0
 
     if not os.path.exists(file_path):
-        return (issues, warnings)
+        return (issues, warnings, count)
 
     try:
         with open(file_path) as f:
@@ -1397,6 +1401,7 @@ def _check_jsonl_file(
                     continue
                 try:
                     entry = json.loads(line)
+                    count += 1
                     missing = required_fields - set(entry.keys())
                     if missing:
                         warnings.append(
@@ -1407,7 +1412,7 @@ def _check_jsonl_file(
     except OSError as e:
         issues.append(f"Cannot read {file_label}: {e}")
 
-    return (issues, warnings)
+    return (issues, warnings, count)
 
 
 def _check_symlinks(design_dir: str) -> tuple[list[str], list[str]]:
@@ -1453,7 +1458,7 @@ def cmd_health_check(args: argparse.Namespace) -> NoReturn:
 
     # Check memory.jsonl
     memory_path = os.path.join(design_dir, "memory.jsonl")
-    mem_issues, mem_warnings = _check_jsonl_file(
+    mem_issues, mem_warnings, _ = _check_jsonl_file(
         memory_path, {"id", "category", "content", "timestamp"}, "memory.jsonl"
     )
     all_issues.extend(mem_issues)
@@ -1461,7 +1466,7 @@ def cmd_health_check(args: argparse.Namespace) -> NoReturn:
 
     # Check reflection.jsonl
     reflection_path = os.path.join(design_dir, "reflection.jsonl")
-    ref_issues, ref_warnings = _check_jsonl_file(
+    ref_issues, ref_warnings, _ = _check_jsonl_file(
         reflection_path,
         {"id", "skill", "goal", "outcome", "timestamp"},
         "reflection.jsonl",
@@ -1471,7 +1476,7 @@ def cmd_health_check(args: argparse.Namespace) -> NoReturn:
 
     # Check trace.jsonl
     trace_path = os.path.join(design_dir, "trace.jsonl")
-    trace_issues, trace_warnings = _check_jsonl_file(
+    trace_issues, trace_warnings, _ = _check_jsonl_file(
         trace_path,
         {"id", "sessionId", "eventType", "timestamp"},
         "trace.jsonl",
@@ -1495,8 +1500,8 @@ def _count_criteria_changes(
     criteria_a: dict[str, Any], criteria_b: dict[str, Any]
 ) -> tuple[int, int, int]:
     """Count criteria changes. Returns (added, removed, modified)."""
-    added = len([c for c in criteria_b if c not in criteria_a])
-    removed = len([c for c in criteria_a if c not in criteria_b])
+    added = sum(1 for c in criteria_b if c not in criteria_a)
+    removed = sum(1 for c in criteria_a if c not in criteria_b)
     modified = sum(
         1
         for c in criteria_a
@@ -1716,9 +1721,6 @@ def cmd_memory_search(args: argparse.Namespace) -> NoReturn:
     parts = [args.goal or "", args.stack or "", args.keywords or ""]
     query = " ".join(p for p in parts if p)
 
-    if not os.path.exists(memory_path):
-        output_json({"ok": True, "memories": []})
-
     query_tokens = _tokenize(query)
     if not query_tokens:
         output_json({"ok": True, "memories": []})
@@ -1867,32 +1869,32 @@ def cmd_memory_add(args: argparse.Namespace) -> NoReturn:
         if not entry_id:
             error_exit("--id required when using --boost or --decay")
         _update_memory_importance(memory_path, entry_id, boost)
+    else:
+        # Mode: add new entry
+        if not args.category:
+            error_exit("--category is required for new entries")
+        if not args.content:
+            error_exit("--content is required for new entries")
 
-    # Mode: add new entry
-    if not args.category:
-        error_exit("--category is required for new entries")
-    if not args.content:
-        error_exit("--content is required for new entries")
+        entry = _add_new_memory_entry(
+            memory_path,
+            args.category,
+            args.content,
+            args.keywords or "",
+            args.source or "unknown",
+            args.goal_context or "",
+            args.importance,
+        )
 
-    entry = _add_new_memory_entry(
-        memory_path,
-        args.category,
-        args.content,
-        args.keywords or "",
-        args.source or "unknown",
-        args.goal_context or "",
-        args.importance,
-    )
-
-    output_json(
-        {
-            "ok": True,
-            "id": entry["id"],
-            "category": entry["category"],
-            "keywords": entry["keywords"],
-            "importance": entry["importance"],
-        }
-    )
+        output_json(
+            {
+                "ok": True,
+                "id": entry["id"],
+                "category": entry["category"],
+                "keywords": entry["keywords"],
+                "importance": entry["importance"],
+            }
+        )
 
 
 # ============================================================================
@@ -2199,33 +2201,11 @@ def cmd_trace_validate(args: argparse.Namespace) -> NoReturn:
     """
     trace_path = args.trace_path
     required_fields = {"id", "timestamp", "sessionId", "skill", "eventType", "payload"}
-    warnings = []
-    entry_count = 0
-
-    if not os.path.exists(trace_path):
-        output_json({"ok": True, "warnings": [], "entryCount": 0})
-
-    try:
-        with open(trace_path) as f:
-            line_num = 0
-            for line in f:
-                line_num += 1
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    entry = json.loads(line)
-                    entry_count += 1
-                    missing = required_fields - set(entry.keys())
-                    if missing:
-                        warnings.append(
-                            f"trace.jsonl line {line_num}: missing fields {missing}"
-                        )
-                except json.JSONDecodeError:
-                    warnings.append(f"trace.jsonl line {line_num}: invalid JSON")
-    except OSError as e:
-        error_exit(f"Error reading trace file: {e}")
-
+    issues, warnings, entry_count = _check_jsonl_file(
+        trace_path, required_fields, "trace.jsonl"
+    )
+    if issues:
+        error_exit(issues[0])
     output_json({"ok": True, "warnings": warnings, "entryCount": entry_count})
 
 
