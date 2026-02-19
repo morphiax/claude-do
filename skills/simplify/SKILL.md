@@ -48,7 +48,7 @@ After each agent lifecycle event: `python3 $PLAN_CLI trace-add .design/trace.jso
 
 ### 1. Pre-flight
 
-1. **Lifecycle context**: Run `python3 $PLAN_CLI plan-health-summary .design` and display to user: "Previous session: {handoff summary}. Recent runs: {reflection summaries}." Skip if all fields empty. Then: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event skill-start --skill simplify || true`
+1. **Lifecycle context**: Run `python3 $PLAN_CLI plan-health-summary .design` and display to user: "Recent runs: {reflection summaries}." Skip if all fields empty. Then: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event skill-start --skill simplify || true`
 2. **Check for ambiguity**: If the target has multiple valid interpretations per the Clarification Protocol, use `AskUserQuestion` before proceeding.
 3. **Parse scope argument**:
    - No args: hotspot-prioritized full scan (git churn x complexity heuristic)

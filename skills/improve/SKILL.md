@@ -66,7 +66,7 @@ After each agent lifecycle event: `python3 $PLAN_CLI trace-add .design/trace.jso
 
 ### 1. Pre-flight
 
-1. **Lifecycle context**: Run `python3 $PLAN_CLI plan-health-summary .design` and display to user: "Previous session: {handoff summary}. Recent runs: {reflection summaries}. {plan status}." Skip if all fields empty. Then: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event skill-start --skill improve || true`
+1. **Lifecycle context**: Run `python3 $PLAN_CLI plan-health-summary .design` and display to user: "Recent runs: {reflection summaries}. {plan status}." Skip if all fields empty. Then: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event skill-start --skill improve || true`
 2. **Parse arguments**: Extract `<skill-path>` and optional `[focus-area]` from `$ARGUMENTS`.
    - If `skill-path` is a name (e.g., `design`), resolve to `skills/{name}/SKILL.md`.
    - If no path provided, ask user which skill to analyze.
@@ -97,7 +97,7 @@ The lead assesses the target skill and determines the analysis approach.
 3. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "improve {skill-name}" --stack "SKILL.md prompt engineering"`. If `ok: false` or no memories → proceed without injection. Otherwise inject top 3-5 into expert prompts. **Show user**: "Memory: injecting {count} past learnings — {keyword summaries}."
 4. **Historical evidence**: Check for past execution artifacts:
    ```bash
-   ls .design/history/*/handoff.md 2>/dev/null | head -5
+   ls .design/history/*/plan.json 2>/dev/null | tail -5
    ```
    If found, note paths for experts — execution evidence is higher-confidence than behavioral simulation.
 5. **Announce to user**: "Analyzing {skill-name}: {analysis mode} mode, {N} experts ({names}). {historical evidence status}."
@@ -297,6 +297,6 @@ Produced by the analysis phase, preserved in `.design/` for execute workers:
 
 ### Historical Evidence
 
-When `.design/history/` contains artifacts from past runs (especially `handoff.md`, `plan.json`, `integration-verifier-report.json`), these serve as execution evidence — higher confidence than behavioral simulation for diagnosing issues.
+When `.design/history/` contains artifacts from past runs (especially `plan.json`, `integration-verifier-report.json`), these serve as execution evidence — higher confidence than behavioral simulation for diagnosing issues.
 
 **Goal**: $ARGUMENTS

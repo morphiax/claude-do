@@ -46,7 +46,7 @@ This protocol is included directly in each worker's spawn prompt below (no separ
 
 ### 1. Setup
 
-1. **Lifecycle context**: Run `python3 $PLAN_CLI plan-health-summary .design` and display to user: "Previous session: {handoff summary}. Recent runs: {reflection summaries}. {plan status}." Skip if all fields empty. Then: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event skill-start --skill execute || true`
+1. **Lifecycle context**: Run `python3 $PLAN_CLI plan-health-summary .design` and display to user: "Recent runs: {reflection summaries}. {plan status}." Skip if all fields empty. Then: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event skill-start --skill execute || true`
 2. Validate: `python3 $PLAN_CLI status .design/plan.json`. On failure: `not_found` = "No plan found. Run `/do:design <goal>` first." and stop; `bad_schema` = unsupported schema, stop; `empty_roles` = no roles, stop.
 3. Resume detection: If `isResume`: run `python3 $PLAN_CLI resume-reset .design/plan.json`. If `noWorkRemaining`: "All roles already resolved." and stop.
 4. Create team: `TeamDelete(team_name: $TEAM_NAME)` (ignore errors), then `TeamCreate(team_name: $TEAM_NAME)`. If TeamCreate fails, tell user Agent Teams is required and stop. Health check: verify team state via `ls ~/.claude/teams/$TEAM_NAME/config.json`. If missing, delete and retry: `TeamDelete(team_name: $TEAM_NAME)`, `TeamCreate(team_name: $TEAM_NAME)`. If retry fails, abort with error message.
@@ -232,9 +232,7 @@ Integration: {PASS|FAIL|SKIPPED — with details}
 {if failures: "Recommended: /do:execute to retry failed roles, or /do:design to redesign."}
 {if all passed: "Run /do:reflect to analyze patterns across runs."}
 ```
-2. **Session handoff** — Write `.design/handoff.md` with sections: goal + date, completed roles (name + one-line result), failed roles (name + reason), integration status (PASS/FAIL/SKIPPED), decisions (deviations/retries/workarounds), files changed (deduplicated list), known gaps (missing coverage/TODOs/skipped roles), next steps (concrete actions).
-
-3. **Self-reflection** — Assess: (a) Roles delivered goal end-to-end? (b) What worked well? (c) What failed/suboptimal? (d) What differently next time?
+2. **Self-reflection** — Assess: (a) Roles delivered goal end-to-end? (b) What worked well? (c) What failed/suboptimal? (d) What differently next time?
 
    ```bash
    echo '{"roleQuality":"<N of M roles completed first attempt>","whatWorked":["<item>"],"whatFailed":["<item>"],"doNextTime":["<item>"],"coordinationNotes":"<any team/worker observations>"}' | python3 $PLAN_CLI reflection-add .design/reflection.jsonl --skill execute --goal "<the goal from plan.json>" --outcome "<completed|partial|failed|aborted>" --goal-achieved <true|false>
@@ -243,11 +241,11 @@ Integration: {PASS|FAIL|SKIPPED — with details}
 
    Be honest — this reflection feeds future runs via memory curation. On failure: proceed (not blocking).
 
-4. **Memory curation** — Spawn memory-curator via `Task(subagent_type: "general-purpose")`:
+3. **Memory curation** — Spawn memory-curator via `Task(subagent_type: "general-purpose")`:
 
 Prompt includes:
 - "Reject aggressively — only store what a future engineer would find surprising and useful. If in doubt, reject. Prioritize unexpected findings over routine successes. Two high-quality entries are worth more than ten mediocre ones."
-- "Read all artifacts: `.design/handoff.md`, `.design/plan.json` (all roles including completed, failed, skipped, in_progress, pending — read result field for each), `.design/reflection.jsonl` (most recent entry — the self-evaluation for this run), `.design/challenger-report.json` (if exists), `.design/scout-report.json` (if exists), `.design/integration-verifier-report.json` (if exists)."
+- "Read all artifacts: `.design/plan.json` (all roles including completed, failed, skipped, in_progress, pending — read result field for each), `.design/reflection.jsonl` (most recent entry — the self-evaluation for this run), `.design/challenger-report.json` (if exists), `.design/scout-report.json` (if exists), `.design/integration-verifier-report.json` (if exists)."
 - "Read existing memories: `.design/memory.jsonl` (if exists). Note what is already recorded to avoid duplicates."
 - "The reflection entry contains the lead's honest self-evaluation of what worked and what didn't. Use it as a primary signal for what to record — reflections that identify surprising failures or unexpected successes are high-value memory candidates."
 
@@ -264,7 +262,7 @@ Prompt includes:
 - "Keywords: include technology names, directory paths, error types, tool names — terms a future goal description would contain."
 - "Content: <200 words. State what you learned AND why it matters. Not what happened."
 - "For failed/skipped roles: always create a `failure` or `mistake` memory with root cause analysis."
-- "For Known Gaps that describe persistent architectural limitations (not one-off session artifacts): create a `procedure` memory. Example: handoff.md says 'Keyword scoring is basic (tokenized overlap)' — this recurs across sessions and should be stored as procedure memory with importance 7+ so future sessions are aware of the limitation."
+- "For Known Gaps that describe persistent architectural limitations (not one-off session artifacts): create a `procedure` memory. Example: reflection says 'Keyword scoring is basic (tokenized overlap)' — this recurs across runs and should be stored as procedure memory with importance 7+ so future sessions are aware of the limitation."
 - "SendMessage to lead when complete: 'Memory curation complete. Added {count} memories ({breakdown by category}). Rejected {rejected_count} candidates (not transferable or duplicates).'."
 
 ```
@@ -273,11 +271,11 @@ Task(subagent_type: "general-purpose", team_name: $TEAM_NAME, name: "memory-cura
 
 Wait for curator completion. **Show user**: "Memory curation: {count} learnings stored, {rejected} rejected." On failure: proceed (memory curation is optional).
 
-5. Archive: If all completed, move artifacts to history:
+4. Archive: If all completed, move artifacts to history:
    ```bash
    python3 $PLAN_CLI archive .design
    ```
    If partial (failures remain): leave artifacts in `.design/` for resume.
-6. Cleanup: `TeamDelete(team_name: $TEAM_NAME)`.
+5. Cleanup: `TeamDelete(team_name: $TEAM_NAME)`.
 
 **Arguments**: $ARGUMENTS

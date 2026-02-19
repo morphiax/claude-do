@@ -2857,35 +2857,32 @@ def _format_memory_for_review(mem: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _read_handoff_summary(design_dir: str) -> str:
-    """Read first 5 lines of handoff.md as summary."""
-    handoff_path = os.path.join(design_dir, "handoff.md")
-    if not os.path.exists(handoff_path):
-        return ""
-
-    try:
-        with open(handoff_path) as f:
-            lines = [line.strip() for line in f if line.strip()]
-            return "\n".join(lines[:5])
-    except OSError:
-        return ""
-
-
-def _read_recent_reflections(design_dir: str) -> list[str]:
-    """Read last 2 reflections and format as summaries."""
+def _read_recent_reflections(design_dir: str) -> list[dict[str, Any]]:
+    """Read last 3 reflections with structured detail."""
     reflection_path = os.path.join(design_dir, "reflection.jsonl")
     try:
         entries = _read_jsonl(reflection_path)
     except OSError:
         return []
     entries.sort(key=lambda x: _parse_timestamp(x.get("timestamp", 0)), reverse=True)
-    summaries = []
-    for ref in entries[:2]:
+    results: list[dict[str, Any]] = []
+    for ref in entries[:3]:
         skill = ref.get("skill", "unknown")
         outcome = ref.get("outcome", "unknown")
+        goal = ref.get("goal", "")
         status = "succeeded" if ref.get("goalAchieved", False) else "failed"
-        summaries.append(f"{skill}: {outcome} ({status})")
-    return summaries
+        evaluation = ref.get("evaluation", {})
+        do_next_time = evaluation.get("doNextTime", [])
+        what_failed = evaluation.get("whatFailed", [])
+        results.append(
+            {
+                "summary": f"{skill}: {outcome} ({status})",
+                "goal": goal,
+                "doNextTime": do_next_time,
+                "whatFailed": what_failed,
+            }
+        )
+    return results
 
 
 def _read_plan_status(design_dir: str) -> str:
@@ -2906,21 +2903,21 @@ def _read_plan_status(design_dir: str) -> str:
 
 
 def cmd_plan_health_summary(args: argparse.Namespace) -> NoReturn:
-    """Generate lifecycle context summary from handoff.md and recent reflections.
+    """Generate lifecycle context summary from recent reflections and plan status.
 
     Shows users where they are in the workflow lifecycle.
     """
     design_dir = args.design_dir
 
-    handoff_summary = _read_handoff_summary(design_dir)
-    reflection_summaries = _read_recent_reflections(design_dir)
+    recent = _read_recent_reflections(design_dir)
+    summaries = [r["summary"] for r in recent]
     plan_status = _read_plan_status(design_dir)
 
     output_json(
         {
             "ok": True,
-            "handoff": handoff_summary,
-            "reflections": reflection_summaries,
+            "reflections": summaries,
+            "recentRuns": recent,
             "plan": plan_status,
         }
     )
@@ -3140,7 +3137,7 @@ def cmd_sync_check(args: argparse.Namespace) -> NoReturn:
 def cmd_archive(args: argparse.Namespace) -> NoReturn:
     """Archive .design/ directory to history/{timestamp}/.
 
-    Preserves persistent files: memory.jsonl, reflection.jsonl, handoff.md, research.json, history/
+    Preserves persistent files: memory.jsonl, reflection.jsonl, research.json, history/
     Moves all other files to .design/history/{UTC timestamp}/
     """
     design_dir = args.design_dir.rstrip("/")
@@ -3161,7 +3158,6 @@ def cmd_archive(args: argparse.Namespace) -> NoReturn:
     persistent = {
         "memory.jsonl",
         "reflection.jsonl",
-        "handoff.md",
         "research.json",
         "trace.jsonl",
         "history",
@@ -3667,12 +3663,6 @@ def _create_fixtures(tmp_dir: str) -> dict[str, str]:
     shutil.copy(minimal_plan_path, os.path.join(design_dir, "plan.json"))
     shutil.copy(memory_file_path, os.path.join(design_dir, "memory.jsonl"))
     shutil.copy(reflection_file_path, os.path.join(design_dir, "reflection.jsonl"))
-
-    handoff_content = (
-        "# Session Handoff\n\nGoal: Build API\nStatus: 2/2 roles completed"
-    )
-    with open(os.path.join(design_dir, "handoff.md"), "w") as f:
-        f.write(handoff_content)
 
     # Archive directory (for testing archive command)
     archive_dir = os.path.join(tmp_dir, "test_archive")
@@ -4352,8 +4342,8 @@ def _test_plan_health_summary(script_path: str, design_dir: str) -> None:
     """Test plan-health-summary command."""
     output = _run_command(script_path, ["plan-health-summary", design_dir])
     assert output.get("ok") is True, f"plan-health-summary failed: {output}"
-    assert "handoff" in output, "plan-health-summary missing handoff field"
     assert "reflections" in output, "plan-health-summary missing reflections field"
+    assert "recentRuns" in output, "plan-health-summary missing recentRuns field"
 
 
 def _test_sync_check(script_path: str, skills_dir: str) -> None:
@@ -5998,12 +5988,12 @@ class TestPlanCommands(unittest.TestCase):
         os.makedirs(design_dir, exist_ok=True)
 
         # Create persistent files
-        for pf in ["memory.jsonl", "reflection.jsonl", "handoff.md", "research.json"]:
+        for pf in ["memory.jsonl", "reflection.jsonl", "research.json"]:
             with open(os.path.join(design_dir, pf), "w") as f:
                 f.write("persistent\n")
 
         # Create non-persistent files
-        for nf in ["plan.json", "expert-arch.json", "cross-review.json"]:
+        for nf in ["plan.json", "expert-arch.json", "cross-review.json", "handoff.md"]:
             with open(os.path.join(design_dir, nf), "w") as f:
                 json.dump({"data": nf}, f)
 
@@ -6014,7 +6004,7 @@ class TestPlanCommands(unittest.TestCase):
         self.assertIn("archivedTo", result)
 
         # Persistent files still exist
-        for pf in ["memory.jsonl", "reflection.jsonl", "handoff.md", "research.json"]:
+        for pf in ["memory.jsonl", "reflection.jsonl", "research.json"]:
             self.assertTrue(
                 os.path.exists(os.path.join(design_dir, pf)),
                 f"Persistent file {pf} should survive archive",
@@ -6235,12 +6225,9 @@ class TestPlanCommands(unittest.TestCase):
     # ================================================================
 
     def test_plan_health_summary_with_data(self) -> None:
-        """Test plan-health-summary with handoff, reflections, and plan."""
+        """Test plan-health-summary with reflections and plan."""
         design_dir = os.path.join(self.tmp_dir.name, "health_data")
         os.makedirs(design_dir, exist_ok=True)
-
-        with open(os.path.join(design_dir, "handoff.md"), "w") as f:
-            f.write("# Handoff\nLast session completed API work.\n")
 
         with open(os.path.join(design_dir, "reflection.jsonl"), "w") as f:
             f.write(
@@ -6248,8 +6235,13 @@ class TestPlanCommands(unittest.TestCase):
                     {
                         "skill": "execute",
                         "outcome": "completed",
+                        "goal": "Build API",
                         "goalAchieved": True,
                         "timestamp": "2025-01-01T00:00:00Z",
+                        "evaluation": {
+                            "doNextTime": ["Use typed schemas"],
+                            "whatFailed": ["Timeout on role 2"],
+                        },
                     }
                 )
                 + "\n"
@@ -6264,8 +6256,10 @@ class TestPlanCommands(unittest.TestCase):
         exit_code, result = self._run_cmd(cmd_plan_health_summary, args)
         self.assertEqual(exit_code, 0)
         self.assertTrue(result["ok"])
-        self.assertIn("Handoff", result["handoff"])
         self.assertGreater(len(result["reflections"]), 0)
+        self.assertGreater(len(result["recentRuns"]), 0)
+        self.assertEqual(result["recentRuns"][0]["goal"], "Build API")
+        self.assertEqual(result["recentRuns"][0]["doNextTime"], ["Use typed schemas"])
         self.assertIn("1/2", result["plan"])
 
     # ================================================================
@@ -6673,7 +6667,7 @@ def main() -> None:
 
     p = subparsers.add_parser(
         "plan-health-summary",
-        help="Show lifecycle context from handoff and reflections",
+        help="Show lifecycle context from reflections and plan status",
     )
     p.add_argument("design_dir", nargs="?", default=".design")
     p.set_defaults(func=cmd_plan_health_summary)

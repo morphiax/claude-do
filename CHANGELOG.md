@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.19.0] - 2026-02-19
+
+### Added
+
+- Memory curator now accepts `procedure` category for persistent architectural limitations (was missing from CATEGORY TEST)
+- Worked example in curator prompt for Known Gaps → procedure memory conversion
+
+### Changed
+
+- `plan-health-summary` now returns structured `recentRuns` (goal, doNextTime, whatFailed) from last 3 reflections instead of reading handoff.md
+- All 6 SKILL.md lifecycle context displays simplified: "Recent runs: {reflection summaries}" (removed "Previous session: {handoff summary}")
+- improve/SKILL.md historical evidence check uses `tail -5` for most recent entries
+
+### Removed
+
+- **handoff.md retired** — session handoff file removed from persistence layer. All unique value (Known Gaps, Next Steps) now flows through reflection.jsonl → memory-curator → memory.jsonl
+- `_read_handoff_summary()` function from plan.py
+- Session handoff write step from execute SKILL.md (was Step 7.2)
+- handoff.md from persistent file set in archive command
+- handoff.md reads from reflect and improve SKILL.md
+- handoff.md from memory-curator artifact read list in execute SKILL.md
+
 ## [2.18.1] - 2026-02-18
 
 ### Changed

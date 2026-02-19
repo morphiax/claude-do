@@ -66,7 +66,7 @@ Researchers tag each finding with which section(s) it informs. Lead assembles pr
 
 ### 1. Pre-flight
 
-1. **Lifecycle context**: Run `python3 $PLAN_CLI plan-health-summary .design` and display to user: "Previous session: {handoff summary}. Recent runs: {reflection summaries}." Skip if all fields empty. Then: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event skill-start --skill research || true`
+1. **Lifecycle context**: Run `python3 $PLAN_CLI plan-health-summary .design` and display to user: "Recent runs: {reflection summaries}." Skip if all fields empty. Then: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event skill-start --skill research || true`
 2. **Check for ambiguity**: If the topic has multiple valid interpretations per the Clarification Protocol, use `AskUserQuestion` before proceeding.
 3. **Check existing research**: `ls .design/research.json`. If exists, ask user: "Existing research output found. Overwrite?" If declined, stop.
 4. **Archive stale artifacts**: `python3 $PLAN_CLI archive .design`

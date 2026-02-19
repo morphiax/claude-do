@@ -59,7 +59,7 @@ Emit skill-start and skill-complete: `python3 $PLAN_CLI trace-add .design/trace.
 
 ### 1. Pre-flight
 
-1. **Lifecycle context**: Run `python3 $PLAN_CLI plan-health-summary .design` and display to user: "Previous session: {handoff summary}. Recent runs: {reflection summaries}. {plan status}." Skip if all fields empty. Then: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event skill-start --skill reflect || true`
+1. **Lifecycle context**: Run `python3 $PLAN_CLI plan-health-summary .design` and display to user: "Recent runs: {reflection summaries}. {plan status}." Skip if all fields empty. Then: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event skill-start --skill reflect || true`
 2. **Parse arguments**: Extract optional `[skill-filter]` (design|execute|improve) and `[--min-runs N]` (default 2).
 3. **Load reflections**:
    ```bash
@@ -86,11 +86,6 @@ Perform analysis directly via Bash commands — no Task agent. This eliminates h
 
 2. **Existing memories** (already loaded in Step 1.6):
    Use the memory-search output from pre-flight. Store as `$MEMORIES`.
-
-3. **Handoff context** (if exists):
-   ```bash
-   test -f .design/handoff.md && cat .design/handoff.md
-   ```
 
 #### 2b. Compute analysis metrics
 
