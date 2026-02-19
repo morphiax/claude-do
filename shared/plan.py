@@ -1897,6 +1897,77 @@ def cmd_memory_add(args: argparse.Namespace) -> NoReturn:
         )
 
 
+def _apply_memory_feedback(
+    entries: list[dict[str, Any]],
+    role_outcomes: list[dict[str, Any]],
+) -> dict[str, int]:
+    """Apply boost/decay to memories based on role outcomes. Returns counts."""
+    entry_map = {e.get("id"): e for e in entries}
+    counts = {"boosted": 0, "decayed": 0, "unchanged": 0}
+
+    for outcome in role_outcomes:
+        memory_ids = outcome.get("memoryIds", [])
+        succeeded = outcome.get("roleSucceeded", False)
+        first_attempt = outcome.get("firstAttempt", True)
+
+        for mid in memory_ids:
+            if mid not in entry_map:
+                continue
+            entry = entry_map[mid]
+            entry["usage_count"] = entry.get("usage_count", 0) + 1
+            current = entry.get("importance", 5)
+
+            if succeeded and first_attempt:
+                entry["importance"] = min(10, current + 1)
+                counts["boosted"] += 1
+            elif not succeeded:
+                entry["importance"] = max(1, current - 1)
+                counts["decayed"] += 1
+            else:
+                counts["unchanged"] += 1
+
+    return counts
+
+
+def cmd_memory_feedback(args: argparse.Namespace) -> NoReturn:
+    """Boost or decay memories based on role outcomes.
+
+    Reads role outcomes from stdin as JSON array:
+    [{"memoryIds": ["id1", "id2"], "roleSucceeded": true, "firstAttempt": true}]
+
+    Memories injected into roles that succeeded first-attempt get boosted.
+    Memories injected into roles that failed get decayed.
+    Roles that succeeded on retry get no change (ambiguous signal).
+    """
+    memory_path = args.memory_path
+    role_outcomes = _read_stdin_json(
+        "Invalid JSON in stdin (expected array of role outcomes)"
+    )
+
+    if not isinstance(role_outcomes, list):
+        error_exit("Expected JSON array of role outcomes")
+
+    if not os.path.exists(memory_path):
+        output_json({"ok": True, "boosted": 0, "decayed": 0, "unchanged": 0})
+
+    try:
+        entries = _read_jsonl(memory_path)
+    except OSError as e:
+        error_exit(f"Error reading memory file: {e}")
+
+    counts = _apply_memory_feedback(entries, role_outcomes)
+
+    try:
+        _ensure_parent_dir(memory_path)
+        with open(memory_path, "w") as f:
+            for e in entries:
+                f.write(json.dumps(e) + "\n")
+    except OSError as e:
+        error_exit(f"Error writing memory file: {e}")
+
+    output_json({"ok": True, **counts})
+
+
 # ============================================================================
 # Reflection Commands
 # ============================================================================
@@ -2237,26 +2308,77 @@ def cmd_expert_validate(args: argparse.Namespace) -> NoReturn:
     output_json({"ok": True, "valid": True})
 
 
+VALID_FAILURE_CLASSES = {
+    "spec-disobey",
+    "step-repetition",
+    "context-loss",
+    "termination-unaware",
+    "ignored-peer-input",
+    "task-derailment",
+    "premature-termination",
+    "incorrect-verification",
+    "no-verification",
+    "reasoning-action-mismatch",
+}
+
+PROMPT_FIX_FIELDS = {"section", "problem", "idealOutcome", "fix", "failureClass"}
+
+
+def _validate_prompt_fixes(fixes: list[Any]) -> list[str]:
+    """Validate promptFixes entries have required subfields and valid failureClass."""
+    warnings: list[str] = []
+    for i, fix in enumerate(fixes):
+        if not isinstance(fix, dict):
+            continue
+        missing = PROMPT_FIX_FIELDS - fix.keys()
+        if missing:
+            warnings.append(f"promptFixes[{i}] missing: {', '.join(missing)}")
+        fc = fix.get("failureClass", "")
+        if fc and fc not in VALID_FAILURE_CLASSES:
+            warnings.append(f"promptFixes[{i}] invalid failureClass: {fc}")
+    return warnings
+
+
 def cmd_reflection_validate(args: argparse.Namespace) -> NoReturn:
-    """Validate reflection evaluation JSON against minimal schema.
+    """Validate reflection evaluation JSON against schema.
 
     Reads evaluation JSON from stdin.
-    Required fields: whatWorked, whatFailed, doNextTime (all arrays)
+    Required fields: promptFixes (array), stepsSkipped (array),
+    instructionsIgnored (array), whatWorked (array), whatFailed (array).
+    Legacy field doNextTime (array) accepted but not required.
     """
     _ = args  # Unused but required for dispatch compatibility
     evaluation = _read_stdin_json("Invalid JSON in evaluation", include_error=True)
 
-    # Check required fields and that each is an array in one pass
-    fields = ["whatWorked", "whatFailed", "doNextTime"]
-    missing = [f for f in fields if f not in evaluation]
-    if missing:
-        error_exit(f"Missing required fields: {', '.join(missing)}")
+    required = [
+        "promptFixes",
+        "stepsSkipped",
+        "instructionsIgnored",
+        "whatWorked",
+        "whatFailed",
+    ]
+    has_legacy = all(
+        f in evaluation for f in ["whatWorked", "whatFailed", "doNextTime"]
+    )
+    has_new = all(f in evaluation for f in required)
 
-    invalid = [f for f in fields if not isinstance(evaluation.get(f), list)]
+    if not has_legacy and not has_new:
+        error_exit(
+            f"Missing required fields. Need: {', '.join(required)} "
+            "(or legacy: whatWorked, whatFailed, doNextTime)"
+        )
+
+    array_fields = [*required, "doNextTime", "acGradients"]
+    invalid = [
+        f
+        for f in array_fields
+        if f in evaluation and not isinstance(evaluation[f], list)
+    ]
     if invalid:
         error_exit(f"Fields must be arrays: {', '.join(invalid)}")
 
-    output_json({"ok": True, "valid": True})
+    warnings = _validate_prompt_fixes(evaluation.get("promptFixes", []))
+    output_json({"ok": True, "valid": True, "warnings": warnings})
 
 
 def _validate_json_schema(
@@ -2809,15 +2931,79 @@ def _read_recent_reflections(design_dir: str) -> list[dict[str, Any]]:
         evaluation = ref.get("evaluation", {})
         do_next_time = evaluation.get("doNextTime", [])
         what_failed = evaluation.get("whatFailed", [])
+        prompt_fixes = evaluation.get("promptFixes", [])
         results.append(
             {
                 "summary": f"{skill}: {outcome} ({status})",
                 "goal": goal,
                 "doNextTime": do_next_time,
                 "whatFailed": what_failed,
+                "promptFixes": prompt_fixes,
             }
         )
     return results
+
+
+def _extract_unresolved_improvements(design_dir: str) -> list[dict[str, Any]]:
+    """Extract and deduplicate promptFixes + doNextTime from recent reflections.
+
+    Returns actionable items sorted failures-first (OPRO ascending pattern:
+    items from failed runs surface before items from successful runs,
+    making the improvement direction visible).
+    Deduped by normalized text similarity.
+    """
+    reflection_path = os.path.join(design_dir, "reflection.jsonl")
+    try:
+        entries = _read_jsonl(reflection_path)
+    except OSError:
+        return []
+
+    entries.sort(key=lambda x: _parse_timestamp(x.get("timestamp", 0)), reverse=True)
+
+    # Collect items from last 5 reflections, tagged with success/failure
+    raw_items: list[dict[str, Any]] = []
+    for ref in entries[:5]:
+        skill = ref.get("skill", "unknown")
+        goal_achieved = ref.get("goalAchieved", False)
+        evaluation = ref.get("evaluation", {})
+        for item in evaluation.get("promptFixes", []):
+            fix_text = item if isinstance(item, str) else item.get("fix", str(item))
+            failure_class = (
+                "" if isinstance(item, str) else item.get("failureClass", "")
+            )
+            raw_items.append(
+                {
+                    "skill": skill,
+                    "type": "promptFix",
+                    "text": fix_text,
+                    "failureClass": failure_class,
+                    "fromFailedRun": not goal_achieved,
+                }
+            )
+        for item in evaluation.get("doNextTime", []):
+            raw_items.append(
+                {
+                    "skill": skill,
+                    "type": "doNextTime",
+                    "text": item,
+                    "failureClass": "",
+                    "fromFailedRun": not goal_achieved,
+                }
+            )
+
+    # Deduplicate by normalized prefix (first 60 chars lowercase, stripped)
+    seen: set[str] = set()
+    deduped: list[dict[str, Any]] = []
+    for item in raw_items:
+        key = item["text"][:60].lower().strip()
+        if key not in seen:
+            seen.add(key)
+            deduped.append(item)
+
+    # OPRO ascending sort: failures first, then successes
+    deduped.sort(key=lambda x: (not x["fromFailedRun"], x["type"] != "promptFix"))
+
+    return deduped
 
 
 def _read_plan_status(design_dir: str) -> str:
@@ -2841,12 +3027,14 @@ def cmd_plan_health_summary(args: argparse.Namespace) -> NoReturn:
     """Generate lifecycle context summary from recent reflections and plan status.
 
     Shows users where they are in the workflow lifecycle.
+    Includes deduplicated unresolved improvements from recent runs.
     """
     design_dir = args.design_dir
 
     recent = _read_recent_reflections(design_dir)
     summaries = [r["summary"] for r in recent]
     plan_status = _read_plan_status(design_dir)
+    unresolved = _extract_unresolved_improvements(design_dir)
 
     output_json(
         {
@@ -2854,6 +3042,7 @@ def cmd_plan_health_summary(args: argparse.Namespace) -> NoReturn:
             "reflections": summaries,
             "recentRuns": recent,
             "plan": plan_status,
+            "unresolvedImprovements": unresolved,
         }
     )
 
@@ -3223,6 +3412,10 @@ def cmd_self_test(args: argparse.Namespace) -> NoReturn:
             (
                 "memory-add --decay (importance arithmetic)",
                 lambda: _test_memory_decay(script_path, fixtures["memory_file"]),
+            ),
+            (
+                "memory-feedback (boost/decay from role outcomes)",
+                lambda: _test_memory_feedback(script_path, fixtures["memory_file"]),
             ),
             (
                 "trace-add (new file write verification)",
@@ -3780,6 +3973,26 @@ def _test_memory_decay(script_path: str, memory_path: str) -> None:
     assert output.get("ok") is True, f"memory-add --decay failed: {output}"
     assert output.get("importance") == 7, (
         f"Expected importance 7 (8-1), got {output.get('importance')}"
+    )
+
+
+def _test_memory_feedback(script_path: str, memory_path: str) -> None:
+    """Test memory-feedback boost/decay based on role outcomes."""
+    feedback_json = json.dumps(
+        [
+            {"memoryIds": ["mem-1"], "roleSucceeded": True, "firstAttempt": True},
+            {"memoryIds": ["mem-2"], "roleSucceeded": False, "firstAttempt": True},
+        ]
+    )
+    output = _run_command(
+        script_path, ["memory-feedback", memory_path], stdin_data=feedback_json
+    )
+    assert output.get("ok") is True, f"memory-feedback failed: {output}"
+    assert output.get("boosted") == 1, (
+        f"Expected 1 boosted, got {output.get('boosted')}"
+    )
+    assert output.get("decayed") == 1, (
+        f"Expected 1 decayed, got {output.get('decayed')}"
     )
 
 
@@ -5695,6 +5908,13 @@ def main() -> None:
     p.add_argument("--decay", action="store_true", help="Decrease importance by 1")
     p.add_argument("--id", help="Entry ID to update (required for --boost/--decay)")
     p.set_defaults(func=cmd_memory_add)
+
+    p = subparsers.add_parser(
+        "memory-feedback",
+        help="Boost/decay memories based on role outcomes (reads JSON from stdin)",
+    )
+    p.add_argument("memory_path", nargs="?", default=".design/memory.jsonl")
+    p.set_defaults(func=cmd_memory_feedback)
 
     p = subparsers.add_parser(
         "update-status", help="Batch update role statuses (reads JSON from stdin)"

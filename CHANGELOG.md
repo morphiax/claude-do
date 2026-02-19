@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.26.0] - 2026-02-19
+
+### Added
+
+- **MAST failure taxonomy**: `promptFixes` entries now include a `failureClass` field drawn from the MAST multi-agent failure taxonomy (spec-disobey, premature-termination, incorrect-verification, etc.). `reflection-validate` enforces valid values via `VALID_FAILURE_CLASSES` constant. Enables cross-run aggregation by failure type.
+- **AC gradient capture**: During lead-side verification in execute, failed AC checks are recorded as structured `(role, criterion, check, exitCode, stderr)` triples into a session-scoped `acGradients` list (initialized Step 1.9, populated Step 4, consumed Step 7). Based on ProTeGi textual gradient approach.
+- **Reflection prepend into agent prompts**: Unresolved improvements from past runs are injected directly into agent prompts at spawn time via a 4-step structural procedure in lead-protocol-core.md. All 4 skills reference it. Based on Reflexion (Shinn et al.) finding that explicit instructions outperform narrative feedback.
+- **OPRO ascending sort**: `_extract_unresolved_improvements` sorts failures-first (items from failed runs before successful), making the improvement direction visible. Based on OPRO (Yang et al.).
+- **Lamarckian prompt fix derivation**: Mandatory Step B in the Reflection Procedure — must write `idealOutcome` before deriving `fix`. `reflection-validate` warns when `idealOutcome` is missing. Based on PromptBreeder's Lamarckian mutation operator.
+
+### Changed
+
+- **Self-Monitoring rewritten as Reflection Procedure**: Advisory paragraph replaced with mandatory 3-step procedure (A: collect AC gradients, B: Lamarckian reverse-engineering, C: build reflection JSON). Each step is structural — has named inputs, outputs, and validation.
+- **Reflection Prepend elevated to structural protocol**: From one-liner "apply per core" to 4-step procedure with matching rules, MUST language, and show-user gate.
+- **`reflection-validate` strengthened**: Now validates `promptFixes` subfields (`section`, `problem`, `idealOutcome`, `fix`, `failureClass`), validates `failureClass` against MAST taxonomy, and accepts `acGradients` array. Returns warnings for missing fields.
+- **SKILL.md reflection templates deduplicated**: All 4 skills now reference lead-protocol-core.md for base schema, only listing skill-specific fields.
+
+## [2.25.0] - 2026-02-19
+
+### Added
+
+- **Prompt-improvement reflections**: Reflection schema reframed to produce data that directly improves SKILL.md prompts. New required fields: `promptFixes` (specific SKILL.md section + problem + fix), `stepsSkipped` (protocol steps skipped and why), `instructionsIgnored` (instructions agents didn't follow). Replaces generic `doNextTime` as primary improvement signal.
+- **Memory feedback loop**: New `memory-feedback` command in plan.py closes the feedback loop on injected memories. Boosts memories correlated with first-attempt role success (+1 importance, cap 10), decays memories correlated with failure (-1 importance, floor 1), increments `usage_count` on all. Execute/SKILL.md wired to call after memory curation.
+- **Unresolved improvements surfacing**: `plan-health-summary` now extracts and deduplicates `promptFixes` + `doNextTime` items from last 5 reflections. Lifecycle Context displays top 3 unresolved items at skill startup so the lead can act on recurring issues.
+
+### Changed
+
+- **Trace payloads**: All trace-add calls across all 4 SKILL.md files now include structured `--payload` with context (model, memories injected, AC results, outcomes, skipped steps). Previously all payloads were empty `{}`. Enables cross-run analysis of step coverage, timing, skip patterns, and retry behavior.
+- **lead-protocol-core.md**: Trace Emission table now includes a Payload column documenting required payload fields per event type. Added guidance: "Always include `--payload` with structured context — empty payloads waste the trace infrastructure."
+- **lead-protocol-core.md streamlined** (via /do:execute): Trace Emission compressed to table, execute-specific git override moved to execute/SKILL.md, Protocol Requirement + Do Not Use EnterPlanMode merged into single Guardrails section, INSIGHT handling separated from Phase Announcements, fixed redundant "auto-deliver automatically" wording.
+- **Deduplication**: Removed inline Lifecycle Context restatements from all 4 SKILL.md files (replaced with references to lead-protocol-core.md). Removed duplicate Script Setup and Trace Emission sections from execute/SKILL.md.
+
 ## [2.23.0] - 2026-02-19
 
 ### Removed

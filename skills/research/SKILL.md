@@ -62,7 +62,7 @@ Researchers tag each finding with which section(s) it informs. Lead assembles pr
 
 Spawn researchers as parallel standalone Task() subagents.
 
-1. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "{topic}" --keywords "{relevant keywords}"`. If `ok: false` or no memories, proceed without injection. Otherwise inject top 3-5 into researcher prompts. **Show user**: "Memory: injecting {count} past learnings — {keyword summaries}."
+1. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "{topic}" --keywords "{relevant keywords}"`. If `ok: false` or no memories, proceed without injection. Otherwise inject top 3-5 into researcher prompts. **Show user**: "Memory: injecting {count} past learnings — {keyword summaries}." Apply Reflection Prepend per lead-protocol-core.md.
 2. **Spawn all 3 researchers in the same response** (parallel). Use `Task(subagent_type: "general-purpose", model: "sonnet")` for each — no `team_name` or `name` parameter. Task() returns their result directly when done — no SendMessage or liveness tracking needed.
    - Include scope bounds: "Focus your investigation on {directories/areas}. Do not explore unrelated areas."
    - Inject relevant memories if available.
@@ -184,11 +184,11 @@ To act on this research: /do:design {designGoal from primary adopt/adapt recomme
 
 ### 6. Reflection
 
-1. **Self-reflection** — Evaluate this research run. Be honest — this reflection feeds future runs via memory curation.
+1. **Self-reflection** — Per Self-Monitoring protocol (lead-protocol-core.md). Skill-specific fields to include alongside the base schema:
 
 ```bash
-echo '{"researchQuality":"<assessment>","sectionCoverage":"<complete|partial>","scopeDiscipline":"<stayed focused|drifted>","researchersSpawned":N,"findingsCount":N,"recommendationsProduced":N,"contradictionsFound":N,"whatWorked":["<item>"],"whatFailed":["<item>"],"doNextTime":["<item>"]}' | python3 $PLAN_CLI reflection-add .design/reflection.jsonl --skill research --goal "<the investigated topic>" --outcome "<completed|partial|failed|aborted>" --goal-achieved <true|false>
-python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event skill-complete --skill research || true
+echo '{"researchQuality":"<assessment>","sectionCoverage":"<complete|partial>","scopeDiscipline":"<stayed focused|drifted>", ...base fields from lead-protocol-core.md...}' | python3 $PLAN_CLI reflection-add .design/reflection.jsonl --skill research --goal "<the investigated topic>" --outcome "<completed|partial|failed|aborted>" --goal-achieved <true|false>
+python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event skill-complete --skill research --payload '{"outcome":"<completed|partial|failed|aborted>","researchersSpawned":N,"findingsCount":N,"recommendationsProduced":N,"contradictionsFound":N,"sectionsComplete":N}' || true
 ```
 
 On failure: proceed (not blocking).

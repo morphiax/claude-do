@@ -3,7 +3,7 @@
 > Multi-agent planning with structured debate, self-verifying execution, and cross-session memory
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Version](https://img.shields.io/badge/version-2.23.0-green.svg)
+![Version](https://img.shields.io/badge/version-2.26.0-green.svg)
 ![Claude Code](https://img.shields.io/badge/Claude%20Code-2.1.32%2B-orange.svg)
 
 ## What's Novel
@@ -20,7 +20,7 @@
 
 **Scout auxiliaries** — Pre-execution agents read the actual codebase to verify expert assumptions match reality. High-impact discrepancies are injected as role constraints before worker spawning.
 
-**Self-monitoring** — All skills self-evaluate after every run, recording structured observations to `.design/reflection.jsonl` for cross-session pattern detection and improvement tracking.
+**Self-monitoring** — All skills self-evaluate after every run, recording prompt-improvement-focused observations to `.design/reflection.jsonl`: specific SKILL.md text fixes with MAST failure classes (`promptFixes`), structured AC failure triples (`acGradients`), skipped protocol steps (`stepsSkipped`), and ignored instructions (`instructionsIgnored`). Unresolved improvements are injected directly into agent prompts at spawn time (Reflexion-style prepend), sorted failures-first (OPRO ascending-sort). Memory feedback loop boosts/decays injected memories based on role outcomes. Lamarckian technique derives fixes by reverse-engineering from desired outcomes.
 
 **Acceptance criteria validation** — Design-time syntax validation catches broken `python3 -c` checks (including f-string brace nesting errors) before execution. Shift-left anti-pattern warnings in expert prompts prevent grep-only criteria from entering plans. Lead-side verification re-runs every criterion before marking roles complete (trust-but-verify). Surface-only checks (grep, file-existence) are flagged as anti-patterns.
 

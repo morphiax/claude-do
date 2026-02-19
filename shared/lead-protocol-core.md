@@ -48,16 +48,18 @@ SESSION_ID=$TEAM_NAME
 
 ## Trace Emission
 
-Emit lifecycle events via `python3 $PLAN_CLI trace-add` (failures are non-blocking — append `|| true`):
+Emit lifecycle events via `python3 $PLAN_CLI trace-add` (failures are non-blocking — append `|| true`).
 
-| Event | Required | When |
-|-------|----------|------|
-| `skill-start` | mandatory | start of every run |
-| `skill-complete` | mandatory | end of every run |
-| `failure` | mandatory | any agent or role fails |
-| `respawn` | mandatory | re-spawning a timed-out or failed agent |
-| `spawn` | optional | team-based skills only |
-| `completion` | optional | team-based skills only |
+**Always include `--payload` with structured context** — empty payloads waste the trace infrastructure. Payloads enable cross-run analysis (step coverage, timing, skip patterns).
+
+| Event | Required | When | Payload |
+|-------|----------|------|---------|
+| `skill-start` | mandatory | start of every run | `{"roleCount":N,"stepsSkipped":["..."],"isResume":bool}` |
+| `skill-complete` | mandatory | end of every run | `{"outcome":"...","rolesCompleted":N,"rolesFailed":N,"retries":N,"auxiliariesRun":["..."],"auxiliariesSkipped":["..."]}` |
+| `failure` | mandatory | any agent or role fails | `{"reason":"...","attempt":N,"model":"..."}` |
+| `respawn` | mandatory | re-spawning a timed-out or failed agent | `{"attempt":N,"escalatedModel":"...","reason":"..."}` |
+| `spawn` | optional | team-based skills only | `{"model":"...","memoriesInjected":N}` |
+| `completion` | optional | team-based skills only | `{"acPassed":N,"acTotal":N,"filesChanged":N,"firstAttempt":bool}` |
 
 ---
 
@@ -69,6 +71,18 @@ python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "{goal}" --stack "{s
 
 If `ok: false` or no memories → proceed without injection. Otherwise inject **top 3-5** into agent prompts. **Show user**: "Memory: injecting {count} past learnings — {keyword summaries}."
 
+### Reflection Prepend
+
+When `plan-health-summary` returns `unresolvedImprovements` (non-empty), the lead MUST inject matching items into each agent's spawn prompt. This is not optional — agents that don't receive past lessons repeat past mistakes.
+
+**Procedure** (at agent spawn time, after memory injection):
+1. Take the `unresolvedImprovements` list from the `plan-health-summary` output stored during Lifecycle Context.
+2. For each agent being spawned, filter items where the item's `text` contains the agent's role name, goal keywords, or scope directory names. Also include all items where `failureClass` matches a pattern relevant to this agent type (e.g., `incorrect-verification` for workers, `spec-disobey` for any agent).
+3. If matches found (even 1), prepend to the agent's prompt: "Lessons from prior runs — you MUST apply these:\n{bullet list of matching fix texts}"
+4. **Show user**: "Reflection prepend: {agent-name} ← {count} lessons from prior runs."
+
+If `unresolvedImprovements` is empty, skip silently. Memories provide general knowledge; reflection prepend provides specific corrections from recent failures.
+
 ---
 
 ## Lifecycle Context
@@ -79,11 +93,11 @@ Run at skill start (Step 1 of pre-flight), before trace emit:
 python3 $PLAN_CLI plan-health-summary .design
 ```
 
-Display to user: "Recent runs: {reflection summaries}. {plan status}." Skip if all fields empty.
+Display to user: "Recent runs: {reflection summaries}. {plan status}." If `unresolvedImprovements` is non-empty, also display: "Unresolved from prior runs: {count} items" and list the top 3 (these are concrete prompt fixes or doNextTime items that keep recurring). Skip if all fields empty.
 
-Then emit skill-start trace:
+Then emit skill-start trace (with payload per Trace Emission table):
 ```bash
-python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event skill-start --skill {skill} || true
+python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event skill-start --skill {skill} --payload '{"roleCount":N,"stepsSkipped":["..."],"isResume":false}' || true
 ```
 
 ---
@@ -102,14 +116,62 @@ When an agent sends a message prefixed with `INSIGHT:`, display it to the user i
 
 ## Self-Monitoring
 
-Every skill MUST call `reflection-add` at end of each run. Record what could be improved about *how the skill executed* — only observations that make the next run better. Be specific (names, data, decisions). 79% of failures are specification and coordination issues — weight observations there.
+Every skill MUST call `reflection-add` at end of each run. **Purpose: produce data that directly improves SKILL.md prompts.** Generic observations ("worked well", "was useful") are worthless — record only what would change the prompt text.
+
+### Reflection Procedure (mandatory — follow these steps in order)
+
+**Step A — Collect AC gradients** (execute only): During the monitor loop, maintain a session-scoped `acGradients` list. Every time a lead-side AC check exits non-zero, append `{"role": "...", "criterion": "...", "check": "the shell command", "exitCode": N, "stderr": "actual error output"}`. This list feeds Step C.
+
+**Step B — Lamarckian reverse-engineering** (mandatory for every failure or suboptimal outcome): For each failed or retried role, write two things before deriving any prompt fix:
+1. `idealOutcome`: "The agent should have produced: {describe the correct output/behavior in one sentence}"
+2. `promptFix`: "To get that outcome, change SKILL.md at {section}: {concrete text change}"
+
+Do NOT skip Step 1. The ideal outcome forces specificity — without it, fixes drift into vague advice. If you cannot describe the ideal outcome, the failure is not understood well enough to fix.
+
+**Step C — Build reflection JSON**: Assemble the fields below and pipe to `reflection-add`:
 
 ```bash
-echo '{"whatWorked":["..."],"whatFailed":["..."],"doNextTime":["..."]}' \
+echo '{"promptFixes":[...],"acGradients":[...],"stepsSkipped":[...],"instructionsIgnored":[...],"whatWorked":[...],"whatFailed":[...]}' \
   | python3 $PLAN_CLI reflection-add .design/reflection.jsonl \
     --skill {skill} --goal "<goal>" --outcome "<completed|partial|failed|aborted>" --goal-achieved <true|false>
 ```
 
-Required base fields: `whatWorked`, `whatFailed`, `doNextTime` (arrays). Each skill adds skill-specific fields in its SKILL.md.
+### Reflection Fields
 
-Ordering rules: `reflection-add` before `trace-add skill-complete`. `doNextTime` is the primary improvement signal — memory curator reads it first. Rich evaluations produce high-quality memories. Non-fatal: if reflection-add fails, proceed.
+All arrays. Each skill adds skill-specific fields in its SKILL.md.
+
+**`promptFixes`** (PRIMARY — if empty, the reflection is too vague):
+
+Each entry MUST have all 5 fields:
+- `section` — which SKILL.md section (e.g., "Step 3", "Worker Protocol")
+- `problem` — what went wrong
+- `idealOutcome` — what the agent should have produced instead (from Step B)
+- `fix` — concrete text change to make to get that outcome
+- `failureClass` — one of:
+
+| Class | Meaning |
+|-------|---------|
+| `spec-disobey` | Agent ignored task/role specification |
+| `step-repetition` | Agent repeated same step without progress |
+| `context-loss` | Agent lost conversation history or prior context |
+| `termination-unaware` | Agent didn't know when to stop |
+| `ignored-peer-input` | Agent had relevant peer data but didn't use it |
+| `task-derailment` | Agent pursued wrong subtask |
+| `premature-termination` | Agent stopped before completing all work |
+| `incorrect-verification` | Superficial checks passed, substantive failures missed |
+| `no-verification` | Agent skipped verification entirely |
+| `reasoning-action-mismatch` | Agent stated correct plan but executed differently |
+
+**`acGradients`** (execute only — from Step A): The raw `(check, exitCode, stderr)` triples that make prompt fixes evidence-based rather than speculative.
+
+**`stepsSkipped`** — protocol steps that were skipped and why (e.g., `"Step 2.3: AC pre-validation skipped — plan had no check commands"`)
+
+**`instructionsIgnored`** — SKILL.md instructions that agents didn't follow despite being told (e.g., `"Workers didn't use CoVe verification — reported completion without running checks"`)
+
+**`whatWorked`** / **`whatFailed`** — kept for backward compatibility but secondary to promptFixes.
+
+### Lifecycle Feedback
+
+`plan-health-summary` surfaces `unresolvedImprovements` (deduplicated promptFixes from last 5 runs, sorted failures-first). Skills display these at startup so the lead can act on recurring issues.
+
+Ordering rules: `reflection-add` before `trace-add skill-complete`. Non-fatal: if reflection-add fails, proceed.

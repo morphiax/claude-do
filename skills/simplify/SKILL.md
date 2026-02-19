@@ -56,7 +56,7 @@ Before starting the Flow, Read `lead-protocol-core.md` and `lead-protocol-teams.
 5. **Anti-pattern guards** (text targets — snapshot for regression check):
    - Copy target file(s) to `.design/skill-snapshot.md` (or `.design/text-snapshot/`) via Bash for baseline comparison.
    - **Circular simplification detection**: Check `.design/history/` for recent simplify runs targeting the same files: `ls .design/history/*/expert-*.json 2>/dev/null | tail -5`. If found, warn user: "Previous simplify runs detected. Review history to avoid circular changes."
-6. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "simplify {target}" --keywords "simplification,cascade,preservation"`. If `ok: false` or no memories, proceed without injection. Otherwise inject top 3-5 into analyst prompts. **Show user**: "Memory: injecting {count} past learnings — {keyword summaries}."
+6. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "simplify {target}" --keywords "simplification,cascade,preservation"`. If `ok: false` or no memories, proceed without injection. Otherwise inject top 3-5 into analyst prompts. **Show user**: "Memory: injecting {count} past learnings — {keyword summaries}." Apply Reflection Prepend per lead-protocol-core.md.
 7. **Announce to user**: "Simplify ({target type}): analyzing {scope description}. Spawning {N} analysts ({names}). Auxiliaries: {list — challenger+scout+integration-verifier+memory-curator for Standard+, memory-curator+integration-verifier only for Trivial tier (roleCount <= 2)}."
 
 ### 3. Spawn Analysts
@@ -67,7 +67,7 @@ Create the team and spawn analysts in parallel.
 2. **TeamCreate health check**: Verify team is reachable. If verification fails, `TeamDelete`, then retry `TeamCreate` once. If retry fails, abort with clear error message.
 3. `TaskCreate` for each analyst.
 4. Spawn analysts as teammates using the Task tool. For each analyst:
-   - Before Task call: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event spawn --skill simplify --agent "{analyst-name}" || true`
+   - Before Task call: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event spawn --skill simplify --agent "{analyst-name}" --payload '{"model":"sonnet","memoriesInjected":N}' || true`
    - Use Task with `team_name: $TEAM_NAME`, `name: "{analyst-name}"`, and `model: "sonnet"`.
    - Instruct: "Save your complete findings to `.design/expert-{name}.json` as structured JSON."
    - Instruct: "Then SendMessage to the lead with a summary."
@@ -330,11 +330,11 @@ Memories applied: {count or "none"}
 Run /do:execute to begin simplification.
 ```
 
-5. **Self-reflection** — Assess: (a) Analysts well-chosen? (b) Cascade analysis depth sufficient? (c) Organizational context handling worked? (d) What differently next time? Be honest — this reflection feeds future runs via memory curation.
+5. **Self-reflection** — Per Self-Monitoring protocol (lead-protocol-core.md). Skill-specific fields to include alongside the base schema:
 
 ```bash
-echo '{"targetType":"<code|text|mixed>","analystQuality":"<which analysts contributed most/least>","cascadeDepth":"<deep structural|mostly surface>","preservationConfidence":"<high|medium|low>","organizationalContextItems":<count>,"whatWorked":["<item>"],"whatFailed":["<item>"],"doNextTime":["<item>"]}' | python3 $PLAN_CLI reflection-add .design/reflection.jsonl --skill simplify --goal "<the target>" --outcome "<completed|partial|failed|aborted>" --goal-achieved <true|false>
-python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event skill-complete --skill simplify || true
+echo '{"targetType":"<code|text|mixed>","analystQuality":"<which analysts contributed most/least>","cascadeDepth":"<deep structural|mostly surface>","preservationConfidence":"<high|medium|low>","organizationalContextItems":<count>, ...base fields from lead-protocol-core.md...}' | python3 $PLAN_CLI reflection-add .design/reflection.jsonl --skill simplify --goal "<the target>" --outcome "<completed|partial|failed|aborted>" --goal-achieved <true|false>
+python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event skill-complete --skill simplify --payload '{"outcome":"<completed|partial|failed|aborted>","targetType":"<code|text|mixed>","roleCount":N,"analystsSpawned":N,"cascadeChains":N,"auxiliariesSkipped":["..."]}' || true
 ```
 
 On failure: proceed (not blocking).
