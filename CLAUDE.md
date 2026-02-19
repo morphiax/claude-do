@@ -58,13 +58,14 @@ Each SKILL.md has YAML frontmatter (`name`, `description`, `argument-hint`) that
 
 A single `shared/plan.py` at the repo root provides all deterministic operations. Each skill symlinks to it from `skills/{name}/scripts/plan.py` so SKILL.md can resolve a skill-local path.
 
-- **Query** (17 commands): team-name (generate project-unique team name from skill + cwd), status, summary, overlap-matrix, tasklist-data, worker-pool, retry-candidates, circuit-breaker, memory-search (keyword-based search in .design/memory.jsonl with recency weighting and importance scoring), reflection-search (filter past reflections by skill, sorted by recency), memory-review (list all memories in human-readable format with filtering), health-check (validate .design/ integrity), plan-diff (compare two plan.json files), plan-health-summary (lifecycle context from reflections, plan status, and deduplicated unresolved improvements from recent promptFixes/doNextTime), sync-check (detect drift between shared protocol sections across SKILL.md files using structural fingerprints), trace-search (query trace events by session, skill, event type, or agent), trace-summary (format trace data for display with aggregate statistics)
-- **Mutation** (7 commands): update-status (atomically modify plan.json via temp file + rename with state machine validation), memory-add (append JSONL entry with UUID, importance 1-10, and dynamic boost/decay), memory-feedback (batch boost/decay from role outcomes — boosts first-attempt successes, decays failures, increments usage_count), reflection-add (append structured self-evaluation to reflection.jsonl, evaluation JSON via stdin), resume-reset (resets in_progress roles to pending, increments attempts), archive (archives stale .design/ artifacts to .design/history/{timestamp}/), trace-add (append agent lifecycle events to trace.jsonl with automatic ID/timestamp generation)
-- **Validation** (7 commands): expert-validate (schema validation for expert artifacts), reflection-validate (schema validation for reflection evaluations), memory-summary (format injection summary for display), validate-checks (syntax validation for acceptanceCriteria check commands — detects broken Python in `python3 -c` checks, including f-string brace nesting errors), research-validate (schema validation for research.json including optional designHandoff), research-summary (format research output for display including designHandoffCount), trace-validate (schema validation for trace.jsonl with required field checks)
+- **Query** (runtime-invoked): team-name, status, summary, overlap-matrix, tasklist-data, worker-pool, retry-candidates, circuit-breaker, memory-search, plan-health-summary
+- **Mutation** (runtime-invoked): update-status, memory-add, memory-feedback, reflection-add, resume-reset, archive, trace-add
+- **Validation** (runtime-invoked): expert-validate, validate-checks, research-validate, research-summary
 - **Build** (1 command): finalize — validates role briefs, computes directory overlaps, validates state transitions, and computes SHA256 checksums for verification specs in one atomic operation
 - **Test** (1 command): self-test — exercises every command against synthetic fixtures in a temp directory, reports pass/fail per command as JSON
+- **Developer inspection tools** (not invoked by skills at runtime): reflection-search, memory-review, health-check, plan-diff, sync-check, trace-search, trace-summary, reflection-validate, memory-summary, trace-validate
 
-Design uses query + finalize. Execute uses all commands. Research uses query + research-validate + research-summary. Improve uses query + finalize (same as design). `worker-pool` reads roles directly — one worker per role, named by role (e.g., `api-developer`, `test-writer`). Workers read `plan.json` directly — no per-worker task files needed.
+Design uses query + finalize. Execute uses all commands. Research uses query + research-validate + research-summary. `worker-pool` reads roles directly — one worker per role, named by role (e.g., `api-developer`, `test-writer`). Workers read `plan.json` directly — no per-worker task files needed.
 
 Scripts use python3 stdlib only (no dependencies), support Python 3.8+, and follow a consistent CLI pattern: `python3 plan.py <command> [plan_path] [options]`. All output is JSON to stdout with exit code 0 for success, 1 for errors.
 
@@ -74,20 +75,10 @@ Skills communicate through structured JSON files in `.design/` (gitignored). Two
 
 **`.design/plan.json` (schemaVersion 4)** — used by design, execute, and simplify for role-based execution:
 
-Key points:
-
-- `.design/plan.json` is the authoritative state; the TaskList is a derived view
-- Schema version 4 is required
-- Roles use name-based dependencies resolved to indices by `finalize`
-- `finalize` validates role briefs and computes `directoryOverlaps` from scope directories/patterns (strict j>i ordering to prevent bidirectional deadlocks)
-- No prompt assembly — workers read role briefs directly from plan.json and decide their own implementation approach
-- Expert artifacts (`expert-*.json`) are preserved in `.design/` for execute workers to reference via `expertContext` entries. The lead must never write expert artifacts — only experts save their own findings
-- Memory storage: `.design/memory.jsonl` contains cross-session semantic learnings (JSONL format with UUID, category, keywords, content, timestamp, importance 1-10). Categories include: convention, pattern, mistake, approach, failure, and procedure (learned execution patterns). Entries must pass five quality gates: transferability, category fit, surprise-based importance, deduplication, and specificity. Session-specific observations (metrics, counts, file lists) are rejected
-- Memory retrieval uses keyword matching with recency decay (10%/30 days) and importance weighting (score = keyword_match * recency_factor * importance/10). Dynamic importance tracking via --boost/--decay flags correlates outcomes with memory relevance
-- Reflection storage: `.design/reflection.jsonl` contains per-run episodic self-evaluations (JSONL format with UUID, skill, goal, outcome, goalAchieved, evaluation object, timestamp). Both design and execute append entries at end of each run. Memory-curator reads reflections as primary signal for what to record
-- **Persistent `.design/` files** (survive archiving): `memory.jsonl`, `reflection.jsonl`, `research.json`, `trace.jsonl`. Everything else is archived to `.design/history/{timestamp}/`
-- Plan history: completed runs are archived to `.design/history/{timestamp}/`; design pre-flight archives stale artifacts
-- Verification specs: optional schema layer for property-based testing. Lead writes spec files in `.design/specs/{role-name}.{ext}` (shell scripts or native test framework). Specs are immutable during execution; workers run them after acceptance criteria pass and report failures as blocking. `finalize` validates spec references and computes SHA256 checksums for tamper detection.
+- Authoritative state; TaskList is a derived view. Schema version 4 required.
+- Roles use name-based dependencies resolved to indices by `finalize`.
+- **Persistent `.design/` files** (survive archiving): `memory.jsonl`, `reflection.jsonl`, `research.json`, `trace.jsonl`. Everything else archived to `.design/history/{timestamp}/`
+- Verification specs: optional `verificationSpecs[]` in plan.json. `finalize` computes SHA256 checksums for tamper detection.
 
 **Top-level fields**: schemaVersion (4), goal, context {stack, conventions, testCommand, buildCommand, lsp}, expertArtifacts [{name, path, summary}], designDecisions [{conflict, experts, decision, reasoning}], verificationSpecs [] (optional), roles[], auxiliaryRoles[], progress {completedRoles: []}
 
@@ -105,14 +96,7 @@ Key points:
 
 **Status fields** (initialized by finalize): status (`pending`), result (null), attempts (0), directoryOverlaps (computed)
 
-**Verification spec fields** (optional, generated in design Step 4.5, validated/checksummed by finalize):
-- `verificationSpecs[]` — top-level array of `{role: string, path: string, runCommand: string, properties: [string], sha256: string}`. Each entry maps a role to its verification spec file (e.g., `.design/specs/api-developer.test.ts`).
-  - `role` — role name this spec applies to (must match a role in roles[])
-  - `path` — path to the spec file; runnable in the project's test framework (bun test, pytest, cargo test) or as a shell script
-  - `runCommand` — shell command to execute the spec (e.g., `bun test .design/specs/spec-api-developer.test.ts`)
-  - `properties` — array of brief descriptions of what each spec tests (property invariants, boundary conditions, integration contracts)
-  - `sha256` — SHA256 checksum of the spec file (computed by finalize); integration-verifier checks this to detect spec tampering
-- Specs test broad behavioral properties (e.g., "rate limit resets after window", "API endpoints return valid JSON") rather than implementation details. Failures are blocking — workers must fix code to pass specs, never modify the spec file itself.
+**Verification spec fields**: `verificationSpecs[]` — top-level array of `{role, path, runCommand, properties, sha256}`. See SKILL.md Step 4.5 for authorship and content guidelines.
 
 **Auxiliary roles** — standalone Task tool agents (not team members) that improve quality without directly implementing features:
 - `challenger` (pre-execution) — reviews plan, challenges assumptions, finds gaps. Blocking issues are mandatory gates: lead must address each one before proceeding
@@ -124,57 +108,10 @@ Key points:
 
 **`.design/research.json` (schemaVersion 1)** — used by `/do:research` for comprehensive knowledge research output:
 
-Research produces structured knowledge across 5 sections with ranked recommendations. Key points:
-
-- Schema fields: schemaVersion (1), goal, context {same as plan.json}, sections {prerequisites, mentalModels, usagePatterns, failurePatterns, productionReadiness}, recommendations[], researchGaps[], designHandoff[] (optional)
-- **Section fields**: name (string), findings (array of finding objects), synthesis (string summary). Notable sub-fields: prerequisites.conceptDependencyGraph[] (ordered learning paths), usagePatterns.evolutionPaths[] (stage/pattern/trigger progression), productionReadiness.teamAdoption {learningTimeline, documentationQuality, communitySupport}
-- **Recommendation fields**: id, title, summary, confidence (low/medium/high), effort (low/medium/high), prerequisites (array), reasoning (string), bestFit[] (scenarios where this is the right choice), wrongFit[] (scenarios where this is the wrong choice)
+- Top-level: schemaVersion (1), goal, context, sections {prerequisites, mentalModels, usagePatterns, failurePatterns, productionReadiness}, recommendations[], researchGaps[], designHandoff[] (optional)
+- **Recommendation fields**: id, title, summary, confidence (low/medium/high), effort (low/medium/high), prerequisites, reasoning, bestFit[], wrongFit[]
 - **Finding fields**: id, section, source, summary, domain (codebase/literature/comparative/theoretical)
-- **Design handoff fields**: source (reference-material|codebase-analysis|expert-finding|literature), element (what the building block is), material (concrete content — string, array, or object), usage (how /do:design should use it)
-- Recommendations include confidence levels and effort estimates for adoption planning
-- Research gaps document areas needing additional investigation
-- Design handoff preserves concrete building blocks from expert artifacts so /do:design can read research.json alone without re-reading expert artifacts (token efficiency)
-
-### Verification Specs Protocol
-
-Verification specs are broad, property-based tests that workers must satisfy. They codify expert-provided properties as executable tests without constraining implementation creativity. `/do:design` can generate verification specs in its optional Step 4.5.
-
-**When to generate specs:**
-- **Mandatory** for complex goals: 4+ roles, new skills, API integration
-- **Optional** for simple goals: 1-3 roles, docs/config-only, sparse verificationProperties
-- Expert artifacts must contain concrete verificationProperties sections
-- Stack supports test execution (context.testCommand or context.buildCommand exists)
-
-**Authorship:**
-- **Simple goals** (1-3 roles, clear external interfaces): Lead writes specs from expert verificationProperties
-- **Complex goals** (4+ roles): Spawn a spec-writer Task agent with `Task(subagent_type: "general-purpose")` that CAN read source code. Prompt: "Read expert verificationProperties from `.design/expert-*.json` and the actual codebase in scope directories from plan.json roles. Write verification spec files in `.design/specs/{role-name}.{ext}` using the project's test framework (bun test, pytest, cargo test) or shell scripts as fallback. Specs test behavioral properties, not implementation details. Return paths of created spec files."
-
-**Spec generation steps:**
-1. Read expert verificationProperties sections from all expert artifacts
-2. For each role, extract relevant properties (filter by role scope/goal alignment)
-3. Create `mkdir -p .design/specs`
-4. Write spec files in project's native test framework or shell scripts:
-   - **Native tests** (preferred): `.design/specs/spec-{role-name}.test.{ext}` using bun test, pytest, jest, cargo test, etc. Use property-based testing frameworks where available (fast-check, hypothesis, proptest)
-   - **Shell fallback**: `.design/specs/spec-{role-name}.sh` with exit 0 = pass
-5. For each spec file created, add an entry to plan.json's `verificationSpecs[]` array:
-   ```json
-   {
-     "role": "{role-name}",
-     "path": ".design/specs/spec-{role-name}.{ext}",
-     "runCommand": "{command to execute spec, e.g., 'bun test .design/specs/spec-api.test.ts'}",
-     "properties": ["brief description of each property tested"]
-   }
-   ```
-
-**Spec content guidelines:**
-- Test WHAT the system does (external behavior), not HOW (implementation structure)
-- Include positive cases (valid inputs succeed) AND negative cases (invalid inputs fail correctly)
-- Use property-based testing where possible (for all X, property P(X) holds)
-- Test cross-role contracts for integration boundaries
-- Specs must be independently runnable via their runCommand (no global setup dependencies)
-
-**Finalization:**
-Run `python3 $PLAN_CLI finalize .design/plan.json` to validate structure, compute overlaps, and compute SHA256 checksums for spec files (tamper detection).
+- **Design handoff fields**: source, element, material, usage — preserves expert building blocks so /do:design can read research.json without re-reading expert artifacts
 
 ### Execution Model
 
@@ -183,81 +120,7 @@ All four skills use the **main conversation as team lead** with Agent Teams (or 
 - **Lead** (main conversation): orchestration only via `TeamCreate`, `SendMessage`, `TaskCreate`/`TaskUpdate`/`TaskList`, `Bash` (scripts, git, verification), `AskUserQuestion`. Never reads project source files.
 - **Teammates**: specialist agents spawned into the team. Discover lead name via `~/.claude/teams/{team-name}/config.json`.
 
-**`/do:design`** — team name: `do-design-{project}-{hash}` (generated by `team-name` command)
-- Protocol guardrail: lead must follow the flow step-by-step and never answer goals directly before pre-flight
-- Phase announcements: lead announces each major phase (pre-flight, expert spawning, cross-review, synthesis, finalization) for user visibility
-- Lifecycle context: runs `plan-health-summary` to display recent reflections at skill start
-- TeamCreate health check: verifies team is reachable, retries once on failure
-- Memory injection: lead searches .design/memory.jsonl for relevant past learnings (using importance-weighted scoring) and injects top 3-5 into expert prompts with transparency (shows what was injected to user). Expert prompts request verificationProperties (behavioral invariants, boundary conditions, integration contracts) to inform spec generation. Expert prompts include anti-pattern warnings for acceptance criteria (shift-left prevention of grep-only checks). Memory search failures gracefully fallback to empty results
-- Expert prompts include INSIGHT: instruction: agents emit intermediate findings during analysis with INSIGHT: prefix for real-time user feedback on discovery progress.
-- Lead spawns expert teammates (architect, researcher, domain-specialists) based on goal type awareness (implementation/meta/research). Expert prompts include behavioral trait instructions (e.g., "prefer composable patterns", "be skeptical of X") and require measurable verificationProperties based on actual code metrics (not theoretical estimates)
-- Expert liveness pipeline: completion checklist tracking which experts have reported, turn-based timeout (3 turns then re-spawn), re-spawn ceiling (max 2 attempts then proceed with available artifacts)
-- Cross-review: interface negotiation and perspective resolution via actual expert messaging (lead must not perform cross-review solo). Audit trail saved to `.design/cross-review.json`. Lead resolves unresolved conflicts in designDecisions[]
-- Draft plan review: for complex/high-stakes goals (based on complexity tier), lead displays draft plan.json to user for brief review before finalization
-- Complexity-proportional auxiliary selection: plans with roleCount ≤ 2 skip challenger and scout auxiliaries (lower token overhead). Plans with roleCount > 2 run challenger (with adversarial behavioral traits) and scout (when the goal touches code). Integration-verifier and memory-curator always run post-execution.
-- Lead synthesizes expert findings into role briefs in plan.json directly (no plan-writer delegate)
-- Step 4.5 (conditional, after role briefs written): Lead generates verification specs from expert verificationProperties and role briefs. Mandatory for complex goals (4+ roles, new skills, API integration). Optional for simple goals (1-3 roles, docs/config-only, sparse verificationProperties). For complex goals, a standalone spec-writer Task agent can assist. Specs are written to `.design/specs/{role-name}.{ext}` in the project's test framework (or shell scripts as fallback) and added to plan.json's verificationSpecs[].
-- `finalize` validates role briefs (including that not all acceptance criteria are surface-only checks), validates verificationSpecs schema (if present), computes SHA256 checksums for spec files, and computes directory overlaps (no prompt assembly)
-- End-of-run summary: displays role count, complexity tier, expert artifacts produced, design decisions made, and verification specs generated
-
-**`/do:execute`** — team name: `do-execute-{project}-{hash}` (generated by `team-name` command)
-- Phase announcements: lead announces each major phase (pre-flight, auxiliary spawning, worker execution, post-execution) for user visibility
-- Lifecycle context: runs `plan-health-summary` to display recent reflections at skill start
-- TeamCreate health check: verifies team is reachable, retries once on failure
-- Complexity-proportional auxiliaries: plans with roleCount ≤ 2 skip challenger and scout auxiliaries (lower token overhead for trivial goals). Plans with roleCount > 2 run pre-execution auxiliaries (challenger with adversarial traits, scout with fact-checking focus) in parallel before workers spawn with structured output formats. After parallel completion, challenger results (plan.json constraint injection) are processed first, then scout results are consumed. Scout verifies that verificationSpec files exist and that runCommands reference valid tools/paths if specs are present.
-- AC pre-validation: before worker spawning, lead runs each role's acceptance criteria `check` commands to detect always-pass or broken criteria early. Workers then verify criteria again during completion as a fresh question.
-- Memory injection: lead searches .design/memory.jsonl per role (using importance-weighted scoring with role.goal + scope as context) and injects top 2-3 into worker prompts with transparency (shows injected memories to user). Memory search failures gracefully fallback to empty results
-- Lead creates TaskList from plan.json, spawns one persistent worker per role via `worker-pool`. Worker instructions use structured tables for clarity (identity, brief, context, verification, reporting)
-- Adaptive model escalation: workers start on assigned model (haiku/sonnet/opus), escalate to next-higher tier on retry (haiku→sonnet→opus). Model escalation shown in worker status updates
-- Peer-to-peer worker handoff: when a role completes and is a dependency for others, worker can send keyDecisions and contextForDependents directly to dependent workers via SendMessage (notifyOnComplete). Lead still controls task unblocking. Enables faster context delivery for dependent roles.
-- Worker liveness pipeline: turn-based silence detection with 3-turn timeout then re-spawn (max 2 attempts per role before proceeding with available progress). Workers must acknowledge fix requests within 1 turn (no idle-without-responding). Simplified from previous 5-turn ping + 7-turn timeout
-- Workers report completion as structured JSON schema: `{role, achieved, filesChanged[], acceptanceCriteria[{criterion, passed, evidence}], keyDecisions[], contextForDependents}`
-- Workers provide progress reporting for significant events (file writes, test runs, criterion verification). Tool boundaries: workers do NOT use WebFetch, WebSearch, or Task
-- Workers use CoVe-style self-verification: before reporting completion, MUST run every acceptance criterion's `check` command as a separate shell invocation (not assumed from other checks). Each criterion's check is a concrete shell command; workers execute them literally and report exit codes. If a verificationSpec is present for the role, workers then run the spec via its runCommand after all acceptance criteria pass; spec failures are blocking. Lead performs file state verification (git diff + ls) before rejecting completions to avoid stale diagnostic false rejections.
-- Directory overlap serialization: concurrent roles touching overlapping directories get runtime `blockedBy` constraints
-- Retry budget: max 3 attempts per role with reflexion (analyze root cause, incorrect assumptions, alternative approaches before retry) and adaptive model escalation. Fix-worker retries are constrained to modifications only (no new file creation). Reflexion format: `--- Retry N Reflexion ---` separates analysis from failure data
-- Cascading failures: explicit TaskUpdate instructions for cascaded entries (increment blockedBy, remove from worker-pool)
-- Circuit breaker: abort if >50% remaining roles would be skipped (bypassed for plans with 3 or fewer roles)
-- Post-execution auxiliaries (integration verifier with structured report format, memory curator with strict quality persona) after all roles complete. Integration verifier checks verificationSpec SHA256 checksums for tampering and runs all specs, reporting results in structured format.
-- Memory curator: distills reflection.jsonl and role results into .design/memory.jsonl entries, applying five quality gates before storing: transferability (useful in a new session?), category fit (convention/pattern/mistake/approach/failure/procedure), surprise (unexpected findings score higher), deduplication (no redundant entries), and specificity (must contain concrete references). Importance scored 1-10 based on surprise value, not uniform. Session-specific data (test counts, metrics, file lists) is explicitly rejected. Curator shows curation summary to user for transparency
-- Goal review evaluates whether completed work achieves the original goal
-- Self-reflection: both design and execute write structured self-evaluations to `.design/reflection.jsonl` at end of each run. Required fields: `promptFixes` (specific SKILL.md text changes with MAST failure class), `acGradients` (structured AC failure triples for execute), `stepsSkipped`, `instructionsIgnored`, plus `whatWorked`/`whatFailed` for backward compatibility. Memory-curator reads reflections as primary signal. Lamarckian technique: derive fixes by reverse-engineering from desired outcome, not forward failure analysis
-- Reflection prepend: `unresolvedImprovements` from plan-health-summary (sorted failures-first per OPRO ascending-sort) are injected directly into agent prompts at spawn time — not just shown to the lead. Agents receive accumulated lessons from past failures as first-person instructions
-- AC gradient capture: during lead-side verification, failed AC checks are recorded as structured `(check, exitCode, stderr)` triples and included in end-of-run reflection as `acGradients` — the raw signal for deriving concrete prompt fixes
-- Memory feedback: after memory curation, execute calls `memory-feedback` with role outcomes to close the feedback loop — boosts memories correlated with first-attempt success, decays memories correlated with failure, increments usage_count on all
-- End-of-run summary: displays roles completed/failed/skipped, files changed, acceptance criteria results, verification spec results, and memories curated
-
-**`/do:research`** — standalone Task() subagents (not team-based)
-- Protocol guardrail: lead must follow the flow step-by-step (pre-flight, researcher spawning, synthesis, output finalization)
-- Phase announcements: lead announces each major phase (pre-flight, researcher spawning, synthesis, finalization) for user visibility
-- Lifecycle context: runs `plan-health-summary` to display recent reflections at skill start
-- Spawns parallel standalone Task() subagents (codebase-analyst, external-researcher, domain-specialist) — research is inherently exploratory, external research is always valuable. Researchers report findings via artifact files in `.design/`, not via team messaging.
-- Memory injection: lead searches .design/memory.jsonl for relevant past learnings and injects top 3 into researcher prompts with transparency. Memory search failures gracefully fallback to empty results
-- Researcher prompts include behavioral trait instructions (e.g., "prefer empirical evidence", "ground research in concrete findings")
-- Researcher quality calibration: behavioral sharpeners per researcher type (codebase-analyst, external-researcher, domain-specialist), DO/DON'T guardrail table with dual-scan posture (seek failure signals AND working constraints), source hierarchy tiers for external-researcher, invisible curriculum elicitation for codebase-analyst and domain-specialist. Minimum research thresholds: >=3 production post-mortems for failure patterns, >=5 beginner mistakes across all sections, quantitative performance claims required
-- Synthesis: lead organizes findings across 5 knowledge sections (prerequisites, mentalModels, usagePatterns, failurePatterns, productionReadiness), generates recommendations ranked by confidence and effort
-- Synthesis delegation: lead synthesizes by default. For >15 findings across >3 domains, spawns single synthesis Task agent
-- `research-validate` validates schema, outputs validation result
-- `research-summary` formats findings and recommendations for display
-- Output: produces `.design/research.json` (schemaVersion 1) with knowledge sections and recommendations array. Recommendations include confidence, effort, prerequisites, and decision framework (bestFit/wrongFit scenarios) for adoption planning. Sections include concept dependency graphs, evolution paths, and team adoption factors
-- Self-reflection: writes structured self-evaluation to `.design/reflection.jsonl` at end of run using `reflection-add`
-- End-of-run summary: displays recommendation count, knowledge sections completed, research gaps identified, and findings analyzed
-
-**`/do:simplify`** — team name: `do-simplify-{project}-{hash}` (generated by `team-name` command)
-- Protocol guardrail: lead must follow the flow step-by-step (pre-flight, analyst spawning, cascade synthesis, plan output)
-- Phase announcements: lead announces each major phase (pre-flight, analyst spawning, cascade synthesis, finalization) for user visibility
-- Lifecycle context: runs `plan-health-summary` to display recent reflections at skill start
-- TeamCreate health check: verifies team is reachable, retries once on failure
-- Target type detection: code (.py/.js/.ts etc), text (.md/SKILL.md/.yaml etc), or mixed — drives which analyst variant spawns
-- Spawns 2 analysts (pattern-recognizer, complexity-analyst) with target-type-aware behavioral trait instructions. Text targets get token weight, dead rules, and redundancy analysis instead of git churn/cyclomatic complexity. Analyst prompts include INSIGHT: instruction for intermediate findings.
-- Cascade thinking: analysts seek simplification opportunities where one insight eliminates multiple components, reducing cognitive overhead without sacrificing capability
-- Anti-pattern guards from improve merged in: token budget tracking, circular simplification detection, regression safety
-- Memory injection: lead searches .design/memory.jsonl for relevant past learnings and injects top 3 into analyst prompts with transparency. Memory search failures gracefully fallback to empty results
-- Analyst liveness pipeline: completion checklist tracking which analysts have reported, turn-based timeout (3 turns then re-spawn), re-spawn ceiling (max 2 attempts then proceed with available findings)
-- Lead synthesizes cascade opportunities into preservation-focused worker roles: roles that remove/restructure code preserve semantics, not just delete
-- Complexity-proportional auxiliary selection: plans with roleCount ≤ 2 skip challenger and scout (post-execution only remains). Plans with roleCount > 2 run full auxiliary pipeline (challenger pre-execution, integration-verifier + memory-curator post-execution).
-- Output: always produces `.design/plan.json` (schemaVersion 4) for `/do:execute` — simplify never writes source files directly
-- End-of-run summary: displays cascade opportunities identified, simplification roles created, and preservation constraints documented
+Team naming convention: `do-{skill}-{project}-{hash}` (generated by `team-name` command). Research uses standalone Task() subagents instead of a persistent team.
 
 ## Requirements
 
