@@ -8,7 +8,7 @@ argument-hint: ""
 
 Execute `.design/plan.json` with persistent, self-organizing workers. Design produced the plan with role briefs — now workers read the codebase and achieve their goals. **This skill only executes — it does NOT design.**
 
-Before starting the Flow, Read `lead-protocol.md`. It defines the canonical lead protocol (boundaries, team setup, trace emission, liveness, memory injection). Substitute: {skill}=execute, {agents}=workers.
+Before starting the Flow, Read `lead-protocol-core.md` and `lead-protocol-teams.md`. They define the canonical lead protocol (boundaries, team setup, trace emission, liveness, memory injection). Substitute: {skill}=execute, {agents}=workers.
 
 **Progress reporting**: After the initial summary, output brief progress updates for significant events. Keep updates to one line each. Suppress intermediate worker tool calls and chatter.
 
@@ -49,7 +49,7 @@ This protocol is included directly in each worker's spawn prompt below (no separ
 
 ### 2. Pre-Execution Auxiliaries
 
-Check `auxiliaryRoles[]` in plan.json for `type: "pre-execution"` roles. **Run Challenger and Scout concurrently in parallel** — they have no data dependency (both only read plan.json and expert artifacts). **Progress update**: "Running challenger and scout in parallel..."
+Check `auxiliaryRoles[]` in plan.json for `type: "pre-execution"` roles. **Tier check**: If `roleCount <= 2`, skip challenger and scout — proceed to Step 3 (memory-curator still runs post-execution). Otherwise: **Run Challenger and Scout concurrently in parallel** — they have no data dependency (both only read plan.json and expert artifacts). **Progress update**: "Running challenger and scout in parallel..."
 
 Auxiliaries are standalone Task tool calls (no `team_name`) — they don't need team coordination. The Task tool returns their result directly. Do not use `SendMessage` or `TaskOutput` for auxiliaries.
 
@@ -120,11 +120,12 @@ Spawn workers as teammates using the Task tool. Each worker prompt MUST include:
 6. **Constraints**: "Constraints from role brief — read them from plan.json roles[{roleIndex}].constraints."
 7. **Done when**: "Done when — read acceptance criteria from plan.json roles[{roleIndex}].acceptanceCriteria."
 8. **Fallback**: If role has a fallback: "If your primary approach fails: {fallback}"
-9. **Working protocol** (inline):
+9. **Peer handoff** (notifyOnComplete): Inject the list of dependent worker names for this role (from plan.json dependency graph — lead computes this at spawn time). Include: "When you complete, SendMessage directly to these dependent workers BEFORE reporting to the lead: {notifyOnComplete list, e.g., ['worker-b', 'worker-c']}. Message format: 'Dependency {your-role-name} completed. Context: {contextForDependents}. Files changed: {filesChanged}. Proceed when ready.' If notifyOnComplete is empty, skip peer messages and report only to the lead."
+10. **Working protocol** (inline):
 
 **Pre-Completion Verification (MANDATORY)**: Before reporting done, run EVERY acceptance criterion's `check` command as separate shell invocation. For each: (a) run exact shell command from `check` field, (b) capture exit code and output, (c) record pass/fail with evidence. If ANY fails, fix and re-run ALL checks. Don't report completion until every check exits 0. If plan.json verificationSpecs[] has entry for your role, run spec via its runCommand AFTER all acceptance criteria pass. Spec files in `.design/specs/` are IMMUTABLE — fix code, never modify specs. Spec failures are blocking.
 
-**Universal Worker Rules**: Task discovery: Check TaskList for pending unblocked task, claim by setting status to in_progress. | Committing: git add specific files + git commit with conventional message (feat:/fix:/refactor:). Never git add -A. | Completion reporting: SendMessage to lead with JSON: `{"role": "{name}", "achieved": true, "filesChanged": ["..."], "acceptanceCriteria": [{"criterion": "...", "passed": true|false, "evidence": "..."}], "keyDecisions": ["..."], "contextForDependents": "..."}`. | **Acknowledgment**: When the lead sends a fix request or retry instruction, you MUST reply within 1 turn — either acknowledging the fix or reporting why you cannot proceed. Do not go silent after receiving instructions. | Tool boundaries: You may use Read, Grep, Glob, Edit, Write, Bash (for tests/build/git), LSP. Do NOT use WebFetch, WebSearch, MCP tools, or Task (no sub-spawning). | Failure handling: If cannot complete, SendMessage to lead with: role name, what failed, why, what you tried, suggested alternative. If rollback triggers fire, stop immediately and report. | Scope boundaries: Stay within your scope directories. Don't modify files outside scope unless absolutely necessary for integration.
+**Universal Worker Rules**: Task discovery: Check TaskList for pending unblocked task, claim by setting status to in_progress. | Committing: git add specific files + git commit with conventional message (feat:/fix:/refactor:). Never git add -A. | Completion reporting: SendMessage to lead with JSON: `{"role": "{name}", "achieved": true, "filesChanged": ["..."], "acceptanceCriteria": [{"criterion": "...", "passed": true|false, "evidence": "..."}], "keyDecisions": ["..."], "contextForDependents": "..."}`. | **Acknowledgment**: When the lead sends a fix request or retry instruction, you MUST reply within 1 turn — either acknowledging the fix or reporting why you cannot proceed. Do not go silent after receiving instructions. | **INSIGHT**: If you discover a surprising finding during your work (unexpected constraint, contradicts assumption, high-impact decision), send `INSIGHT: {one sentence}` to the lead immediately. Maximum one insight message — choose the most surprising. | Tool boundaries: You may use Read, Grep, Glob, Edit, Write, Bash (for tests/build/git), LSP. Do NOT use WebFetch, WebSearch, MCP tools, or Task (no sub-spawning). | Failure handling: If cannot complete, SendMessage to lead with: role name, what failed, why, what you tried, suggested alternative. If rollback triggers fire, stop immediately and report. | Scope boundaries: Stay within your scope directories. Don't modify files outside scope unless absolutely necessary for integration.
 
 ```
 python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event spawn --skill execute --agent "{worker-name}" || true
