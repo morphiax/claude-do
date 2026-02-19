@@ -1998,6 +1998,15 @@ def cmd_reflection_add(args: argparse.Namespace) -> NoReturn:
     # Read evaluation from stdin (JSON object)
     evaluation = _read_stdin_json("Invalid JSON in stdin (expected evaluation object)")
 
+    # Validate: if whatFailed is non-empty, promptFixes must also be non-empty
+    what_failed = evaluation.get("whatFailed", [])
+    prompt_fixes = evaluation.get("promptFixes", [])
+    if what_failed and not prompt_fixes:
+        error_exit(
+            "whatFailed is non-empty but promptFixes is empty \u2014 reflection too vague. "
+            "For each failure, write idealOutcome + promptFix per Self-Monitoring Step B."
+        )
+
     entry = {
         "id": str(uuid.uuid4()),
         "timestamp": _now_iso(),
@@ -4155,17 +4164,18 @@ class TestPlanCommands(unittest.TestCase):
         """Helper to run a cmd_* function with stdin injection and capture output."""
         captured = io.StringIO()
         old_stdin = sys.stdin
+        exit_code = 0
         with contextlib.redirect_stdout(captured):
             try:
                 sys.stdin = io.StringIO(json.dumps(json_obj))
                 func(args)
-            except SystemExit:
-                pass
+            except SystemExit as e:
+                exit_code = e.code or 0
             finally:
                 sys.stdin = old_stdin
 
         result = json.loads(captured.getvalue())
-        return 0, result
+        return exit_code, result
 
     # Test core algorithm functions
 
@@ -4737,7 +4747,62 @@ class TestPlanCommands(unittest.TestCase):
             outcome="completed",
             goal_achieved=True,
         )
-        _, result = self._run_cmd_with_stdin(cmd_reflection_add, args, reflection_obj)
+        exit_code, result = self._run_cmd_with_stdin(
+            cmd_reflection_add, args, reflection_obj
+        )
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+
+    def test_reflection_add_rejects_empty_prompt_fixes_with_failures(self) -> None:
+        """Test reflection-add rejects whatFailed non-empty but promptFixes empty."""
+        reflection_file = os.path.join(self.tmp_dir.name, "refl_reject.jsonl")
+
+        reflection_obj = {
+            "whatFailed": ["something went wrong"],
+            "promptFixes": [],
+        }
+
+        args = argparse.Namespace(
+            reflection_path=reflection_file,
+            skill="design",
+            goal="Test goal",
+            outcome="completed",
+            goal_achieved=True,
+        )
+        exit_code, result = self._run_cmd_with_stdin(
+            cmd_reflection_add, args, reflection_obj
+        )
+        self.assertEqual(exit_code, 1)
+        self.assertFalse(result["ok"])
+
+    def test_reflection_add_accepts_what_failed_with_prompt_fixes(self) -> None:
+        """Test reflection-add accepts whatFailed when promptFixes is also non-empty."""
+        reflection_file = os.path.join(self.tmp_dir.name, "refl_accept.jsonl")
+
+        reflection_obj = {
+            "whatFailed": ["something went wrong"],
+            "promptFixes": [
+                {
+                    "section": "Step 3",
+                    "problem": "missed step",
+                    "idealOutcome": "step executed",
+                    "fix": "add explicit directive",
+                    "failureClass": "spec-disobey",
+                }
+            ],
+        }
+
+        args = argparse.Namespace(
+            reflection_path=reflection_file,
+            skill="design",
+            goal="Test goal",
+            outcome="completed",
+            goal_achieved=True,
+        )
+        exit_code, result = self._run_cmd_with_stdin(
+            cmd_reflection_add, args, reflection_obj
+        )
+        self.assertEqual(exit_code, 0)
         self.assertTrue(result["ok"])
 
     def test_reflection_search_with_skill_filter(self) -> None:
