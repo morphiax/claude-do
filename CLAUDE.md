@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-`claude-do` is a Claude Code plugin providing five skills: `/do:design` (team-based goal decomposition into `.design/plan.json`), `/do:execute` (dependency-graph execution with worker teammates), `/do:research` (comprehensive knowledge research producing actionable research.json with recommendations), `/do:simplify` (cascade simplification for code and text — one insight eliminates multiple components — producing plan.json with preservation-focused worker roles), and `/do:reflect` (evidence-based improvement from execution reflections). It leverages Claude Code's native Agent Teams and Tasks features for multi-agent collaboration. All skills use the main conversation as team lead with teammates for analytical/execution work. Skills are implemented as SKILL.md prompts augmented with python3 helper scripts for deterministic operations.
+`claude-do` is a Claude Code plugin providing four skills: `/do:design` (team-based goal decomposition into `.design/plan.json`), `/do:execute` (dependency-graph execution with worker teammates), `/do:research` (comprehensive knowledge research producing actionable research.json with recommendations), and `/do:simplify` (cascade simplification for code and text — one insight eliminates multiple components — producing plan.json with preservation-focused worker roles). All skills self-monitor their execution by recording structured observations to `.design/reflection.jsonl` via the Self-Monitoring protocol documented in the shared lead protocol. It leverages Claude Code's native Agent Teams and Tasks features for multi-agent collaboration. All skills use the main conversation as team lead with teammates for analytical/execution work. Skills are implemented as SKILL.md prompts augmented with python3 helper scripts for deterministic operations.
 
 ## Testing
 
@@ -19,7 +19,7 @@ claude --plugin-dir ~/.claude/plugins/marketplaces/do
 /do:execute
 ```
 
-All five skills must be tested end-to-end. Changes to design, execute, research, simplify, or reflect may affect the others since they share the `.design/plan.json` contract (or `.design/research.json` for research) and persistent files (`memory.jsonl`, `reflection.jsonl`).
+All four skills must be tested end-to-end. Changes to design, execute, research, or simplify may affect the others since they share the `.design/plan.json` contract (or `.design/research.json` for research) and persistent files (`memory.jsonl`, `reflection.jsonl`).
 
 ## Architecture
 
@@ -41,8 +41,6 @@ All five skills must be tested end-to-end. Changes to design, execute, research,
 - `skills/research/SKILL.md` — `/do:research` skill definition
 - `skills/research/scripts/plan.py` — Symlink → `shared/plan.py`
 - `skills/research/lead-protocol-core.md` — Symlink → `shared/lead-protocol-core.md`
-- `skills/reflect/SKILL.md` — `/do:reflect` skill definition
-- `skills/reflect/scripts/plan.py` — Symlink → `shared/plan.py`
 - `skills/simplify/SKILL.md` — `/do:simplify` skill definition
 - `skills/simplify/scripts/plan.py` — Symlink → `shared/plan.py`
 - `skills/simplify/lead-protocol-core.md` — Symlink → `shared/lead-protocol-core.md`
@@ -54,7 +52,7 @@ The SKILL.md files are imperative prompts that Claude interprets at runtime. Det
 
 Each SKILL.md has YAML frontmatter (`name`, `description`, `argument-hint`) that must be preserved.
 
-**Shared Lead Protocol**: Design, execute, research, and simplify share common orchestration patterns through two symlinked files. `shared/lead-protocol-core.md` (consumed by all team-based skills) covers boundaries, no-polling guarantees, trace emission, memory injection, phase announcements, and INSIGHT handling. `shared/lead-protocol-teams.md` (consumed by design/execute/simplify only) covers TeamCreate enforcement, liveness pipeline patterns, and team-member coordination. Research uses standalone Task() subagents and consumes only the core protocol. Reflect is fully inline (no team, no agent spawning) and does not consume the shared protocol.
+**Shared Lead Protocol**: Design, execute, research, and simplify share common orchestration patterns through two symlinked files. `shared/lead-protocol-core.md` (consumed by all team-based skills) covers boundaries, no-polling guarantees, trace emission, memory injection, phase announcements, self-monitoring protocol, and INSIGHT handling. `shared/lead-protocol-teams.md` (consumed by design/execute/simplify only) covers TeamCreate enforcement, liveness pipeline patterns, and team-member coordination. Research uses standalone Task() subagents and consumes only the core protocol.
 
 ### Scripts
 
@@ -74,7 +72,7 @@ Scripts use python3 stdlib only (no dependencies), support Python 3.8+, and foll
 
 Skills communicate through structured JSON files in `.design/` (gitignored). Two primary contracts:
 
-**`.design/plan.json` (schemaVersion 4)** — used by design, execute, simplify, and reflect for role-based execution:
+**`.design/plan.json` (schemaVersion 4)** — used by design, execute, and simplify for role-based execution:
 
 Key points:
 
@@ -180,7 +178,7 @@ Run `python3 $PLAN_CLI finalize .design/plan.json` to validate structure, comput
 
 ### Execution Model
 
-All five skills use the **main conversation as team lead** with Agent Teams (or Task for single-agent skills). Runtime behavior is defined in each SKILL.md file — this section covers structural facts only.
+All four skills use the **main conversation as team lead** with Agent Teams (or Task for single-agent skills). Runtime behavior is defined in each SKILL.md file — this section covers structural facts only.
 
 - **Lead** (main conversation): orchestration only via `TeamCreate`, `SendMessage`, `TaskCreate`/`TaskUpdate`/`TaskList`, `Bash` (scripts, git, verification), `AskUserQuestion`. Never reads project source files.
 - **Teammates**: specialist agents spawned into the team. Discover lead name via `~/.claude/teams/{team-name}/config.json`.
@@ -221,7 +219,7 @@ All five skills use the **main conversation as team lead** with Agent Teams (or 
 - Cascading failures: explicit TaskUpdate instructions for cascaded entries (increment blockedBy, remove from worker-pool)
 - Circuit breaker: abort if >50% remaining roles would be skipped (bypassed for plans with 3 or fewer roles)
 - Post-execution auxiliaries (integration verifier with structured report format, memory curator with strict quality persona) after all roles complete. Integration verifier checks verificationSpec SHA256 checksums for tampering and runs all specs, reporting results in structured format.
-- Memory curator: distills reflection.jsonl and role results into .design/memory.jsonl entries, applying five quality gates before storing: transferability (useful in a new session?), category fit (convention/pattern/mistake/approach/failure/procedure), surprise (unexpected findings score higher), deduplication (no redundant entries), and specificity (must contain concrete references). Importance scored 1-10 based on surprise value, not uniform. Session-specific data (test counts, metrics, file lists) is explicitly rejected. When goal originated from `/do:reflect`, explicitly records which doNextTime items were addressed and how using category "procedure". Curator shows curation summary to user for transparency
+- Memory curator: distills reflection.jsonl and role results into .design/memory.jsonl entries, applying five quality gates before storing: transferability (useful in a new session?), category fit (convention/pattern/mistake/approach/failure/procedure), surprise (unexpected findings score higher), deduplication (no redundant entries), and specificity (must contain concrete references). Importance scored 1-10 based on surprise value, not uniform. Session-specific data (test counts, metrics, file lists) is explicitly rejected. Curator shows curation summary to user for transparency
 - Goal review evaluates whether completed work achieves the original goal
 - Self-reflection: both design and execute write structured self-evaluations to `.design/reflection.jsonl` at end of each run (episodic memory). Memory-curator reads reflections as primary signal
 - End-of-run summary: displays roles completed/failed/skipped, files changed, acceptance criteria results, verification spec results, and memories curated
@@ -241,21 +239,6 @@ All five skills use the **main conversation as team lead** with Agent Teams (or 
 - Output: produces `.design/research.json` (schemaVersion 1) with knowledge sections and recommendations array. Recommendations include confidence, effort, prerequisites, and decision framework (bestFit/wrongFit scenarios) for adoption planning. Sections include concept dependency graphs, evolution paths, and team adoption factors
 - Self-reflection: writes structured self-evaluation to `.design/reflection.jsonl` at end of run using `reflection-add`
 - End-of-run summary: displays recommendation count, knowledge sections completed, research gaps identified, and findings analyzed
-
-**`/do:reflect`** — no team (direct Bash-based analysis)
-- Phase announcements: lead announces each major phase (pre-flight, reflection analysis, hypothesis generation, user selection) for user visibility
-- Lifecycle context: runs `plan-health-summary` to display recent reflections at skill start
-- Evidence-based improvement using execution reflections (`.design/reflection.jsonl`) as optimization signal
-- Requires minimum 2 reflection entries to identify patterns (configurable via `--min-runs`). Uses `reflection-search` command to filter reflections by skill
-- Direct Bash-based analysis (no Task agent): lead gathers data via plan.py commands (reflection-search, memory-search), computes metrics via python3, formulates hypotheses directly, and writes artifact — eliminates hallucination risk from unreliable Task agents
-- Temporal resolution tracking: recurring failures classified as active (appears in recent 3 runs), likely_resolved (absent from recent runs), or confirmed_resolved (memory.jsonl has resolution record). Non-active patterns skipped during hypothesis generation
-- Memory injection: lead searches .design/memory.jsonl for relevant past learnings with transparency. Memory search failures gracefully fallback to empty results
-- Hypotheses have confidence levels: high (>=3 reflections), medium (2), low (1 strong signal)
-- User selects which improvements to include in plan
-- Uses `archive` command (via plan.py) instead of raw shell for consistency with other skills
-- Self-reflection at end of run (writes to reflection.jsonl like other skills) using `reflection-add` with validation
-- Output: always produces `.design/plan.json` (schemaVersion 4) for `/do:execute` — reflect never writes source files directly
-- End-of-run summary: displays reflection count analyzed, hypotheses generated by confidence level, and user-selected improvements
 
 **`/do:simplify`** — team name: `do-simplify-{project}-{hash}` (generated by `team-name` command)
 - Protocol guardrail: lead must follow the flow step-by-step (pre-flight, analyst spawning, cascade synthesis, plan output)

@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.23.0] - 2026-02-19
+
+### Removed
+
+- **`/do:reflect` skill**: Removed entire skill directory and command entry. The separate reflection analysis skill is no longer needed since all skills now self-monitor continuously via the Self-Monitoring protocol.
+- `/do:reflect` from plugin.json description
+- `/do:reflect` execution model section from CLAUDE.md
+- `/do:reflect` example from README.md usage block
+- `skills/reflect/SKILL.md` — skill file
+- `skills/reflect/scripts/plan.py` — symlink
+
+### Added
+
+- **Self-Monitoring protocol** in `shared/lead-protocol-core.md`: Lightweight observation recording mechanism. All four surviving skills (design, execute, research, simplify) now record structured observations at the moment they occur — no separate reflection analysis step needed. Observations are appended to `.design/reflection.jsonl` alongside end-of-run reflections.
+- Self-monitoring references added to design, execute, research, and simplify SKILL.md files to emit observations at key decision points (AC quality, challenger outcome, verifier outcome, worker violations in execute; similar expansion points in other skills as needed).
+
 ## [2.22.0] - 2026-02-19
 
 ### Changed

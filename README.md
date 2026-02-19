@@ -3,7 +3,7 @@
 > Multi-agent planning with structured debate, self-verifying execution, and cross-session memory
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Version](https://img.shields.io/badge/version-2.22.0-green.svg)
+![Version](https://img.shields.io/badge/version-2.23.0-green.svg)
 ![Claude Code](https://img.shields.io/badge/Claude%20Code-2.1.32%2B-orange.svg)
 
 ## What's Novel
@@ -20,11 +20,11 @@
 
 **Scout auxiliaries** — Pre-execution agents read the actual codebase to verify expert assumptions match reality. High-impact discrepancies are injected as role constraints before worker spawning.
 
-**Execution reflections** — Skills self-evaluate after every run, storing structured assessments in episodic memory. `/do:reflect` analyzes these to identify recurring failures and generate evidence-based improvements (inspired by Reflexion and GEPA research).
+**Self-monitoring** — All skills self-evaluate after every run, recording structured observations to `.design/reflection.jsonl` for cross-session pattern detection and improvement tracking.
 
 **Acceptance criteria validation** — Design-time syntax validation catches broken `python3 -c` checks (including f-string brace nesting errors) before execution. Shift-left anti-pattern warnings in expert prompts prevent grep-only criteria from entering plans. Lead-side verification re-runs every criterion before marking roles complete (trust-but-verify). Surface-only checks (grep, file-existence) are flagged as anti-patterns.
 
-**Execution observability via trace.jsonl** — Append-only event log capturing agent lifecycle events (spawn, completion, failure, respawn) with timestamps and session grouping. `trace-search` and `trace-summary` commands enable post-execution analysis for `/do:reflect` and debugging.
+**Execution observability via trace.jsonl** — Append-only event log capturing agent lifecycle events (spawn, completion, failure, respawn) with timestamps and session grouping. `trace-search` and `trace-summary` commands enable post-execution analysis and debugging.
 
 **Automated self-test suite** — `plan.py self-test` exercises all 35 commands against synthetic fixtures in a temp directory, enabling CI-style validation of the helper script.
 
@@ -48,10 +48,6 @@
 # Simplify code or text using cascade thinking
 /do:simplify
 /do:simplify skills/design/SKILL.md
-
-# Improve skills based on real execution outcomes
-/do:reflect
-/do:execute
 ```
 
 ## How It Works
@@ -63,8 +59,6 @@
 **`/do:execute`** spawns persistent worker agents per role. Pre-execution auxiliaries (challenger, scout) run in parallel to identify issues early. AC pre-validation runs all acceptance criteria checks before worker spawning to catch broken criteria. Workers use CoVe-style verification, apply reflexion on failures, and report structured completion reports (role, achieved, filesChanged, acceptanceCriteria results). Workers must acknowledge fix requests within 1 turn. Adaptive model escalation on retry (haiku→sonnet→opus). Worker-to-worker handoff injects completed role context into dependent workers. Liveness pipeline detects worker silence with 3-turn timeout and re-spawn (simplified from 5+7). Safety rails: retry budgets, cascading failures, circuit breaker, overlap serialization. Memory curator distills outcomes (including failures) into importance-rated learnings with 6 categories (convention/pattern/mistake/approach/failure/procedure). Dynamic importance tracking via boost/decay. Progress reporting for significant events. Curation transparency. End-of-run summary with detailed metrics.
 
 **`/do:simplify`** analyzes code or text for cascade simplification opportunities — where one insight eliminates multiple components at once, reducing cognitive overhead without sacrificing capability. Target type detection (code/text/mixed) drives analyst variant selection: code targets get git churn × cyclomatic complexity analysis, text targets get token weight, dead rules, and redundancy analysis. Spawns pattern-recognizer and complexity-analyst. Pattern-recognizer's primary lens is "Everything is a special case of..." — seeking paradigm-level cascades (not just component unification) with worked examples spanning component, system, and paradigm levels. Anti-pattern guards prevent token bloat, circular simplification, and regressions. Lead synthesizes findings into plan.json with preservation-focused worker roles for `/do:execute`. Memory injection with transparency. 3-turn liveness timeout.
-
-**`/do:reflect`** uses execution outcomes (from `.design/reflection.jsonl`) to identify what's actually working and what isn't. Direct Bash-based analysis (no Task agent) gathers data via plan.py commands, computes metrics, and formulates hypotheses — eliminating hallucination risk. Temporal resolution tracking classifies patterns as active/likely_resolved/confirmed_resolved using a 3-run recency window and memory.jsonl cross-referencing, preventing duplicate improvement work on already-fixed issues. Hypotheses are grounded in real evidence with confidence levels. Requires >=2 reflections to identify patterns. Complements `/do:simplify` (structural analysis) with dynamic functional optimization. Phase announcements and end-of-run summary.
 
 ## Requirements
 
