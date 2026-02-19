@@ -10,7 +10,7 @@ Analyze code or text for simplification opportunities using cascade thinking —
 
 Works on any target: application code, scripts, SKILL.md prompts, configuration files, documentation. The cascade framework applies equally to code duplication and prose redundancy.
 
-Before starting the Flow, Read `lead-protocol.md`. It defines the canonical lead protocol (boundaries, team setup, trace emission, liveness, memory injection). Substitute: {skill}=simplify, {agents}=analysts.
+Before starting the Flow, Read `lead-protocol-core.md` and `lead-protocol-teams.md`. They define the canonical lead protocol (boundaries, team setup, trace emission, liveness, memory injection). Substitute: {skill}=simplify, {agents}=analysts.
 
 **CRITICAL BOUNDARY: /do:simplify analyzes and plans — it does NOT execute simplifications. Output is `.design/plan.json` for `/do:execute`. This skill is NOT `/do:design` (which decomposes arbitrary goals).**
 
@@ -57,7 +57,7 @@ Before starting the Flow, Read `lead-protocol.md`. It defines the canonical lead
    - Copy target file(s) to `.design/skill-snapshot.md` (or `.design/text-snapshot/`) via Bash for baseline comparison.
    - **Circular simplification detection**: Check `.design/history/` for recent simplify runs targeting the same files: `ls .design/history/*/expert-*.json 2>/dev/null | tail -5`. If found, warn user: "Previous simplify runs detected. Review history to avoid circular changes."
 6. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "simplify {target}" --keywords "simplification,cascade,preservation"`. If `ok: false` or no memories, proceed without injection. Otherwise inject top 3-5 into analyst prompts. **Show user**: "Memory: injecting {count} past learnings — {keyword summaries}."
-7. **Announce to user**: "Simplify ({target type}): analyzing {scope description}. Spawning {N} analysts ({names}). Auxiliaries: challenger, scout, integration-verifier, memory-curator."
+7. **Announce to user**: "Simplify ({target type}): analyzing {scope description}. Spawning {N} analysts ({names}). Auxiliaries: {list — challenger+scout+integration-verifier+memory-curator for Standard+, memory-curator+integration-verifier only for Trivial tier (roleCount <= 2)}."
 
 ### 3. Spawn Analysts
 
@@ -71,6 +71,7 @@ Create the team and spawn analysts in parallel.
    - Use Task with `team_name: $TEAM_NAME`, `name: "{analyst-name}"`, and `model: "sonnet"`.
    - Instruct: "Save your complete findings to `.design/expert-{name}.json` as structured JSON."
    - Instruct: "Then SendMessage to the lead with a summary."
+   - Instruct: "If you discover a surprising finding, SendMessage to lead with prefix INSIGHT: followed by one sentence. Maximum one insight message — choose the most surprising."
 
 **Analyst Prompts**:
 
@@ -255,7 +256,7 @@ If ALL findings are `organizationalContextNeeded: yes` with no actionable simpli
    - **Regression safety**: No capability may be lost. For text targets: no behavioral instruction may be removed without replacement. If a change tightens one area but risks losing nuance in another, note the trade-off and ask user to approve.
 8. **Validate checks**: `python3 $PLAN_CLI validate-checks .design/plan.json`. If errors found, fix obvious syntax errors. Non-blocking — proceed even if some checks remain unfixable, but flag to user.
 9. If simplification requires updating CLAUDE.md or README.md to stay in sync (per pre-commit checklist), add a `docs-updater` role.
-10. Add `auxiliaryRoles[]`:
+10. Add `auxiliaryRoles[]`: **Tier check**: If `roleCount <= 2`, skip challenger and scout — proceed with memory-curator only (plus integration-verifier post-execution). Otherwise include all auxiliaries:
 
 ```json
 [

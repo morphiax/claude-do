@@ -8,7 +8,7 @@ argument-hint: "<goal description>"
 
 Decompose a goal into `.design/plan.json` with role briefs — goal-directed scopes for specialist workers. **This skill only designs — it does NOT execute.**
 
-Before starting the Flow, Read `lead-protocol.md`. It defines the canonical lead protocol (boundaries, team setup, trace emission, liveness, memory injection). Substitute: {skill}=design, {agents}=experts.
+Before starting the Flow, Read `lead-protocol-core.md` and `lead-protocol-teams.md`. They define the canonical lead protocol (boundaries, team setup, trace emission, liveness, memory injection). Substitute: {skill}=design, {agents}=experts.
 
 ---
 
@@ -48,7 +48,7 @@ The lead directly assesses the goal to determine needed perspectives.
 | Complex (cross-cutting concerns) | 4-6 |
 | High-stakes (production, security, data) | 3-8 |
 
-4. Select auxiliary roles. Challenger and integration-verifier always run. Scout runs when the goal touches code (implementation, refactoring, bug fixes — not pure docs/research/config).
+4. Select auxiliary roles. If complexity tier is Trivial (1-2 roles): only memory-curator runs. Otherwise: challenger and integration-verifier always run; scout runs when the goal touches code (implementation, refactoring, bug fixes — not pure docs/research/config).
 5. **Announce to user**: Display planned team composition, complexity tier, and auxiliaries: "Design: {complexity tier}, spawning {N} experts ({names}). Auxiliaries: {list}."
 
 **Expert Selection**
@@ -93,6 +93,7 @@ Create the team and spawn experts in parallel.
    - Every expert prompt MUST end with: "In your findings JSON, include a `verificationProperties` section: an array of properties that should hold regardless of implementation (behavioral invariants, boundary conditions, cross-role contracts). Format: `[{\"property\": \"...\", \"category\": \"invariant|boundary|integration\", \"testableVia\": \"how to test this with concrete commands/endpoints\"}]`. Provide concrete, externally observable properties that can be tested without reading source code. When suggesting testableVia commands, avoid anti-patterns: grep-only checks (verifies text exists, not that feature works), `test -f` as sole check (file exists but may contain errors), `wc -l` counts (size not correctness), `|| echo` or `|| true` fallbacks (always exits 0), pipe chains without exit-code handling (may mask failures)."
    - Instruct: "Save your complete findings to `.design/expert-{name}.json` as structured JSON."
    - Instruct: "Then SendMessage to the lead with a summary."
+   - Instruct: "If you discover a surprising finding, SendMessage to lead with prefix INSIGHT: followed by one sentence. Maximum one insight message — choose the most surprising."
 
    Expert artifacts flow directly to execution workers — they are structured JSON with sections that can be referenced selectively.
 6. **Expert liveness pipeline**: Apply the Liveness Pipeline from `lead-protocol.md`. Track completion per expert: (a) SendMessage received AND (b) artifact file exists (`ls .design/expert-{name}.json`). Show user status: "Expert progress: {name} done ({M}/{N} complete)."
@@ -270,7 +271,7 @@ Additional requirements for all cases: expert artifacts contain verificationProp
 
 ### 5. Auxiliary Roles
 
-Add auxiliary roles to `auxiliaryRoles[]` in plan.json. Challenger and integration-verifier are always included. Scout is included when the goal touches code. These are meta-agents that improve quality without directly implementing features.
+Add auxiliary roles to `auxiliaryRoles[]` in plan.json. For Trivial tier (1-2 roles): only memory-curator. For Standard and above: challenger and integration-verifier are always included; scout is included when the goal touches code. These are meta-agents that improve quality without directly implementing features.
 
 ```json
 [
@@ -355,7 +356,7 @@ Run /do:execute to begin.
 
 The authoritative interface between design and execute. Execute reads this file; design produces it.
 
-**Top-level fields**: schemaVersion (4), goal, context {stack, conventions, testCommand, buildCommand, lsp}, expertArtifacts [{name, path, summary}], interfaceContracts (path to .design/interfaces.json, if produced), designDecisions [], verificationSpecs [] (optional), roles[], auxiliaryRoles[], progress {completedRoles: []}
+**Top-level fields**: schemaVersion (4), goal, context {stack, conventions, testCommand, buildCommand, lsp, complexityTier (trivial|standard|complex|high-stakes)}, expertArtifacts [{name, path, summary}], interfaceContracts (path to .design/interfaces.json, if produced), designDecisions [], verificationSpecs [] (optional), roles[], auxiliaryRoles[], progress {completedRoles: []}
 
 **designDecisions fields**: conflict, experts (array), decision, reasoning. Documents lead's resolution of expert disagreements.
 
