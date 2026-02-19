@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.21.0] - 2026-02-19
+
+### Added
+
+- Shared lead protocol extracted into `skills/shared/lead-protocol.md` as canonical source of truth for 4 team-based skills (design, execute, research, simplify). Reduces drift and improves maintainability.
+- Each team-based skill now reads `skills/shared/lead-protocol.md` at startup via relative symlinks, substituting skill-specific values (agent types: experts/researchers/analysts/workers).
+
+### Fixed
+
+- **Bug 1**: TEAM_NAME parsing now uses proper JSON extraction (`python3 -c` with json.load) instead of shell field accessor. Fixes design and execute skills.
+- **Bug 2**: Research liveness pipeline table restored to 4 rows (was missing "Turn timeout" ping text and "Never write artifacts yourself" row).
+- **Bug 3**: Design liveness timeout standardized to 3 turns (was incorrectly 2 turns; execute/research/simplify all use 3).
+- **Bug 4**: Trace emission `--payload` option now documented in research SKILL.md (was missing payload mention).
+
+### Changed
+
+- Memory injection standardized to "top 3-5" across all skills (execute was inconsistently using "top 2-3").
+- Design, execute, research, simplify SKILL.md files refactored to reference shared protocol instead of inline duplication.
+- Reflect SKILL.md left unchanged (fully inline, no team, does not consume shared protocol).
+
 ## [2.20.0] - 2026-02-19
 
 ### Changed

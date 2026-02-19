@@ -28,22 +28,29 @@ All five skills must be tested end-to-end. Changes to design, execute, research,
 - `.claude-plugin/plugin.json` — Plugin manifest (name, version, metadata)
 - `.claude-plugin/marketplace.json` — Marketplace distribution config
 - `scripts/plan.py` — Shared helper script (35 commands: 17 query, 6 mutation, 9 validation, 1 build, 2 test)
+- `skills/shared/lead-protocol.md` — Canonical lead protocol (boundaries, team setup, trace emission, liveness, memory injection). Consumed by design/execute/research/simplify via symlinks. Reflect is fully inline (no team).
 - `skills/design/SKILL.md` — `/do:design` skill definition
 - `skills/design/scripts/plan.py` — Symlink → `../../../scripts/plan.py`
+- `skills/design/shared/lead-protocol.md` — Symlink → `../../shared/lead-protocol.md`
 - `skills/execute/SKILL.md` — `/do:execute` skill definition
 - `skills/execute/scripts/plan.py` — Symlink → `../../../scripts/plan.py`
+- `skills/execute/shared/lead-protocol.md` — Symlink → `../../shared/lead-protocol.md`
 - `skills/research/SKILL.md` — `/do:research` skill definition
 - `skills/research/scripts/plan.py` — Symlink → `../../../scripts/plan.py`
+- `skills/research/shared/lead-protocol.md` — Symlink → `../../shared/lead-protocol.md`
 - `skills/reflect/SKILL.md` — `/do:reflect` skill definition
 - `skills/reflect/scripts/plan.py` — Symlink → `../../../scripts/plan.py`
 - `skills/simplify/SKILL.md` — `/do:simplify` skill definition
 - `skills/simplify/scripts/plan.py` — Symlink → `../../../scripts/plan.py`
+- `skills/simplify/shared/lead-protocol.md` — Symlink → `../../shared/lead-protocol.md`
 
 ### Skill Files Are the Implementation
 
 The SKILL.md files are imperative prompts that Claude interprets at runtime. Deterministic operations (validation, dependency computation, plan manipulation) are delegated to per-skill python3 helper scripts. Each skill resolves its local `scripts/plan.py` path at runtime and invokes subcommands via `python3 $PLAN_CLI <command> [args]`. All script output follows JSON convention (`{ok: true/false, ...}`).
 
 Each SKILL.md has YAML frontmatter (`name`, `description`, `argument-hint`) that must be preserved.
+
+**Shared Lead Protocol**: Design, execute, research, and simplify share common orchestration patterns (team boundaries, liveness tracking, memory injection, trace emission). These patterns are extracted into `skills/shared/lead-protocol.md` as the canonical source. Each of these four skills reads it at startup (via symlink) and substitutes skill-specific values (agent types, keywords). Reflect is fully inline (no team, no agent spawning) and does not consume the shared protocol.
 
 ### Scripts
 
