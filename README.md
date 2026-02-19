@@ -28,7 +28,7 @@
 
 **Automated self-test suite** — `plan.py self-test` exercises all 35 commands against synthetic fixtures in a temp directory, enabling CI-style validation of the helper script.
 
-**Shared lead protocol** — Design, execute, research, and simplify skills share a canonical lead protocol defined in `skills/shared/lead-protocol.md` (consumed via symlinks), eliminating protocol drift and ensuring consistent orchestration across all skills.
+**Shared lead protocol** — Design, execute, research, and simplify skills share a canonical lead protocol defined in `shared/lead-protocol.md`, eliminating protocol drift and ensuring consistent orchestration across all skills.
 
 **Comprehensive knowledge research** — `/do:research` gathers and structures knowledge across 5 sections (prerequisites, mental models, usage patterns, failure patterns, production readiness). Spawns researchers to map findings across codebase, external sources, and domain expertise. Minimum research thresholds enforce quality floors (>=3 post-mortems, >=5 beginner mistakes, quantitative performance claims). Concept dependency graphs order learning paths. Evolution paths capture pattern progression at scale. Team adoption factors assess learning timeline, documentation quality, and community support. Decision framework (bestFit/wrongFit scenarios) makes recommendations actionable. Design handoff preserves concrete building blocks for `/do:design`.
 

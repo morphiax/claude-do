@@ -27,22 +27,22 @@ All five skills must be tested end-to-end. Changes to design, execute, research,
 
 - `.claude-plugin/plugin.json` — Plugin manifest (name, version, metadata)
 - `.claude-plugin/marketplace.json` — Marketplace distribution config
-- `scripts/plan.py` — Shared helper script (35 commands: 17 query, 6 mutation, 9 validation, 1 build, 2 test)
-- `skills/shared/lead-protocol.md` — Canonical lead protocol (boundaries, team setup, trace emission, liveness, memory injection). Consumed by design/execute/research/simplify via symlinks. Reflect is fully inline (no team).
+- `shared/plan.py` — Shared helper script (35 commands: 17 query, 6 mutation, 9 validation, 1 build, 2 test)
+- `shared/lead-protocol.md` — Canonical lead protocol (boundaries, team setup, trace emission, liveness, memory injection). Consumed by design/execute/research/simplify at startup. Reflect is fully inline (no team).
 - `skills/design/SKILL.md` — `/do:design` skill definition
-- `skills/design/scripts/plan.py` — Symlink → `../../../scripts/plan.py`
-- `skills/design/shared/lead-protocol.md` — Symlink → `../../shared/lead-protocol.md`
+- `skills/design/scripts/plan.py` — Symlink → `shared/plan.py`
+- `skills/design/lead-protocol.md` — Symlink → `shared/lead-protocol.md`
 - `skills/execute/SKILL.md` — `/do:execute` skill definition
-- `skills/execute/scripts/plan.py` — Symlink → `../../../scripts/plan.py`
-- `skills/execute/shared/lead-protocol.md` — Symlink → `../../shared/lead-protocol.md`
+- `skills/execute/scripts/plan.py` — Symlink → `shared/plan.py`
+- `skills/execute/lead-protocol.md` — Symlink → `shared/lead-protocol.md`
 - `skills/research/SKILL.md` — `/do:research` skill definition
-- `skills/research/scripts/plan.py` — Symlink → `../../../scripts/plan.py`
-- `skills/research/shared/lead-protocol.md` — Symlink → `../../shared/lead-protocol.md`
+- `skills/research/scripts/plan.py` — Symlink → `shared/plan.py`
+- `skills/research/lead-protocol.md` — Symlink → `shared/lead-protocol.md`
 - `skills/reflect/SKILL.md` — `/do:reflect` skill definition
-- `skills/reflect/scripts/plan.py` — Symlink → `../../../scripts/plan.py`
+- `skills/reflect/scripts/plan.py` — Symlink → `shared/plan.py`
 - `skills/simplify/SKILL.md` — `/do:simplify` skill definition
-- `skills/simplify/scripts/plan.py` — Symlink → `../../../scripts/plan.py`
-- `skills/simplify/shared/lead-protocol.md` — Symlink → `../../shared/lead-protocol.md`
+- `skills/simplify/scripts/plan.py` — Symlink → `shared/plan.py`
+- `skills/simplify/lead-protocol.md` — Symlink → `shared/lead-protocol.md`
 
 ### Skill Files Are the Implementation
 
@@ -50,11 +50,11 @@ The SKILL.md files are imperative prompts that Claude interprets at runtime. Det
 
 Each SKILL.md has YAML frontmatter (`name`, `description`, `argument-hint`) that must be preserved.
 
-**Shared Lead Protocol**: Design, execute, research, and simplify share common orchestration patterns (team boundaries, liveness tracking, memory injection, trace emission). These patterns are extracted into `skills/shared/lead-protocol.md` as the canonical source. Each of these four skills reads it at startup (via symlink) and substitutes skill-specific values (agent types, keywords). Reflect is fully inline (no team, no agent spawning) and does not consume the shared protocol.
+**Shared Lead Protocol**: Design, execute, research, and simplify share common orchestration patterns (team boundaries, liveness tracking, memory injection, trace emission). These patterns live in `shared/lead-protocol.md` as the canonical source, symlinked into each skill directory. Each of these four skills reads `lead-protocol.md` (the local symlink) at startup and substitutes skill-specific values (agent types, keywords). Reflect is fully inline (no team, no agent spawning) and does not consume the shared protocol.
 
 ### Scripts
 
-A single `scripts/plan.py` at the repo root provides all deterministic operations. Each skill symlinks to it from `skills/{name}/scripts/plan.py` so SKILL.md can resolve a skill-local path.
+A single `shared/plan.py` at the repo root provides all deterministic operations. Each skill symlinks to it from `skills/{name}/scripts/plan.py` so SKILL.md can resolve a skill-local path.
 
 - **Query** (17 commands): team-name (generate project-unique team name from skill + cwd), status, summary, overlap-matrix, tasklist-data, worker-pool, retry-candidates, circuit-breaker, memory-search (keyword-based search in .design/memory.jsonl with recency weighting and importance scoring), reflection-search (filter past reflections by skill, sorted by recency), memory-review (list all memories in human-readable format with filtering), health-check (validate .design/ integrity), plan-diff (compare two plan.json files), plan-health-summary (lifecycle context from reflections and plan status), sync-check (detect drift between shared protocol sections across SKILL.md files using structural fingerprints), trace-search (query trace events by session, skill, event type, or agent), trace-summary (format trace data for display with aggregate statistics)
 - **Mutation** (6 commands): update-status (atomically modify plan.json via temp file + rename with state machine validation), memory-add (append JSONL entry with UUID, importance 1-10, and dynamic boost/decay), reflection-add (append structured self-evaluation to reflection.jsonl, evaluation JSON via stdin), resume-reset (resets in_progress roles to pending, increments attempts), archive (archives stale .design/ artifacts to .design/history/{timestamp}/), trace-add (append agent lifecycle events to trace.jsonl with automatic ID/timestamp generation)

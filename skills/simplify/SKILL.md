@@ -10,7 +10,7 @@ Analyze code or text for simplification opportunities using cascade thinking —
 
 Works on any target: application code, scripts, SKILL.md prompts, configuration files, documentation. The cascade framework applies equally to code duplication and prose redundancy.
 
-Before starting the Flow, Read `skills/shared/lead-protocol.md`. It defines the canonical lead protocol (boundaries, team setup, trace emission, liveness, memory injection). Substitute: {skill}=simplify, {agents}=analysts.
+Before starting the Flow, Read `lead-protocol.md`. It defines the canonical lead protocol (boundaries, team setup, trace emission, liveness, memory injection). Substitute: {skill}=simplify, {agents}=analysts.
 
 **CRITICAL BOUNDARY: /do:simplify analyzes and plans — it does NOT execute simplifications. Output is `.design/plan.json` for `/do:execute`. This skill is NOT `/do:design` (which decomposes arbitrary goals).**
 

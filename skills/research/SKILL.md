@@ -8,7 +8,7 @@ argument-hint: "<topic or question to research>"
 
 Investigate a topic and produce a knowledge artifact in `.design/research.json` with structured knowledge sections and actionable recommendations. **This skill researches and synthesizes — it does NOT design or execute.**
 
-Before starting the Flow, Read `skills/shared/lead-protocol.md`. It defines the canonical lead protocol (boundaries, team setup, trace emission, liveness, memory injection). Substitute: {skill}=research, {agents}=researchers.
+Before starting the Flow, Read `lead-protocol.md`. It defines the canonical lead protocol (boundaries, team setup, trace emission, liveness, memory injection). Substitute: {skill}=research, {agents}=researchers.
 
 **CRITICAL BOUNDARY: Research captures WHAT is known and WHY it matters. It does NOT determine HOW to implement — that is `/do:design`'s job. Research produces `.design/research.json`, NOT `.design/plan.json`. If you start thinking about role decomposition or acceptance criteria, you have crossed into design territory — stop and refocus on knowledge synthesis.**
 

@@ -1,1 +1,1 @@
-../../../scripts/plan.py
+../../../shared/plan.py

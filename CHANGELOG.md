@@ -9,8 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Shared lead protocol extracted into `skills/shared/lead-protocol.md` as canonical source of truth for 4 team-based skills (design, execute, research, simplify). Reduces drift and improves maintainability.
-- Each team-based skill now reads `skills/shared/lead-protocol.md` at startup via relative symlinks, substituting skill-specific values (agent types: experts/researchers/analysts/workers).
+- Shared lead protocol extracted into `shared/lead-protocol.md` as canonical source of truth for 4 team-based skills (design, execute, research, simplify). Reduces drift and improves maintainability.
+- Each team-based skill now reads `shared/lead-protocol.md` at startup, substituting skill-specific values (agent types: experts/researchers/analysts/workers).
+- `shared/` directory consolidates common assets (`plan.py` helper script + `lead-protocol.md` protocol) at root level, replacing previous `scripts/` and `skills/shared/` layout.
 
 ### Fixed
 

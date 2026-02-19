@@ -8,7 +8,7 @@ argument-hint: ""
 
 Execute `.design/plan.json` with persistent, self-organizing workers. Design produced the plan with role briefs — now workers read the codebase and achieve their goals. **This skill only executes — it does NOT design.**
 
-Before starting the Flow, Read `skills/shared/lead-protocol.md`. It defines the canonical lead protocol (boundaries, team setup, trace emission, liveness, memory injection). Substitute: {skill}=execute, {agents}=workers.
+Before starting the Flow, Read `lead-protocol.md`. It defines the canonical lead protocol (boundaries, team setup, trace emission, liveness, memory injection). Substitute: {skill}=execute, {agents}=workers.
 
 **Progress reporting**: After the initial summary, output brief progress updates for significant events. Keep updates to one line each. Suppress intermediate worker tool calls and chatter.
 

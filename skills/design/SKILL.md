@@ -8,7 +8,7 @@ argument-hint: "<goal description>"
 
 Decompose a goal into `.design/plan.json` with role briefs — goal-directed scopes for specialist workers. **This skill only designs — it does NOT execute.**
 
-Before starting the Flow, Read `skills/shared/lead-protocol.md`. It defines the canonical lead protocol (boundaries, team setup, trace emission, liveness, memory injection). Substitute: {skill}=design, {agents}=experts.
+Before starting the Flow, Read `lead-protocol.md`. It defines the canonical lead protocol (boundaries, team setup, trace emission, liveness, memory injection). Substitute: {skill}=design, {agents}=experts.
 
 ---
 
