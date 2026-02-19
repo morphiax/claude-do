@@ -189,6 +189,24 @@ The lead collects expert findings and writes the plan.
    - `cmd || echo "fallback"` or `cmd || true` — anti-pattern: always exits 0, masks failures completely
    - `cmd 2>&1 | tail -N` — anti-pattern: pipe may mask exit code unless `set -o pipefail` is used
 
+   **Check command authoring rules** (apply when writing `check` fields):
+   - **Ban f-strings in inline Python**: `python3 -c "..."` check commands must NOT use f-strings — nested quotes and backslash escapes inside `"..."` cause `SyntaxError`. Use `.format()` or `%` formatting instead, or move complex logic to a script file.
+   - **Prefer script files for complex checks**: When a check requires >1 logical step, write it to a temp file (`python3 /tmp/check_role.py`) instead of inlining with `-c`. Inline `-c` is limited to simple one-liners.
+   - **Fail-fast required**: Every check must exit non-zero on failure with no fallback (`|| true`, `|| echo`) that masks the result.
+
+   **Check command template library** — use these patterns, not custom one-offs:
+
+   | Purpose | Template |
+   |---|---|
+   | File contains pattern (structural only, not sole check) | `grep -q "pattern" path/to/file` |
+   | Python script parses JSON without error | `python3 -c "import json; json.load(open('file.json'))"` |
+   | Python script validates field (use .format, not f-string) | `python3 -c "import json; d=json.load(open('f.json')); assert d['k']=='v', d['k']"` |
+   | Complex Python check (multi-step) | Write to `/tmp/check_rolename.py`, then: `python3 /tmp/check_rolename.py` |
+   | Command exits 0 (build/test) | `bun run build` or `python3 -m pytest tests/` |
+   | Schema field exists and is non-empty | `python3 -c "import json,sys; d=json.load(open('f.json')); sys.exit(0 if d.get('field') else 1)"` |
+   | Count lines/entries in output | `python3 -c "import json; d=json.load(open('f.json')); assert len(d['items'])>=3"` |
+   | Shell script file is executable and exits 0 | `bash path/to/script.sh` |
+
 7. Add `auxiliaryRoles[]` (see Auxiliary Roles section).
 8. Write to `.design/plan.json` (do NOT run finalize yet — that happens in Step 4.5).
 9. **Draft plan review** (complex/high-stakes tier only): Display the draft plan to the user before finalization:
@@ -201,7 +219,7 @@ The lead collects expert findings and writes the plan.
    ```
    This is non-blocking — continue to finalization. If the user objects, adjust before finalizing. For trivial/standard tiers, skip this review.
 
-**Validate acceptance criteria checks**: After writing plan.json, run `python3 $PLAN_CLI validate-checks .design/plan.json`. If errors found, display them to the user with role name and criterion. Attempt to fix obvious syntax errors by editing the check commands in plan.json (e.g., missing quotes, unescaped characters, invalid Python syntax). This is non-blocking — proceed to finalization even if some checks remain unfixable, but flag them to the user.
+**Validate acceptance criteria checks (MANDATORY blocking gate)**: Before running finalize, you MUST run `python3 $PLAN_CLI validate-checks .design/plan.json`. If errors are found, display them to the user with role name and criterion, then fix every check command in plan.json before proceeding. Do NOT call finalize until validate-checks reports zero errors. Apply the check command authoring rules above (ban f-strings, prefer script files for complex checks) when rewriting broken checks.
 
 ### 4.5. Generate Verification Specs
 
