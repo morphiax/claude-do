@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.26.1] - 2026-02-20
+
+### Changed
+
+- **CLAUDE.md trimmed**: Removed ~150 lines of runtime-duplicate content from CLAUDE.md. Eliminated per-skill Execution Model bullets (those were restatements of SKILL.md workflows), removed Verification Specs Protocol section (developers should read SKILL.md Step 4.5), trimmed verbose Data Contracts prose to developer-facing schema references only, removed stale /do:improve references, and condensed 10 never-invoked plan.py inspection tool descriptions into a single summary line. Architecture section now focuses on structural facts (file layout, symlinks, data contracts) rather than runtime sequences.
+- **Step numbering unified**: Fixed step numbering in design/SKILL.md (3.5→4, 4→5, 4.5→6, 5→7, 6→8) and simplify/SKILL.md (3.5→4, 4→5, 5→6). All internal cross-references and protocol headers updated. AC anti-patterns consolidated into canonical location (design Step 5).
+- **Soft protocol references hardened**: Strengthened all soft protocol references (e.g., "Per Self-Monitoring protocol") to hard directives (e.g., "You MUST follow the Self-Monitoring procedure...") across all 4 SKILL.md files. Applies to Self-Monitoring, Reflection Prepend, Memory Injection show-user steps, and Liveness Pipeline (design/execute/simplify). Improves protocol enforcement.
+- **Reflection validation tightened**: `reflection-add` now rejects (exit 1 with error) when `whatFailed` is non-empty but `promptFixes` is empty. This prevents vague failure records that lack actionable improvement guidance. All self-tests pass (121/121).
+
 ## [2.26.0] - 2026-02-19
 
 ### Added
