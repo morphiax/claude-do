@@ -8,15 +8,7 @@ argument-hint: "<goal description>"
 
 Decompose a goal into `.design/plan.json` with role briefs — goal-directed scopes for specialist workers. **This skill only designs — it does NOT execute.**
 
-**PROTOCOL REQUIREMENT: Do NOT answer the goal directly. Your FIRST action after reading the goal MUST be the pre-flight check. Follow the Flow step-by-step.**
-
-**Do NOT use `EnterPlanMode`** — this skill IS the plan.
-
-**CRITICAL: Always use agent teams.** When spawning any expert via Task tool, you MUST include `team_name: $TEAM_NAME` and `name: "{role}"` parameters. Without these, agents are standalone and cannot coordinate.
-
-**Lead boundaries**: Use only `TeamCreate`, `TeamDelete`, `TaskCreate`, `TaskUpdate`, `TaskList`, `SendMessage`, `Task`, `AskUserQuestion`, and `Bash` (for `python3 $PLAN_CLI`, cleanup, verification). Project metadata (CLAUDE.md, package.json, README) allowed via Bash. **Never use Read, Grep, Glob, Edit, Write, LSP, WebFetch, WebSearch, or MCP tools on project source files.** The lead orchestrates — agents think.
-
-**No polling**: Messages auto-deliver automatically. Never use `sleep`, loops, or Bash waits. When a teammate sends a message, it appears in your next turn.
+Before starting the Flow, Read `skills/shared/lead-protocol.md`. It defines the canonical lead protocol (boundaries, team setup, trace emission, liveness, memory injection). Substitute: {skill}=design, {agents}=experts.
 
 ---
 
@@ -28,20 +20,6 @@ Decompose a goal into `.design/plan.json` with role briefs — goal-directed sco
 | Scope is underspecified | Standard practice is clear |
 | Technology choice is open and impacts approach | Any reasonable choice works |
 | Data source is ambiguous | User preference doesn't change approach |
-
-### Script Setup
-
-Resolve plugin root (containing `.claude-plugin/`). All script calls: `python3 $PLAN_CLI <command> [args]` via Bash. JSON output: `{"ok": true/false, ...}`.
-
-```bash
-PLAN_CLI={plugin_root}/skills/design/scripts/plan.py
-TEAM_NAME=$(python3 $PLAN_CLI team-name design).teamName
-SESSION_ID=$TEAM_NAME
-```
-
-### Trace Emission
-
-After each agent lifecycle event: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event {event} --skill design [--agent "{name}"] || true`. Events: skill-start, skill-complete, spawn, completion, failure, respawn. Use `--payload '{"key":"val"}'` for extras. Failures are non-blocking (`|| true`).
 
 ---
 
@@ -117,14 +95,7 @@ Create the team and spawn experts in parallel.
    - Instruct: "Then SendMessage to the lead with a summary."
 
    Expert artifacts flow directly to execution workers — they are structured JSON with sections that can be referenced selectively.
-6. **Expert liveness pipeline**: Track completion: (a) SendMessage received AND (b) artifact file exists (`ls .design/expert-{name}.json`). **Show user status**: "Expert progress: {name} done ({M}/{N} complete)." On completion: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event completion --skill design --agent "{name}" || true`
-
-| Rule | Action |
-|---|---|
-| Turn timeout (2 turns) | Send: "Status check — artifact expected at `.design/expert-{name}.json`. Report completion or blockers." |
-| Re-spawn ceiling | No completion 1 turn after ping → re-spawn with same prompt (max 2 attempts). On re-spawn: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event respawn --skill design --agent "{name}" || true`. Show: "Re-spawning {name} (timeout)." |
-| Proceed with available | After 2 re-spawn attempts → `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event failure --skill design --agent "{name}" || true`. Log failure, proceed with responsive experts' artifacts. |
-| Never write artifacts yourself | Lead interpretation ≠ specialist analysis. |
+6. **Expert liveness pipeline**: Apply the Liveness Pipeline from `lead-protocol.md`. Track completion per expert: (a) SendMessage received AND (b) artifact file exists (`ls .design/expert-{name}.json`). Show user status: "Expert progress: {name} done ({M}/{N} complete)."
 
 ### 3.5. Interface Negotiation & Cross-Review
 

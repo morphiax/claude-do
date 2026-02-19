@@ -8,15 +8,9 @@ argument-hint: "<topic or question to research>"
 
 Investigate a topic and produce a knowledge artifact in `.design/research.json` with structured knowledge sections and actionable recommendations. **This skill researches and synthesizes — it does NOT design or execute.**
 
-**PROTOCOL REQUIREMENT: Do NOT answer the goal directly. Your FIRST action after reading the topic MUST be the pre-flight check. Follow the Flow step-by-step.**
+Before starting the Flow, Read `skills/shared/lead-protocol.md`. It defines the canonical lead protocol (boundaries, team setup, trace emission, liveness, memory injection). Substitute: {skill}=research, {agents}=researchers.
 
 **CRITICAL BOUNDARY: Research captures WHAT is known and WHY it matters. It does NOT determine HOW to implement — that is `/do:design`'s job. Research produces `.design/research.json`, NOT `.design/plan.json`. If you start thinking about role decomposition or acceptance criteria, you have crossed into design territory — stop and refocus on knowledge synthesis.**
-
-**Do NOT use `EnterPlanMode`** — this skill IS the plan.
-
-**Lead boundaries**: Use only `TeamCreate`, `TeamDelete`, `TaskCreate`, `TaskUpdate`, `TaskList`, `SendMessage`, `Task`, `AskUserQuestion`, and `Bash` (for `python3 $PLAN_CLI`, cleanup, verification). Project metadata (CLAUDE.md, package.json, README) allowed via Bash. **Never use Read, Grep, Glob, Edit, Write, LSP, WebFetch, WebSearch, or MCP tools on project source files.** The lead orchestrates — researchers investigate.
-
-**No polling**: Messages auto-deliver automatically. Never use `sleep`, loops, or Bash waits.
 
 ---
 
@@ -29,20 +23,6 @@ Investigate a topic and produce a knowledge artifact in `.design/research.json` 
 | User intent unclear (evaluate vs audit vs migrate) | Any reasonable interpretation leads to similar research |
 
 Research tolerates vague inputs better than design. "Should we adopt GraphQL?" is valid. "Research things" with no context is not.
-
-### Script Setup
-
-Resolve plugin root (containing `.claude-plugin/`). All script calls: `python3 $PLAN_CLI <command> [args]` via Bash. JSON output: `{"ok": true/false, ...}`.
-
-```bash
-PLAN_CLI={plugin_root}/skills/research/scripts/plan.py
-TEAM_NAME=$(python3 $PLAN_CLI team-name research | python3 -c "import sys,json;print(json.load(sys.stdin)['teamName'])")
-SESSION_ID=$TEAM_NAME
-```
-
-### Trace Emission
-
-After each agent lifecycle event: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event {event} --skill research [--agent "{name}"] || true`. Events: skill-start, skill-complete, spawn, completion, failure, respawn. Failures are non-blocking (`|| true`).
 
 ---
 
@@ -152,12 +132,7 @@ Create the team and spawn researchers in parallel.
 - "Then SendMessage to the lead with a summary."
 - "For each finding include: area, observation, evidence, sections (array from: prerequisites/mentalModels/usagePatterns/failurePatterns/productionReadiness), confidence (high/medium/low), effort (trivial/small/medium/large/transformative). If the finding contains worked examples, templates, process steps, or prompt patterns from reference materials, include a `verbatim` field with the actual content."
 
-6. **Researcher liveness pipeline**: Track completion: (a) SendMessage received AND (b) artifact file exists (`ls .design/expert-{name}.json`). **Show user status**: "Researcher progress: {name} done ({M}/{N} complete)." On completion: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event completion --skill research --agent "{name}" || true`
-
-| Rule | Action |
-|---|---|
-| Turn timeout (3 turns) | On re-spawn: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event respawn --skill research --agent "{name}" || true`. Re-spawn with same prompt (max 2 attempts). |
-| Proceed with available | After 2 re-spawn attempts: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event failure --skill research --agent "{name}" || true`. Proceed with responsive researchers' artifacts. |
+6. **Researcher liveness pipeline**: Apply the Liveness Pipeline from `lead-protocol.md`. Track completion per researcher: (a) SendMessage received AND (b) artifact file exists (`ls .design/expert-{name}.json`). Show user status: "Researcher progress: {name} done ({M}/{N} complete)."
 
 ### 4. Synthesis
 

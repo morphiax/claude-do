@@ -10,15 +10,9 @@ Analyze code or text for simplification opportunities using cascade thinking —
 
 Works on any target: application code, scripts, SKILL.md prompts, configuration files, documentation. The cascade framework applies equally to code duplication and prose redundancy.
 
-**PROTOCOL REQUIREMENT: Do NOT answer the goal directly. Your FIRST action after reading the target MUST be the pre-flight check. Follow the Flow step-by-step.**
+Before starting the Flow, Read `skills/shared/lead-protocol.md`. It defines the canonical lead protocol (boundaries, team setup, trace emission, liveness, memory injection). Substitute: {skill}=simplify, {agents}=analysts.
 
 **CRITICAL BOUNDARY: /do:simplify analyzes and plans — it does NOT execute simplifications. Output is `.design/plan.json` for `/do:execute`. This skill is NOT `/do:design` (which decomposes arbitrary goals).**
-
-**Do NOT use `EnterPlanMode`** — this skill IS the plan.
-
-**Lead boundaries**: Use only `TeamCreate`, `TeamDelete`, `TaskCreate`, `TaskUpdate`, `TaskList`, `SendMessage`, `Task`, `AskUserQuestion`, and `Bash` (for `python3 $PLAN_CLI`, cleanup, verification). Project metadata (CLAUDE.md, package.json, README) allowed via Bash. **Never use Read, Grep, Glob, Edit, Write, LSP, WebFetch, WebSearch, or MCP tools on project source files.** The lead orchestrates — analysts think.
-
-**No polling**: Messages auto-deliver automatically. Never use `sleep`, loops, or Bash waits. When a teammate sends a message, it appears in your next turn.
 
 ---
 
@@ -29,20 +23,6 @@ Works on any target: application code, scripts, SKILL.md prompts, configuration 
 | Scope is unbounded with no project context | Any scope is specified |
 | Multiple unrelated codebases in workspace | Project has clear boundaries |
 | User intent unclear (code cleanup vs architectural simplification vs config reduction vs prompt tightening) | Recent changes provide natural scope |
-
-### Script Setup
-
-Resolve plugin root (containing `.claude-plugin/`). All script calls via Bash. JSON output: `{"ok": true/false, ...}`.
-
-```bash
-PLAN_CLI={plugin_root}/skills/simplify/scripts/plan.py
-TEAM_NAME=$(python3 $PLAN_CLI team-name simplify | python3 -c "import sys,json;print(json.load(sys.stdin)['teamName'])")
-SESSION_ID=$TEAM_NAME
-```
-
-### Trace Emission
-
-After each agent lifecycle event: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event {event} --skill simplify [--agent "{name}"] || true`. Events: skill-start, skill-complete, spawn, completion, failure, respawn. Use `--payload '{"key":"val"}'` for extras. Failures are non-blocking (`|| true`).
 
 ---
 
@@ -222,14 +202,7 @@ Each analyst finding must include:
 - **Tools denied**: Edit, Write.
 - Focus: component count reduction, interface seam elimination, cross-boundary unification.
 
-5. **Analyst liveness pipeline**: Track completion: (a) SendMessage received AND (b) artifact file exists (`ls .design/expert-{name}.json`). **Show user status**: "Analyst progress: {name} done ({M}/{N} complete)." On completion: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event completion --skill simplify --agent "{name}" || true`
-
-| Rule | Action |
-|---|---|
-| Turn timeout (3 turns) | Send: "Status check — artifact expected at `.design/expert-{name}.json`. Report completion or blockers." |
-| Re-spawn ceiling | No completion 1 turn after ping — re-spawn with same prompt (max 2 attempts). On re-spawn: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event respawn --skill simplify --agent "{name}" || true`. Show: "Re-spawning {name} (timeout)." |
-| Proceed with available | After 2 re-spawn attempts — `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event failure --skill simplify --agent "{name}" || true`. Log failure, proceed with responsive analysts' artifacts. |
-| Never write artifacts yourself | Lead interpretation is not specialist analysis. |
+5. **Analyst liveness pipeline**: Apply the Liveness Pipeline from `lead-protocol.md`. Track completion per analyst: (a) SendMessage received AND (b) artifact file exists (`ls .design/expert-{name}.json`). Show user status: "Analyst progress: {name} done ({M}/{N} complete)."
 
 ### 3.5. Cascade-First Resolution
 

@@ -8,17 +8,9 @@ argument-hint: ""
 
 Execute `.design/plan.json` with persistent, self-organizing workers. Design produced the plan with role briefs — now workers read the codebase and achieve their goals. **This skill only executes — it does NOT design.**
 
-**Do NOT use `EnterPlanMode`** — this skill IS the plan.
-
-**PROTOCOL REQUIREMENT: Follow the Flow step-by-step.** Begin with pre-flight checks, spawn workers only after auxiliaries complete.
-
-**CRITICAL: Always use agent teams.** When spawning any worker via Task tool, you MUST include `team_name: $TEAM_NAME` and `name: "{role}"` parameters. Without these, workers are standalone and cannot coordinate.
-
-**Lead boundaries**: Use only `TeamCreate`, `TeamDelete`, `TaskCreate`, `TaskUpdate`, `TaskList`, `SendMessage`, `Task`, `AskUserQuestion`, and `Bash` (for `python3 $PLAN_CLI`, cleanup, verification, `git`). Project metadata (CLAUDE.md, package.json, README) allowed via Bash. **Never use Read, Grep, Glob, Edit, Write, LSP, WebFetch, WebSearch, or MCP tools on project source files.** The lead orchestrates — agents think.
+Before starting the Flow, Read `skills/shared/lead-protocol.md`. It defines the canonical lead protocol (boundaries, team setup, trace emission, liveness, memory injection). Substitute: {skill}=execute, {agents}=workers.
 
 **Progress reporting**: After the initial summary, output brief progress updates for significant events. Keep updates to one line each. Suppress intermediate worker tool calls and chatter.
-
-**No polling**: Messages auto-deliver automatically. Never use `sleep`, loops, or Bash waits. When a teammate sends a message, it appears in your next turn.
 
 ### Script Setup
 
@@ -26,13 +18,13 @@ Resolve plugin root. All script calls: `python3 $PLAN_CLI <command> [args]` via 
 
 ```bash
 PLAN_CLI={plugin_root}/skills/execute/scripts/plan.py
-TEAM_NAME=$(python3 $PLAN_CLI team-name execute).teamName
+TEAM_NAME=$(python3 $PLAN_CLI team-name execute | python3 -c "import sys,json;print(json.load(sys.stdin)['teamName'])")
 SESSION_ID=$TEAM_NAME
 ```
 
 ### Trace Emission
 
-After each agent lifecycle event: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event {event} --skill execute [--agent "{name}"] || true`. Events: skill-start, skill-complete, spawn, completion, failure, respawn. Use `--payload '{"key":"val"}'` for extras. Failures are non-blocking (`|| true`).
+After each agent lifecycle event: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event {event} --skill execute [--agent "{name}"] [--payload '{"key":"val"}'] || true`. Events: skill-start, skill-complete, spawn, completion, failure, respawn. Use `--payload` for extras. Failures are non-blocking (`|| true`).
 
 ---
 
@@ -114,7 +106,7 @@ Warn if git is dirty. If resuming: "Resuming execution."
 ```bash
 python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "{role.goal}" --stack "{context.stack}" --keywords "{role.scope.directories + role.name}"
 ```
-If `ok: false` or no memories → proceed without injection. Otherwise take top 2-3. **Show user**: "Memory: {role.name} ← {count} learnings ({keyword summaries})."
+If `ok: false` or no memories → proceed without injection. Otherwise take top 3-5. **Show user**: "Memory: {role.name} ← {count} learnings ({keyword summaries})."
 
 Spawn workers as teammates using the Task tool. Each worker prompt MUST include:
 
@@ -170,7 +162,7 @@ Event-driven loop — process worker messages as they arrive.
 **Worker liveness check** (3-turn timeout for silent workers):
 Track silence per worker (count lead turns where an in_progress worker sends no message).
 - After 3 turns of silence: SendMessage to worker: "No updates for 3 turns on {role.name}. Report progress or blockers."
-- After 5 total turns of silence (2 more after ping): Mark role as failed with `echo '[{"roleIndex": N, "status": "failed", "result": "worker_timeout: no response after 5 turns"}]' | python3 $PLAN_CLI update-status .design/plan.json`. Re-spawn worker (max 2 attempts per role, then proceed with available progress). Output progress update "✗ Timeout: {role.name} — worker silent for 5 turns".
+- After 5-turn total silence (2 more after ping): Mark role as failed with `echo '[{"roleIndex": N, "status": "failed", "result": "worker_timeout: no response after 5 turns"}]' | python3 $PLAN_CLI update-status .design/plan.json`. Re-spawn worker (max 2 attempts per role, then proceed with available progress). Output progress update "✗ Timeout: {role.name} — worker silent for 5 turns".
 
 **Completion check** (after each idle/completion):
 1. `python3 $PLAN_CLI status .design/plan.json`
