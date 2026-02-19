@@ -3963,6 +3963,24 @@ class TestPlanCommands(unittest.TestCase):
         result = json.loads(captured.getvalue())
         return exit_code, result
 
+    def _run_cmd_with_stdin(
+        self, func: Any, args: argparse.Namespace, json_obj: Any
+    ) -> tuple[int, dict[str, Any]]:
+        """Helper to run a cmd_* function with stdin injection and capture output."""
+        captured = io.StringIO()
+        old_stdin = sys.stdin
+        with contextlib.redirect_stdout(captured):
+            try:
+                sys.stdin = io.StringIO(json.dumps(json_obj))
+                func(args)
+            except SystemExit:
+                pass
+            finally:
+                sys.stdin = old_stdin
+
+        result = json.loads(captured.getvalue())
+        return 0, result
+
     # Test core algorithm functions
 
     def test_compute_depths_linear_chain(self) -> None:
@@ -4397,23 +4415,10 @@ class TestPlanCommands(unittest.TestCase):
         with open(plan_file, "w") as f:
             json.dump(plan, f)
 
-        update_json = json.dumps([{"role": "backend-developer", "status": "failed"}])
         args = argparse.Namespace(plan_path=plan_file)
-
-        captured = io.StringIO()
-        with contextlib.redirect_stdout(captured):
-            try:
-                import sys
-
-                old_stdin = sys.stdin
-                sys.stdin = io.StringIO(update_json)
-                cmd_update_status(args)
-                sys.stdin = old_stdin
-            except SystemExit:
-                sys.stdin = old_stdin
-                pass
-
-        result = json.loads(captured.getvalue())
+        _, result = self._run_cmd_with_stdin(
+            cmd_update_status, args, [{"role": "backend-developer", "status": "failed"}]
+        )
         self.assertTrue(result["ok"])
 
     def test_memory_add_with_boost(self) -> None:
@@ -4529,17 +4534,15 @@ class TestPlanCommands(unittest.TestCase):
         with open(reflection_file, "w"):
             pass
 
-        reflection_json = json.dumps(
-            {
-                "goalAchieved": True,
-                "successFactors": ["factor1"],
-                "challenges": [],
-                "whatWorked": [],
-                "whatDidntWork": [],
-                "surprises": [],
-                "recommendation": "Continue",
-            }
-        )
+        reflection_obj = {
+            "goalAchieved": True,
+            "successFactors": ["factor1"],
+            "challenges": [],
+            "whatWorked": [],
+            "whatDidntWork": [],
+            "surprises": [],
+            "recommendation": "Continue",
+        }
 
         args = argparse.Namespace(
             reflection_path=reflection_file,
@@ -4548,21 +4551,7 @@ class TestPlanCommands(unittest.TestCase):
             outcome="completed",
             goal_achieved=True,
         )
-
-        captured = io.StringIO()
-        with contextlib.redirect_stdout(captured):
-            try:
-                import sys
-
-                old_stdin = sys.stdin
-                sys.stdin = io.StringIO(reflection_json)
-                cmd_reflection_add(args)
-                sys.stdin = old_stdin
-            except SystemExit:
-                sys.stdin = old_stdin
-                pass
-
-        result = json.loads(captured.getvalue())
+        _, result = self._run_cmd_with_stdin(cmd_reflection_add, args, reflection_obj)
         self.assertTrue(result["ok"])
 
     def test_reflection_search_with_skill_filter(self) -> None:
@@ -4773,21 +4762,11 @@ class TestPlanCommands(unittest.TestCase):
         with open(plan_file, "w") as f:
             json.dump(plan, f)
 
-        update_json = json.dumps(
-            [{"roleIndex": 0, "status": "failed", "result": "build error"}]
+        _, result = self._run_cmd_with_stdin(
+            cmd_update_status,
+            argparse.Namespace(plan_path=plan_file),
+            [{"roleIndex": 0, "status": "failed", "result": "build error"}],
         )
-        captured = io.StringIO()
-        old_stdin = sys.stdin
-        with contextlib.redirect_stdout(captured):
-            try:
-                sys.stdin = io.StringIO(update_json)
-                cmd_update_status(argparse.Namespace(plan_path=plan_file))
-            except SystemExit:
-                pass
-            finally:
-                sys.stdin = old_stdin
-
-        result = json.loads(captured.getvalue())
         self.assertTrue(result["ok"])
         self.assertIn(0, result["updated"])
         self.assertGreater(len(result["cascaded"]), 0)
@@ -4801,21 +4780,11 @@ class TestPlanCommands(unittest.TestCase):
         with open(plan_file, "w") as f:
             json.dump(plan, f)
 
-        update_json = json.dumps(
-            [{"roleIndex": 0, "status": "completed", "result": "done"}]
+        _, result = self._run_cmd_with_stdin(
+            cmd_update_status,
+            argparse.Namespace(plan_path=plan_file),
+            [{"roleIndex": 0, "status": "completed", "result": "done"}],
         )
-        captured = io.StringIO()
-        old_stdin = sys.stdin
-        with contextlib.redirect_stdout(captured):
-            try:
-                sys.stdin = io.StringIO(update_json)
-                cmd_update_status(argparse.Namespace(plan_path=plan_file))
-            except SystemExit:
-                pass
-            finally:
-                sys.stdin = old_stdin
-
-        result = json.loads(captured.getvalue())
         self.assertTrue(result["ok"])
         self.assertIn(0, result["trimmed"])
 
@@ -4827,19 +4796,11 @@ class TestPlanCommands(unittest.TestCase):
         with open(plan_file, "w") as f:
             json.dump(plan, f)
 
-        update_json = json.dumps([{"roleIndex": 0, "status": "completed"}])
-        captured = io.StringIO()
-        old_stdin = sys.stdin
-        with contextlib.redirect_stdout(captured):
-            try:
-                sys.stdin = io.StringIO(update_json)
-                cmd_update_status(argparse.Namespace(plan_path=plan_file))
-            except SystemExit:
-                pass
-            finally:
-                sys.stdin = old_stdin
-
-        result = json.loads(captured.getvalue())
+        _, result = self._run_cmd_with_stdin(
+            cmd_update_status,
+            argparse.Namespace(plan_path=plan_file),
+            [{"roleIndex": 0, "status": "completed"}],
+        )
         self.assertFalse(result["ok"])
         self.assertIn("error", result)
 
@@ -4886,35 +4847,17 @@ class TestPlanCommands(unittest.TestCase):
     def test_reflection_validate_valid(self) -> None:
         """Test reflection-validate with valid evaluation JSON."""
         evaluation = {"whatWorked": ["a"], "whatFailed": ["b"], "doNextTime": ["c"]}
-        captured = io.StringIO()
-        old_stdin = sys.stdin
-        with contextlib.redirect_stdout(captured):
-            try:
-                sys.stdin = io.StringIO(json.dumps(evaluation))
-                cmd_reflection_validate(argparse.Namespace())
-            except SystemExit:
-                pass
-            finally:
-                sys.stdin = old_stdin
-
-        result = json.loads(captured.getvalue())
+        _, result = self._run_cmd_with_stdin(
+            cmd_reflection_validate, argparse.Namespace(), evaluation
+        )
         self.assertTrue(result["ok"])
 
     def test_reflection_validate_missing_fields(self) -> None:
         """Test reflection-validate rejects missing required fields."""
         evaluation = {"whatWorked": ["a"]}
-        captured = io.StringIO()
-        old_stdin = sys.stdin
-        with contextlib.redirect_stdout(captured):
-            try:
-                sys.stdin = io.StringIO(json.dumps(evaluation))
-                cmd_reflection_validate(argparse.Namespace())
-            except SystemExit:
-                pass
-            finally:
-                sys.stdin = old_stdin
-
-        result = json.loads(captured.getvalue())
+        _, result = self._run_cmd_with_stdin(
+            cmd_reflection_validate, argparse.Namespace(), evaluation
+        )
         self.assertFalse(result["ok"])
 
     # ================================================================
@@ -5050,35 +4993,17 @@ class TestPlanCommands(unittest.TestCase):
             "keyDecisions": ["Used REST"],
             "contextForDependents": "API at /api/v1",
         }
-        captured = io.StringIO()
-        old_stdin = sys.stdin
-        with contextlib.redirect_stdout(captured):
-            try:
-                sys.stdin = io.StringIO(json.dumps(report))
-                cmd_worker_completion_validate(argparse.Namespace())
-            except SystemExit:
-                pass
-            finally:
-                sys.stdin = old_stdin
-
-        result = json.loads(captured.getvalue())
+        _, result = self._run_cmd_with_stdin(
+            cmd_worker_completion_validate, argparse.Namespace(), report
+        )
         self.assertTrue(result["ok"])
 
     def test_worker_completion_validate_missing_fields(self) -> None:
         """Test worker-completion-validate rejects missing fields."""
         report = {"role": "api-dev"}
-        captured = io.StringIO()
-        old_stdin = sys.stdin
-        with contextlib.redirect_stdout(captured):
-            try:
-                sys.stdin = io.StringIO(json.dumps(report))
-                cmd_worker_completion_validate(argparse.Namespace())
-            except SystemExit:
-                pass
-            finally:
-                sys.stdin = old_stdin
-
-        result = json.loads(captured.getvalue())
+        _, result = self._run_cmd_with_stdin(
+            cmd_worker_completion_validate, argparse.Namespace(), report
+        )
         self.assertFalse(result["ok"])
 
     # ================================================================
