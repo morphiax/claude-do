@@ -1,16 +1,4 @@
 # Shared Lead Protocol — Core
-# shared/lead-protocol-core.md
-#
-# Core lead behavior for all do: skills (design, execute, research, simplify).
-# Defines: boundaries, no-polling, trace emission, memory injection, lifecycle context,
-# phase announcements, insight handling, and self-monitoring.
-#
-# Companion file: lead-protocol-teams.md (TeamCreate, liveness pipeline, team patterns).
-# Skills that use teams (design, execute, simplify) should read BOTH files.
-# Research reads ONLY this file (uses standalone Task subagents, no teams).
-#
-# Each SKILL.md should Read this file at its upfront instruction block and substitute
-# {skill} with its skill name, {agents} with its agent noun (experts/researchers/analysts/workers).
 
 ---
 

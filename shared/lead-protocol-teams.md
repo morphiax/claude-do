@@ -1,11 +1,4 @@
 # Shared Lead Protocol — Teams
-# shared/lead-protocol-teams.md
-#
-# Multi-agent team patterns for team-based do: skills (design, execute, simplify).
-# Defines: TeamCreate enforcement, liveness pipeline, team-specific SendMessage patterns.
-# Research does NOT consume this file (uses standalone Task subagents).
-#
-# Read lead-protocol-core.md first — this file extends it with team-specific behavior.
 
 ---
 

@@ -72,7 +72,7 @@ Analyze the goal type and spawn appropriate experts:
 
 **For complex/high-stakes goals with >=3 experts**: Choose at least 2 experts with contrasting priorities (e.g., performance vs maintainability, security vs usability) to enable productive debate.
 
-**For trivial goals** (1-2 roles, single obvious approach): skip experts. Write the plan directly. Skip to Step 4.
+**For trivial goals** (1-2 roles, single obvious approach): skip experts. Write the plan directly. Skip to Step 5.
 
 **When uncertain about goal type**: Ask the user to clarify intent before spawning experts.
 
@@ -96,9 +96,9 @@ Create the team and spawn experts in parallel.
    - Instruct: "If you discover a surprising finding, SendMessage to lead with prefix INSIGHT: followed by one sentence. Maximum one insight message — choose the most surprising."
 
    Expert artifacts flow directly to execution workers — they are structured JSON with sections that can be referenced selectively.
-6. **Expert liveness pipeline**: Apply the Liveness Pipeline from `lead-protocol.md`. Track completion per expert: (a) SendMessage received AND (b) artifact file exists (`ls .design/expert-{name}.json`). Show user status: "Expert progress: {name} done ({M}/{N} complete)."
+6. **Expert liveness pipeline**: Apply the Liveness Pipeline from `lead-protocol-teams.md`. Track completion per expert: (a) SendMessage received AND (b) artifact file exists (`ls .design/expert-{name}.json`). Show user status: "Expert progress: {name} done ({M}/{N} complete)."
 
-### 3.5. Interface Negotiation & Cross-Review
+### 4. Interface Negotiation & Cross-Review
 
 Expert coordination prevents **integration failures** (domains don't fit together) and **convergence failures** (experts reach incompatible conclusions). Assess which phases apply per the decision matrix, then execute them.
 
@@ -137,7 +137,7 @@ All phases follow: **maximum 2 rounds** of negotiation per conflict. If no conve
 
 **Checkpoint**: Save `.design/cross-review.json` with audit trail: `{phasesRun: ["A"|"B"|"C"], interfaces: {count, rounds}, reconciliations: {count, rounds}, challenges: {sent, resolved}, skippedPhases: [{phase, reason}]}`. If no phases applicable, save with `phasesRun: []` and skip reasons.
 
-### 4. Synthesize into Role Briefs
+### 5. Synthesize into Role Briefs
 
 **Announce to user**: "Synthesizing expert findings into role briefs."
 
@@ -145,7 +145,7 @@ The lead collects expert findings and writes the plan.
 
 1. Collect all expert findings (messages and `.design/expert-*.json` files).
 2. **Resolve conflicts from cross-review** (if debate occurred): For each challenge, evaluate trade-offs and decide. Document resolution in plan.json under `designDecisions[]` (schema: {conflict, experts, decision, reasoning}). **Show user each decision**: "Decision: {conflict} → {chosen approach} ({one-line reasoning})."
-2b. **Incorporate interface contracts**: If `.design/interfaces.json` was produced in Step 3.5, add each interface as a constraint on the relevant producer and consumer roles. Interface contracts are binding — workers must implement the agreed interface shape.
+2b. **Incorporate interface contracts**: If `.design/interfaces.json` was produced in Step 4, add each interface as a constraint on the relevant producer and consumer roles. Interface contracts are binding — workers must implement the agreed interface shape.
 3. Identify the specialist roles needed to execute this goal:
    - Each role scopes a **coherent problem domain** for one worker
    - If a role would cross two unrelated domains, split into two roles
@@ -180,7 +180,7 @@ The lead collects expert findings and writes the plan.
    | Shell script file is executable and exits 0 | `bash path/to/script.sh` |
 
 7. Add `auxiliaryRoles[]` (see Auxiliary Roles section).
-8. Write to `.design/plan.json` (do NOT run finalize yet — that happens in Step 4.5).
+8. Write to `.design/plan.json` (do NOT run finalize yet — that happens in Step 6).
 9. **Draft plan review** (complex/high-stakes tier only): Display the draft plan to the user before finalization:
    ```
    Draft Plan ({roleCount} roles):
@@ -193,7 +193,7 @@ The lead collects expert findings and writes the plan.
 
 **Validate acceptance criteria checks (MANDATORY blocking gate)**: Before running finalize, you MUST run `python3 $PLAN_CLI validate-checks .design/plan.json`. If errors are found, display them to the user with role name and criterion, then fix every check command in plan.json before proceeding. Do NOT call finalize until validate-checks reports zero errors. Apply the check command authoring rules above (ban f-strings, prefer script files for complex checks) when rewriting broken checks.
 
-### 4.5. Generate Verification Specs
+### 6. Generate Verification Specs
 
 Verification specs are property-based tests workers must satisfy. They codify expert verificationProperties as executable tests without constraining implementation.
 
@@ -269,7 +269,7 @@ Additional requirements for all cases: expert artifacts contain verificationProp
 }
 ```
 
-### 5. Auxiliary Roles
+### 7. Auxiliary Roles
 
 Add auxiliary roles to `auxiliaryRoles[]` in plan.json. For Trivial tier (1-2 roles): only memory-curator. For Standard and above: challenger and integration-verifier are always included; scout is included when the goal touches code. These are meta-agents that improve quality without directly implementing features.
 
@@ -306,7 +306,7 @@ Add auxiliary roles to `auxiliaryRoles[]` in plan.json. For Trivial tier (1-2 ro
 ]
 ```
 
-### 6. Complete
+### 8. Complete
 
 1. Validate: `python3 $PLAN_CLI status .design/plan.json`. Stop if `ok: false`.
 2. Shut down teammates, delete team.
@@ -364,16 +364,16 @@ The authoritative interface between design and execute. Execute reads this file;
 
 **Role fields**: name, goal, model, scope {directories, patterns, dependencies}, expertContext [{expert, artifact, relevance}], constraints [], acceptanceCriteria [{criterion, check}], assumptions [{text, severity}], rollbackTriggers [], fallback. Status fields (status, result, attempts, directoryOverlaps) are initialized by finalize.
 
-**Auxiliary role fields**: name, type (pre-execution|post-execution), goal, model, trigger. See Step 5 for examples.
+**Auxiliary role fields**: name, type (pre-execution|post-execution), goal, model, trigger. See Step 7 for examples.
 
 ### Interface Contracts (interfaces.json)
 
-Produced during Step 3.5 Phase A when roles share domain boundaries. Array of `{boundary, producer, consumer, contract, negotiationNotes}`. Workers treat interface contracts as binding constraints.
+Produced during Step 4 Phase A when roles share domain boundaries. Array of `{boundary, producer, consumer, contract, negotiationNotes}`. Workers treat interface contracts as binding constraints.
 
 ### Analysis Artifacts
 
 Preserved in `.design/` for execute workers:
 - `expert-{name}.json` — per-expert findings (structured JSON)
-- `interfaces.json` — agreed interface contracts (if produced in Step 3.5)
+- `interfaces.json` — agreed interface contracts (if produced in Step 4)
 
 **Goal**: $ARGUMENTS

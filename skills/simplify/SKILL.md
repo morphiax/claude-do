@@ -203,9 +203,9 @@ Each analyst finding must include:
 - **Tools denied**: Edit, Write.
 - Focus: component count reduction, interface seam elimination, cross-boundary unification.
 
-5. **Analyst liveness pipeline**: Apply the Liveness Pipeline from `lead-protocol.md`. Track completion per analyst: (a) SendMessage received AND (b) artifact file exists (`ls .design/expert-{name}.json`). Show user status: "Analyst progress: {name} done ({M}/{N} complete)."
+5. **Analyst liveness pipeline**: Apply the Liveness Pipeline from `lead-protocol-teams.md`. Track completion per analyst: (a) SendMessage received AND (b) artifact file exists (`ls .design/expert-{name}.json`). Show user status: "Analyst progress: {name} done ({M}/{N} complete)."
 
-### 3.5. Cascade-First Resolution
+### 4. Cascade-First Resolution
 
 When both complexity-analyst and pattern-recognizer target the same file or area:
 
@@ -213,7 +213,7 @@ When both complexity-analyst and pattern-recognizer target the same file or area
 2. **Cascade precedence**: When findings conflict on approach, the finding with `eliminationCount >= 2` takes precedence (it is a cascade; the other is not).
 3. **Genuine contradictions**: When both have cascades but in incompatible directions, escalate to user via `designDecisions[]` in plan.json: `{conflict, experts, decision, reasoning}`. **Show user**: "Contradiction: {analyst A} recommends {X}, {analyst B} recommends {Y}. Choosing {decision} because {reasoning}."
 
-### 4. Synthesize into Plan
+### 5. Synthesize into Plan
 
 **Announce to user**: "Synthesizing analyst findings into simplification roles."
 
@@ -243,12 +243,7 @@ If ALL findings are `organizationalContextNeeded: yes` with no actionable simpli
    - Include rollbackTriggers: test failure, security path detection, organizational context gap.
    - Add constraint: "SKIP recursive algorithms — flag and report instead."
 
-   **Acceptance criteria anti-patterns** (NEVER use as sole check):
-   - `grep -q "pattern" file` — verifies text exists, not that feature works
-   - `test -f output.json` — file exists but may contain errors
-   - `wc -l file` — verifies size, not correctness
-   - `cmd || echo "fallback"` or `cmd || true` — always exits 0, masks failures
-   - `cmd | tail -N` — pipe may mask exit code
+   **Acceptance criteria anti-patterns**: Apply the same anti-patterns and check command authoring rules as design/SKILL.md Step 5 (canonical list). Never use grep-only checks, test -f as sole check, wc -l counts, `|| true` fallbacks, or pipe chains without exit-code handling.
 
 7. **Anti-pattern guards** (CRITICAL — do NOT proceed to finalize if any guard triggers without user approval):
    - **Token budget** (text targets): Calculate net token delta for proposed changes. If total would increase target beyond its current size, ask user to approve flagged changes explicitly.
@@ -304,7 +299,7 @@ Design decisions: {count}
 Organizational context items: {approved count}/{total count}
 ```
 
-### 5. Complete
+### 6. Complete
 
 1. Validate: `python3 $PLAN_CLI status .design/plan.json`. Stop if `ok: false`.
 2. Shut down teammates, delete team.
