@@ -254,7 +254,7 @@ Prompt includes:
 **Quality gates** (all must pass before storing):
 
 - TRANSFERABILITY TEST: Useful in new session? (reject: test counts, metrics, file lists, timings, exit codes)
-- CATEGORY TEST: Fits convention|pattern|mistake|approach|failure? (reject: uncategorizable)
+- CATEGORY TEST: Fits convention|pattern|mistake|approach|failure|procedure? (reject: uncategorizable)
 - SURPRISE TEST: Unexpected/contradicts assumptions? Score 7-10. Routine success? Score 1-3.
 - DEDUPLICATION TEST: Not already in memory.jsonl? (reject: duplicates)
 - SPECIFICITY TEST: Contains concrete reference (path|command|error|pattern|tool)? (reject: vague)
@@ -264,6 +264,7 @@ Prompt includes:
 - "Keywords: include technology names, directory paths, error types, tool names — terms a future goal description would contain."
 - "Content: <200 words. State what you learned AND why it matters. Not what happened."
 - "For failed/skipped roles: always create a `failure` or `mistake` memory with root cause analysis."
+- "For Known Gaps that describe persistent architectural limitations (not one-off session artifacts): create a `procedure` memory. Example: handoff.md says 'Keyword scoring is basic (tokenized overlap)' — this recurs across sessions and should be stored as procedure memory with importance 7+ so future sessions are aware of the limitation."
 - "SendMessage to lead when complete: 'Memory curation complete. Added {count} memories ({breakdown by category}). Rejected {rejected_count} candidates (not transferable or duplicates).'."
 
 ```
