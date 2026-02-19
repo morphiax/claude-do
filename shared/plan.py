@@ -141,6 +141,37 @@ def resolve_dependencies(
     return resolved
 
 
+def _plan_with_deps(
+    plan_path: str,
+) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, int], list[list[int]]]:
+    """Load plan and compute name_index + dep_indices in one call.
+
+    Returns:
+        (plan, roles, name_index, dep_indices)
+    """
+    plan = load_plan(plan_path)
+    roles = plan.get("roles", [])
+    name_index = build_name_index(roles)
+    dep_indices = resolve_dependencies(roles, name_index)
+    return plan, roles, name_index, dep_indices
+
+
+def _read_stdin_json(error_msg: str, include_error: bool = False) -> Any:
+    """Read and parse JSON from stdin. Calls error_exit on parse failure.
+
+    Args:
+        error_msg: Base error message. When include_error=True, ': {exception}' is appended.
+        include_error: If True, append the JSONDecodeError detail to error_msg.
+    """
+    try:
+        return json.load(sys.stdin)
+    except json.JSONDecodeError as e:
+        if include_error:
+            error_exit(f"{error_msg}: {e}")
+        else:
+            error_exit(error_msg)
+
+
 def compute_depths(
     roles: list[dict[str, Any]], dep_indices: list[list[int]]
 ) -> dict[int, int]:
@@ -274,12 +305,8 @@ def cmd_status(args: argparse.Namespace) -> NoReturn:
 
 def cmd_summary(args: argparse.Namespace) -> NoReturn:
     """Compute roleCount, maxDepth, depthSummary, and modelDistribution."""
-    plan = load_plan(args.plan_path)
-    roles = plan.get("roles", [])
+    plan, roles, _name_index, dep_indices = _plan_with_deps(args.plan_path)
     goal = plan.get("goal", "")
-
-    name_index = build_name_index(roles)
-    dep_indices = resolve_dependencies(roles, name_index)
 
     role_count = len(roles)
     depths = compute_depths(roles, dep_indices)
@@ -361,10 +388,7 @@ def _compute_overlaps(
 
 def cmd_overlap_matrix(args: argparse.Namespace) -> NoReturn:
     """Compute directory overlap matrix between roles."""
-    plan = load_plan(args.plan_path)
-    roles = plan.get("roles", [])
-    name_index = build_name_index(roles)
-    dep_indices = resolve_dependencies(roles, name_index)
+    _plan, roles, _name_index, dep_indices = _plan_with_deps(args.plan_path)
 
     overlaps_by_role = _compute_overlaps(roles, dep_indices)
 
@@ -420,10 +444,7 @@ def _transitive_closure(dep_indices: list[list[int]], start: int) -> list[int]:
 
 def cmd_tasklist_data(args: argparse.Namespace) -> NoReturn:
     """Extract fields needed for TaskCreate calls — one entry per role."""
-    plan = load_plan(args.plan_path)
-    roles = plan.get("roles", [])
-    name_index = build_name_index(roles)
-    dep_indices = resolve_dependencies(roles, name_index)
+    _plan, roles, _name_index, dep_indices = _plan_with_deps(args.plan_path)
 
     result = []
     for i, role in enumerate(roles):
@@ -462,10 +483,7 @@ def _deduplicate_slug(slug: str, used_slugs: set[str]) -> str:
 
 def cmd_worker_pool(args: argparse.Namespace) -> NoReturn:
     """Compute worker pool directly from roles[] — one worker per role."""
-    plan = load_plan(args.plan_path)
-    roles = plan.get("roles", [])
-    name_index = build_name_index(roles)
-    dep_indices = resolve_dependencies(roles, name_index)
+    _plan, roles, _name_index, dep_indices = _plan_with_deps(args.plan_path)
 
     # Filter to pending/runnable roles
     runnable: list[int] = []
@@ -545,10 +563,7 @@ def cmd_retry_candidates(args: argparse.Namespace) -> NoReturn:
 
 def cmd_circuit_breaker(args: argparse.Namespace) -> NoReturn:
     """Check if >50% of remaining roles would be skipped by cascading failures."""
-    plan = load_plan(args.plan_path)
-    roles = plan.get("roles", [])
-    name_index = build_name_index(roles)
-    dep_indices = resolve_dependencies(roles, name_index)
+    _plan, roles, _name_index, dep_indices = _plan_with_deps(args.plan_path)
 
     total_roles = len(roles)
     pending_count = sum(1 for r in roles if r.get("status") == "pending")
@@ -744,15 +759,9 @@ def _validate_status_transition(
 def cmd_update_status(args: argparse.Namespace) -> NoReturn:
     """Batch update role statuses with progressive trimming and cascading failures."""
     plan_path = args.plan_path
-    plan = load_plan(plan_path)
-    roles = plan.get("roles", [])
-    name_index = build_name_index(roles)
-    dep_indices = resolve_dependencies(roles, name_index)
+    plan, roles, _name_index, dep_indices = _plan_with_deps(plan_path)
 
-    try:
-        updates = json.load(sys.stdin)
-    except json.JSONDecodeError:
-        error_exit("Invalid JSON in stdin")
+    updates = _read_stdin_json("Invalid JSON in stdin")
 
     if not isinstance(updates, list):
         error_exit("Expected JSON array in stdin")
@@ -1914,10 +1923,7 @@ def cmd_reflection_add(args: argparse.Namespace) -> NoReturn:
         error_exit("Goal is required")
 
     # Read evaluation from stdin (JSON object)
-    try:
-        evaluation = json.load(sys.stdin)
-    except json.JSONDecodeError:
-        error_exit("Invalid JSON in stdin (expected evaluation object)")
+    evaluation = _read_stdin_json("Invalid JSON in stdin (expected evaluation object)")
 
     entry = {
         "id": str(uuid.uuid4()),
@@ -2260,10 +2266,7 @@ def cmd_reflection_validate(args: argparse.Namespace) -> NoReturn:
     Required fields: whatWorked, whatFailed, doNextTime (all arrays)
     """
     _ = args  # Unused but required for dispatch compatibility
-    try:
-        evaluation = json.load(sys.stdin)
-    except json.JSONDecodeError as e:
-        error_exit(f"Invalid JSON in evaluation: {e}")
+    evaluation = _read_stdin_json("Invalid JSON in evaluation", include_error=True)
 
     # Check required fields and that each is an array in one pass
     fields = ["whatWorked", "whatFailed", "doNextTime"]
@@ -2511,10 +2514,7 @@ def cmd_worker_completion_validate(args: argparse.Namespace) -> NoReturn:
     """
     _ = args  # Unused but required for dispatch compatibility
 
-    try:
-        data = json.load(sys.stdin)
-    except json.JSONDecodeError as e:
-        error_exit(f"Invalid JSON in worker completion: {e}")
+    data = _read_stdin_json("Invalid JSON in worker completion", include_error=True)
 
     errors = _validate_json_schema(
         data,
@@ -2537,16 +2537,11 @@ def cmd_worker_completion_validate(args: argparse.Namespace) -> NoReturn:
     output_json({"ok": True, "valid": True})
 
 
-def _load_research_json(research_path: str) -> dict[str, Any]:
-    """Load research.json from disk, exit on error."""
-    return _load_json_file(research_path, "research file")  # type: ignore[return-value]
-
-
 def _load_and_validate_research_structure(
     research_path: str,
 ) -> dict[str, Any]:
     """Load and validate research.json top-level structure."""
-    data = _load_research_json(research_path)
+    data = _load_json_file(research_path, "research file")
 
     if data.get("schemaVersion") != 1:
         error_exit(
@@ -2677,7 +2672,7 @@ def cmd_research_summary(args: argparse.Namespace) -> NoReturn:
 
     Returns recommendation count, section count, top recommendations with designGoal.
     """
-    data = _load_research_json(args.research_path)
+    data = _load_json_file(args.research_path, "research file")
 
     recommendations = data.get("recommendations", [])
     sections = data.get("sections", {})
