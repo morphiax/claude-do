@@ -82,7 +82,7 @@ Create the team and spawn experts in parallel.
 
 1. `TeamDelete(team_name: $TEAM_NAME)` (ignore errors), `TeamCreate(team_name: $TEAM_NAME)`. If TeamCreate fails, tell user Agent Teams is required and stop. If TeamDelete succeeds, a previous session's team was cleaned up.
 2. **TeamCreate health check**: Verify team is reachable. If verification fails, `TeamDelete`, then retry `TeamCreate` once. If retry fails, abort with clear error message.
-3. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "{goal}" --stack "{stack}"`. If `ok: false` or no memories → proceed without injection. Otherwise inject top 3-5 into expert prompts. **Show user**: "Memory: injecting {count} past learnings — {keyword summaries}." Apply Reflection Prepend per lead-protocol-core.md.
+3. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "{goal}" --stack "{stack}"`. If `ok: false` or no memories → proceed without injection. Otherwise inject top 3-5 into expert prompts. **Show user**: "Memory: injecting {count} past learnings — {keyword summaries}." You MUST follow the Reflection Prepend procedure in lead-protocol-core.md step-by-step — do not skip steps.
 4. `TaskCreate` for each expert.
 5. Spawn experts as teammates using the Task tool. For each expert:
    - Before Task call: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event spawn --skill design --agent "{expert-name}" --payload '{"model":"sonnet","memoriesInjected":N}' || true`
@@ -96,7 +96,7 @@ Create the team and spawn experts in parallel.
    - Instruct: "If you discover a surprising finding, SendMessage to lead with prefix INSIGHT: followed by one sentence. Maximum one insight message — choose the most surprising."
 
    Expert artifacts flow directly to execution workers — they are structured JSON with sections that can be referenced selectively.
-6. **Expert liveness pipeline**: Apply the Liveness Pipeline from `lead-protocol-teams.md`. Track completion per expert: (a) SendMessage received AND (b) artifact file exists (`ls .design/expert-{name}.json`). Show user status: "Expert progress: {name} done ({M}/{N} complete)."
+6. **Expert liveness pipeline**: You MUST follow the Liveness Pipeline procedure in lead-protocol-teams.md step-by-step — do not skip steps. Track completion per expert: (a) SendMessage received AND (b) artifact file exists (`ls .design/expert-{name}.json`). Show user status: "Expert progress: {name} done ({M}/{N} complete)."
 
 ### 4. Interface Negotiation & Cross-Review
 
@@ -335,7 +335,7 @@ Memories applied: {count or "none"}
 Run /do:execute to begin.
 ```
 
-5. **Self-reflection** — Per Self-Monitoring protocol (lead-protocol-core.md). Skill-specific fields to include alongside the base schema:
+5. **Self-reflection** — You MUST follow the Self-Monitoring procedure in lead-protocol-core.md step-by-step — do not skip steps. Skill-specific fields to include alongside the base schema:
 
    ```bash
    echo '{"expertQuality":"<which experts contributed most/least>","crossReviewValue":"<useful|redundant|skipped>","planCompleteness":"<assessment>", ...base fields from lead-protocol-core.md...}' | python3 $PLAN_CLI reflection-add .design/reflection.jsonl --skill design --goal "<the goal>" --outcome "<completed|partial|failed|aborted>" --goal-achieved <true|false>

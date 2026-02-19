@@ -56,7 +56,7 @@ Before starting the Flow, Read `lead-protocol-core.md` and `lead-protocol-teams.
 5. **Anti-pattern guards** (text targets — snapshot for regression check):
    - Copy target file(s) to `.design/skill-snapshot.md` (or `.design/text-snapshot/`) via Bash for baseline comparison.
    - **Circular simplification detection**: Check `.design/history/` for recent simplify runs targeting the same files: `ls .design/history/*/expert-*.json 2>/dev/null | tail -5`. If found, warn user: "Previous simplify runs detected. Review history to avoid circular changes."
-6. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "simplify {target}" --keywords "simplification,cascade,preservation"`. If `ok: false` or no memories, proceed without injection. Otherwise inject top 3-5 into analyst prompts. **Show user**: "Memory: injecting {count} past learnings — {keyword summaries}." Apply Reflection Prepend per lead-protocol-core.md.
+6. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "simplify {target}" --keywords "simplification,cascade,preservation"`. If `ok: false` or no memories, proceed without injection. Otherwise inject top 3-5 into analyst prompts. **Show user**: "Memory: injecting {count} past learnings — {keyword summaries}." You MUST follow the Reflection Prepend procedure in lead-protocol-core.md step-by-step — do not skip steps.
 7. **Announce to user**: "Simplify ({target type}): analyzing {scope description}. Spawning {N} analysts ({names}). Auxiliaries: {list — challenger+scout+integration-verifier+memory-curator for Standard+, memory-curator+integration-verifier only for Trivial tier (roleCount <= 2)}."
 
 ### 3. Spawn Analysts
@@ -203,7 +203,7 @@ Each analyst finding must include:
 - **Tools denied**: Edit, Write.
 - Focus: component count reduction, interface seam elimination, cross-boundary unification.
 
-5. **Analyst liveness pipeline**: Apply the Liveness Pipeline from `lead-protocol-teams.md`. Track completion per analyst: (a) SendMessage received AND (b) artifact file exists (`ls .design/expert-{name}.json`). Show user status: "Analyst progress: {name} done ({M}/{N} complete)."
+5. **Analyst liveness pipeline**: You MUST follow the Liveness Pipeline procedure in lead-protocol-teams.md step-by-step — do not skip steps. Track completion per analyst: (a) SendMessage received AND (b) artifact file exists (`ls .design/expert-{name}.json`). Show user status: "Analyst progress: {name} done ({M}/{N} complete)."
 
 ### 4. Cascade-First Resolution
 
@@ -325,7 +325,7 @@ Memories applied: {count or "none"}
 Run /do:execute to begin simplification.
 ```
 
-5. **Self-reflection** — Per Self-Monitoring protocol (lead-protocol-core.md). Skill-specific fields to include alongside the base schema:
+5. **Self-reflection** — You MUST follow the Self-Monitoring procedure in lead-protocol-core.md step-by-step — do not skip steps. Skill-specific fields to include alongside the base schema:
 
 ```bash
 echo '{"targetType":"<code|text|mixed>","analystQuality":"<which analysts contributed most/least>","cascadeDepth":"<deep structural|mostly surface>","preservationConfidence":"<high|medium|low>","organizationalContextItems":<count>, ...base fields from lead-protocol-core.md...}' | python3 $PLAN_CLI reflection-add .design/reflection.jsonl --skill simplify --goal "<the target>" --outcome "<completed|partial|failed|aborted>" --goal-achieved <true|false>

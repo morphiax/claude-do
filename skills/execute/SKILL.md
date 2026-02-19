@@ -104,7 +104,7 @@ Spawn workers as teammates using the Task tool. Each worker prompt MUST include:
 1. **Identity**: "You are a specialist: {role.name}. Your goal: {role.goal}"
 2. **Brief location**: "Read your full role brief from `.design/plan.json` at `roles[{roleIndex}]`."
 3. **Expert context**: "Read these expert artifacts for context: {expertContext entries with artifact paths and relevance notes}." If a scout report exists: "Also read `.design/scout-report.json` for codebase reality check."
-4. **Past learnings** (if memories found): "Relevant past learnings: {bullet list of memories with format: '- {category}: {summary} (from {created})'}" Apply Reflection Prepend per lead-protocol-core.md — match `unresolvedImprovements` against this role's name, goal, and scope.
+4. **Past learnings** (if memories found): "Relevant past learnings: {bullet list of memories with format: '- {category}: {summary} (from {created})'}" You MUST follow the Reflection Prepend procedure in lead-protocol-core.md step-by-step — do not skip steps. Match `unresolvedImprovements` against this role's name, goal, and scope.
 5. **Process**: "Explore your scope directories ({scope.directories}). Plan your own approach based on what you find in the actual codebase. Implement, test, verify against your acceptance criteria."
 6. **Constraints**: "Constraints from role brief — read them from plan.json roles[{roleIndex}].constraints."
 7. **Done when**: "Done when — read acceptance criteria from plan.json roles[{roleIndex}].acceptanceCriteria."
@@ -214,7 +214,7 @@ Integration: {PASS|FAIL|SKIPPED — with details}
 {if failures: "Recommended: /do:execute to retry failed roles, or /do:design to redesign."}
 {if all passed: "All roles complete. Review reflection.jsonl for patterns across runs."}
 ```
-2. **Self-reflection** — Follow the Reflection Procedure (Steps A/B/C) from lead-protocol-core.md. Use the `acGradients` list from Step 1.9 as input to Step A (already collected during monitoring). Execute-specific fields alongside the base schema: `roleQuality`, `coordinationNotes`.
+2. **Self-reflection** — You MUST follow the Self-Monitoring procedure (Reflection Procedure, Steps A/B/C) in lead-protocol-core.md step-by-step — do not skip steps. Use the `acGradients` list from Step 1.9 as input to Step A (already collected during monitoring). Execute-specific fields alongside the base schema: `roleQuality`, `coordinationNotes`.
 
    ```bash
    echo '{"roleQuality":"<N of M roles completed first attempt>","coordinationNotes":"<any team/worker observations>","acGradients":[...from session list...],"promptFixes":[...derived via Lamarckian Step B...],"stepsSkipped":[...],"instructionsIgnored":[...],"whatWorked":[...],"whatFailed":[...]}' | python3 $PLAN_CLI reflection-add .design/reflection.jsonl --skill execute --goal "<the goal from plan.json>" --outcome "<completed|partial|failed|aborted>" --goal-achieved <true|false>
