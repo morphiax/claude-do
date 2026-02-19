@@ -12,7 +12,7 @@ No automated test suite exists. Testing is manual and functional:
 
 ```bash
 # Load the plugin locally
-claude --plugin-dir /path/to/claude-do
+claude --plugin-dir ~/.claude/plugins/marketplaces/do
 
 # Test the full workflow
 /do:design <some goal>
