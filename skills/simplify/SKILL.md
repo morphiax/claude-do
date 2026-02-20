@@ -8,7 +8,7 @@ argument-hint: "<target-path> [--scope <pattern>]"
 
 Analyze code or text for simplification opportunities using cascade thinking — one insight eliminates multiple components — and produce `.design/plan.json` with preservation-focused worker roles executable via `/do:execute`.
 
-Before starting the Flow, Read `lead-protocol-core.md` and `lead-protocol-teams.md`. They define the canonical lead protocol (boundaries, team setup, trace emission, liveness, memory injection). Substitute: {skill}=simplify, {agents}=analysts.
+Before starting the Flow, Read `lead-protocol-core.md`. It defines the canonical lead protocol (boundaries, trace emission, memory injection, phase announcements). Simplify uses standalone Task() subagents — no team setup required. Task() blocks until done, so no polling logic is needed. Substitute: {skill}=simplify, {agents}=analysts.
 
 **CRITICAL BOUNDARY: /do:simplify analyzes and plans — it does NOT execute simplifications. Output is `.design/plan.json` for `/do:execute`. This skill is NOT `/do:design` (which decomposes arbitrary goals).**
 
@@ -59,17 +59,12 @@ Before starting the Flow, Read `lead-protocol-core.md` and `lead-protocol-teams.
 
 ### 3. Spawn Analysts
 
-Create the team and spawn analysts in parallel.
+Spawn analysts as parallel standalone Task() subagents.
 
-1. `TeamDelete(team_name: $TEAM_NAME)` (ignore errors), `TeamCreate(team_name: $TEAM_NAME)`. If TeamCreate fails, tell user Agent Teams is required and stop.
-2. **TeamCreate health check**: Verify team is reachable. If verification fails, `TeamDelete`, then retry `TeamCreate` once. If retry fails, abort with clear error message.
-3. `TaskCreate` for each analyst.
-4. Spawn analysts as teammates using the Task tool. For each analyst:
-   - Before Task call: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event spawn --skill simplify --agent "{analyst-name}" --payload '{"model":"sonnet","memoriesInjected":N}' || true`
-   - Use Task with `team_name: $TEAM_NAME`, `name: "{analyst-name}"`, and `model: "sonnet"`.
+1. **Spawn all analysts in the same response** (parallel). Use `Task(subagent_type: "general-purpose", model: "sonnet")` for each — standalone Task calls only, no team or name parameters. Task() returns their result directly when done — no liveness tracking needed.
+   - Before each Task call: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event spawn --skill simplify --agent "{analyst-name}" --payload '{"model":"sonnet","memoriesInjected":N}' || true`
    - Instruct: "Save your complete findings to `.design/expert-{name}.json` as structured JSON."
-   - Instruct: "Then SendMessage to the lead with a summary."
-   - Instruct: "If you discover a surprising finding, SendMessage to lead with prefix INSIGHT: followed by one sentence. Maximum one insight message — choose the most surprising."
+   - Instruct: "Return a one-paragraph summary when done."
 
 **Analyst Prompts**:
 
@@ -202,7 +197,7 @@ Each analyst finding must include:
 - **Tools denied**: Edit, Write.
 - Focus: component count reduction, interface seam elimination, cross-boundary unification.
 
-5. **Analyst liveness pipeline**: You MUST follow the Liveness Pipeline procedure in lead-protocol-teams.md step-by-step — do not skip steps.
+2. After all Tasks return, verify artifacts exist: `ls .design/expert-{name}.json` for each analyst. If any is missing but Task returned output, write the output to the missing artifact file. If Task errored, spawn a replacement Task() with the same prompt (max 1 retry per analyst).
 
 ### 4. Cascade-First Resolution
 
@@ -216,7 +211,7 @@ When both complexity-analyst and pattern-recognizer target the same file or area
 
 **Announce to user**: "Synthesizing analyst findings into simplification roles."
 
-1. Collect all analyst findings from messages and `.design/expert-*.json` files via Bash.
+1. Collect all analyst findings from `.design/expert-*.json` files via Bash.
 2. Validate artifacts: `python3 $PLAN_CLI expert-validate .design/expert-{name}.json` for each.
 3. **Organizational context gate**: Collect all findings with `organizationalContextNeeded: yes`. Present to user as a review block:
 
@@ -301,9 +296,7 @@ Organizational context items: {approved count}/{total count}
 ### 6. Complete
 
 1. Validate: `python3 $PLAN_CLI status .design/plan.json`. Stop if `ok: false`.
-2. Shut down teammates, delete team.
-3. Clean up TaskList (delete all planning tasks so `/do:execute` starts clean).
-4. Summary: `python3 $PLAN_CLI summary .design/plan.json`. Display a rich end-of-run summary:
+2. Summary: `python3 $PLAN_CLI summary .design/plan.json`. Display a rich end-of-run summary:
 
 ```
 Simplification Analysis Complete: {target}
@@ -324,13 +317,13 @@ Memories applied: {count or "none"}
 Run /do:execute to begin simplification.
 ```
 
-5. **Trace** — Emit completion trace:
+3. **Trace** — Emit completion trace:
 
    ```bash
    python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event skill-complete --skill simplify --payload '{"outcome":"<completed|partial|failed|aborted>","targetType":"<code|text|mixed>","roleCount":N,"analystsSpawned":N,"cascadeChains":N,"auxiliariesSkipped":["..."]}' || true
    ```
 
-6. **Next action** — Always include `/do:reflect` first:
+4. **Next action** — Always include `/do:reflect` first:
 
    ```
    Next: /do:reflect (review this simplification for gaps and missed opportunities)

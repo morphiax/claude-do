@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0] - 2026-02-21
+
+### Changed
+
+- **BREAKING: Replace Agent Teams with standalone Task() subagents**: Design, execute, and simplify no longer use TeamCreate/TeamDelete/SendMessage. All agent coordination now uses standalone `Task()` calls that block until completion. Removes team setup, liveness pipelines, and polling logic.
+- **Remove lead-protocol-teams.md**: Deleted symlinks from design, execute, and simplify. Team patterns consolidated into individual SKILL.md files or removed entirely.
+- **Simplify lead-protocol-core.md**: Removed Self-Monitoring section (now in `/do:reflect`), simplified Lead Boundaries (removed team tools), updated No Polling and INSIGHT Handling for Task()-based model, removed Lifecycle Feedback section.
+- **Design uses Task() subagents**: Experts spawned as parallel standalone Task() calls instead of team members. Cross-review uses follow-up Task() calls. No team creation or liveness tracking.
+- **Execute and simplify updated**: Adjusted for Task()-based agent model.
+
 ## [2.29.0] - 2026-02-20
 
 ### Changed

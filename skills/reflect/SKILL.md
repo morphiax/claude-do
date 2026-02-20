@@ -83,6 +83,25 @@ The prose should be structured in sections mirroring the thinking steps, but wri
 - **Severity signals** — distinguish between minor polish issues and fundamental gaps that would cause downstream failure.
 - **What actually worked** — this isn't only about criticism. Identify what was genuinely good, so future runs preserve it. But be specific — "the codebase analysis was thorough" is useless; "the codebase analyst correctly identified that availability data is scraped but silently dropped at the service worker boundary (CS-001)" is useful.
 
+### 3.5. Plan Verification (design/simplify output only)
+
+**Trigger**: The reviewed skill produced `.design/plan.json` (i.e., skill is design or simplify). **Skip for** execute/research reviews.
+
+Reflect's prose analysis identifies gaps through reasoning. This step verifies them against the codebase — replacing the challenger and scout auxiliaries that execute previously ran.
+
+Spawn a single Task agent:
+```
+Task(subagent_type: "general-purpose", model: "sonnet")
+```
+
+Prompt:
+- "Read `.design/plan.json` and all `.design/expert-*.json` artifacts."
+- "Read actual project files in each role's scope.directories."
+- "Cross-reference: Do field names in the plan schema match actual data source field names? Do referenced files contain expected data (not empty)? Do AC check commands reference valid paths and tools? Do interface contracts match actual code signatures?"
+- "Save findings to `.design/plan-verification.json`: `{\"verified\": [{\"claim\": \"...\", \"source\": \"...\", \"actual\": \"...\", \"match\": true|false}], \"issues\": [{\"severity\": \"blocking|high-risk|low-risk\", \"description\": \"...\", \"affectedRoles\": [...], \"recommendation\": \"...\"}]}`"
+
+Process results: blocking issues feed into Step 4 (Resolution) as mandatory patches. High-risk issues become warnings in the prose. This replaces challenger+scout — one focused agent instead of two, with reflect's full conversation context informing what to verify.
+
 ### 4. Resolution — Fix Artifacts
 
 **Trigger**: gapSeverity is "significant" or "fundamental" AND the reviewed skill produced modifiable artifacts (plan.json, interfaces.json, research.json).

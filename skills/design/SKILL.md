@@ -8,7 +8,7 @@ argument-hint: "<goal description>"
 
 Decompose a goal into `.design/plan.json` with role briefs — goal-directed scopes for specialist workers. **This skill only designs — it does NOT execute.**
 
-Before starting the Flow, Read `lead-protocol-core.md` and `lead-protocol-teams.md`. They define the canonical lead protocol (boundaries, team setup, trace emission, liveness, memory injection). Substitute: {skill}=design, {agents}=experts.
+Before starting the Flow, Read `lead-protocol-core.md`. It defines the canonical lead protocol (boundaries, trace emission, memory injection, phase announcements). Design uses standalone Task() subagents — no team setup required. Task() blocks until done, so no polling logic is needed. Substitute: {skill}=design, {agents}=experts.
 
 ---
 
@@ -78,31 +78,25 @@ Analyze the goal type and spawn appropriate experts:
 
 ### 3. Spawn Experts
 
-Create the team and spawn experts in parallel.
+Spawn experts as parallel standalone Task() subagents.
 
-1. `TeamDelete(team_name: $TEAM_NAME)` (ignore errors), `TeamCreate(team_name: $TEAM_NAME)`. If TeamCreate fails, tell user Agent Teams is required and stop. If TeamDelete succeeds, a previous session's team was cleaned up.
-2. **TeamCreate health check**: Verify team is reachable. If verification fails, `TeamDelete`, then retry `TeamCreate` once. If retry fails, abort with clear error message.
-3. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "{goal}" --stack "{stack}"`. If `ok: false` or no memories → proceed without injection. Otherwise inject top 3-5 into expert prompts. **Show user**: "Memory: injecting {count} past learnings — {keyword summaries}."
-4. `TaskCreate` for each expert.
-5. Spawn experts as teammates using the Task tool. For each expert:
-   - Before Task call: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event spawn --skill design --agent "{expert-name}" --payload '{"model":"sonnet","memoriesInjected":N}' || true`
-   - Use Task with `team_name: $TEAM_NAME`, `name: "{expert-name}"`, and `model: "sonnet"` (experts require Read/Grep/Glob/Bash for codebase analysis).
+1. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "{goal}" --stack "{stack}"`. If `ok: false` or no memories → proceed without injection. Otherwise inject top 3-5 into expert prompts. **Show user**: "Memory: injecting {count} past learnings — {keyword summaries}."
+2. **Spawn all experts in the same response** (parallel). Use `Task(subagent_type: "general-purpose", model: "sonnet")` for each — standalone Task calls only, no team or name parameters. Task() returns their result directly when done — no liveness tracking needed.
+   - Before each Task call: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event spawn --skill design --agent "{expert-name}" --payload '{"model":"sonnet","memoriesInjected":N}' || true`
    - Write prompts appropriate to the goal and each expert's focus area. Ask them to score relevant dimensions and trace scenarios.
    - **Behavioral traits**: Include behavioral instructions — tell experts HOW to think, not WHO to be. Examples: "Question assumptions that feel obvious", "Reject solutions that add complexity without clear benefit", "Focus on failure modes before success paths", "Assume prior art exists — search before inventing." Tailor traits to the expert's focus (e.g., architect: "Prefer composable patterns over monolithic solutions"; security specialist: "Assume every input is hostile until validated").
    - **Measurable estimates**: Instruct experts: "Base verification properties and estimates on actual code metrics (file counts, line counts, test coverage, dependency depth) where possible. Read codebase samples to ground estimates. Avoid theoretical predictions — anchor to observable reality."
    - **Verify claims against reality**: Instruct experts: "When claiming existing code/data/infrastructure works, verify by checking actual outputs — not just code structure. Read data files, run scripts, inspect results. A scraper that exists in code but produces empty output is not 'fully functional'. Report what you verified vs what you inferred."
    - Every expert prompt MUST end with: "In your findings JSON, include a `verificationProperties` section: an array of properties that should hold regardless of implementation (behavioral invariants, boundary conditions, cross-role contracts). Format: `[{\"property\": \"...\", \"category\": \"invariant|boundary|integration\", \"testableVia\": \"how to test this with concrete commands/endpoints\"}]`. Provide concrete, externally observable properties that can be tested without reading source code. When suggesting testableVia commands, avoid anti-patterns: grep-only checks (verifies text exists, not that feature works), `test -f` as sole check (file exists but may contain errors), `wc -l` counts (size not correctness), `|| echo` or `|| true` fallbacks (always exits 0), pipe chains without exit-code handling (may mask failures)."
    - Instruct: "Save your complete findings to `.design/expert-{name}.json` as structured JSON."
-   - Instruct: "Then SendMessage to the lead with a summary."
-   - Instruct: "If you discover a surprising finding, SendMessage to lead with prefix INSIGHT: followed by one sentence. Maximum one insight message — choose the most surprising."
-
-6. **Expert liveness pipeline**: You MUST follow the Liveness Pipeline procedure in lead-protocol-teams.md step-by-step — do not skip steps.
+   - Instruct: "Return a one-paragraph summary when done."
+3. After all Tasks return, verify artifacts exist: `ls .design/expert-{name}.json` for each expert. If any is missing but Task returned output, write the output to the missing artifact file. If Task errored, spawn a replacement Task() with the same prompt (max 1 retry per expert).
 
 ### 4. Interface Negotiation & Cross-Review
 
 Expert coordination prevents **integration failures** (domains don't fit together) and **convergence failures** (experts reach incompatible conclusions). Assess which phases apply per the decision matrix, then execute them.
 
-**CRITICAL ENFORCEMENT**: The lead MUST NOT perform cross-review solo. Every phase requires actual `SendMessage` calls to experts and collecting their responses. Skipping expert interaction when the decision matrix says a phase is mandatory is a protocol violation.
+**CRITICAL ENFORCEMENT**: The lead MUST NOT skip cross-review when the decision matrix mandates a phase. Cross-review uses follow-up Task() calls — lead reads expert artifacts after all initial Task() calls complete, then spawns targeted Task() calls to perform negotiation. Max 2 rounds = max 2 follow-up Task() calls per conflict. Skipping cross-review when the decision matrix says a phase is mandatory is a protocol violation.
 
 | Phase | Trigger | Purpose |
 |---|---|---|
@@ -117,23 +111,25 @@ Expert coordination prevents **integration failures** (domains don't fit togethe
 All phases follow: **maximum 2 rounds** of negotiation per conflict. If no convergence after 2 rounds, lead decides and documents reasoning. **When resolving conflicts**, use `sequential-thinking` to weigh each position: "What evidence supports each side? What would failure look like if I choose wrong? Is there a synthesis that preserves both positions' strengths?"
 
 **Phase A steps**:
-1. Lead identifies domain boundaries (API shapes, schemas, file formats, shared state)
-2. Lead drafts consumer-driven contracts: `{boundary, producer, consumer, contract}` (use format: `Interface: {name}, Producer: {role}, Consumer: {role}, Contract: {concrete spec}`)
-3. SendMessage each contract to producer-consumer pair: "Does this work for your domain? Flag constraints."
-4. Collect responses, negotiate (max 2 rounds)
-5. Save to `.design/interfaces.json` as binding constraints
+1. Lead reads all expert artifacts from `.design/expert-*.json` files
+2. Lead identifies domain boundaries (API shapes, schemas, file formats, shared state)
+3. Lead drafts consumer-driven contracts: `{boundary, producer, consumer, contract}` (use format: `Interface: {name}, Producer: {role}, Consumer: {role}, Contract: {concrete spec}`)
+4. For each contract requiring input, spawn a follow-up `Task(subagent_type: "general-purpose", model: "sonnet")` with the relevant expert artifact(s) as context: "Read these expert findings. Does this interface contract work for your domain? Flag constraints: {contract}. Return: (a) approved/rejected, (b) constraints, (c) proposed amendments."
+5. Collect Task() results, negotiate (max 2 rounds of follow-up Tasks)
+6. Save to `.design/interfaces.json` as binding constraints
 
 **Phase B steps**:
-1. Lead identifies overlapping analysis (>=2 experts made recommendations about same thing)
-2. SendMessage relevant experts (not broadcast): "You both analyzed {topic}. Your positions differ: {A's position} vs {B's position}. Read each other's artifact. Respond: (a) agreements, (b) disagreements + why yours is better, (c) synthesis."
-3. Collect responses, negotiate synthesis (max 2 rounds)
+1. Lead reads all expert artifacts and identifies overlapping analysis (>=2 experts made recommendations about same thing)
+2. For each conflict, spawn a follow-up `Task(subagent_type: "general-purpose", model: "sonnet")` with both expert artifacts as context: "Read these two expert analyses. They differ on {topic}: {positionA} vs {positionB}. Return: (a) agreements, (b) disagreements + which is better supported by evidence, (c) synthesis proposal."
+3. Collect Task() results, negotiate synthesis (max 2 rounds of follow-up Tasks)
 4. Lead decides if no convergence, documents trade-off
 
 **Phase C steps**:
-1. Broadcast to all experts: "Read OTHER experts' artifacts. Challenge claims affecting your domain. Format: Challenge to {expert}, Claim: '{quote}', Severity: [blocking|important|minor], Evidence: {why problematic}, Alternative: {proposal}. If no challenges: send 'No challenges found'."
-2. Collect structured challenge messages
-3. Forward each challenge to targeted expert for defense or concession (max 2 rounds per challenge)
-4. Lead resolves conflicts, updates `.design/interfaces.json` if contracts changed
+1. Lead reads all expert artifacts
+2. For each expert, spawn a follow-up `Task(subagent_type: "general-purpose", model: "sonnet")` with all OTHER experts' artifacts as context: "Read these expert analyses. Challenge any claims that affect your domain. Format: Challenge to {expert}, Claim: '{quote}', Severity: [blocking|important|minor], Evidence: {why problematic}, Alternative: {proposal}. If no challenges: return 'No challenges found'."
+3. Collect challenge Task() results
+4. For each blocking/important challenge, spawn a targeted follow-up Task() for the challenged expert to respond (max 2 rounds per challenge)
+5. Lead resolves conflicts, updates `.design/interfaces.json` if contracts changed
 
 **Checkpoint**: Save `.design/cross-review.json` with audit trail: `{phasesRun: ["A"|"B"|"C"], interfaces: {count, rounds}, reconciliations: {count, rounds}, challenges: {sent, resolved}, skippedPhases: [{phase, reason}]}`. If no phases applicable, save with `phasesRun: []` and skip reasons.
 
@@ -141,13 +137,14 @@ All phases follow: **maximum 2 rounds** of negotiation per conflict. If no conve
 
 **Announce to user**: "Synthesizing expert findings into role briefs."
 
-1. Collect all expert findings (messages and `.design/expert-*.json` files).
+1. Collect all expert findings from `.design/expert-*.json` files via Bash (`python3 -c "import json; ..."`).
 2. **Evaluate expert claims**: Use `sequential-thinking` before writing role briefs: "For each key expert claim, is it grounded in verified evidence (data files checked, outputs inspected, code tested) or inferred from code structure alone? What gaps exist between expert findings and the actual project state? What assumptions am I encoding into role constraints that haven't been verified against reality?"
 3. **Resolve conflicts from cross-review** (if debate occurred): For each challenge, evaluate trade-offs and decide. Document resolution in plan.json under `designDecisions[]` (schema: {conflict, experts, decision, reasoning}). **Show user each decision**: "Decision: {conflict} → {chosen approach} ({one-line reasoning})."
 3. **Incorporate interface contracts**: If `.design/interfaces.json` was produced in Step 4, add each interface as a constraint on the relevant producer and consumer roles. Interface contracts are binding — workers must implement the agreed interface shape.
 4. Identify the specialist roles needed to execute this goal:
    - Each role scopes a **coherent problem domain** for one worker
    - If a role would cross two unrelated domains, split into two roles
+   - **Shared file check**: If a role modifies a file that exists identically in multiple directories (e.g., shared protocol files, copied configs), the plan MUST scope ALL copies for update — either in the same role or in a dependent role. Run `find` or `ls` to detect duplicates before finalizing scope.
    - Workers decide HOW to implement — briefs define WHAT and WHY
 5. Write `.design/plan.json` with role briefs (see schema below).
 6. For each role, include `expertContext[]` referencing specific expert artifacts and the sections relevant to that role. **Do not lossy-compress expert findings into terse fields** — reference the full artifacts.
@@ -163,6 +160,7 @@ All phases follow: **maximum 2 rounds** of negotiation per conflict. If no conve
    - `wc -l file` — anti-pattern: verifies size, not correctness
    - `cmd || echo "fallback"` or `cmd || true` — anti-pattern: always exits 0, masks failures completely
    - `cmd 2>&1 | tail -N` — anti-pattern: pipe may mask exit code unless `set -o pipefail` is used
+   - `! grep -q "removed_thing" file` as sole check — anti-pattern: verifies removal but not that the replacement works. Always pair removal checks with positive checks verifying the new pattern exists in the correct context (e.g., `! grep -q 'old_pattern' f && grep -q 'Task(' f`)
 
    **Check command authoring rules** (apply when writing `check` fields):
    - **Ban f-strings in inline Python**: `python3 -c "..."` check commands must NOT use f-strings — nested quotes and backslash escapes inside `"..."` cause `SyntaxError`. Use `.format()` or `%` formatting instead, or move complex logic to a script file.
@@ -298,9 +296,7 @@ Add auxiliary roles to `auxiliaryRoles[]` in plan.json. For all tiers: integrati
 ### 8. Complete
 
 1. Validate: `python3 $PLAN_CLI status .design/plan.json`. Stop if `ok: false`.
-2. Shut down teammates, delete team.
-3. Clean up TaskList (delete all planning tasks so `/do:execute` starts clean).
-4. Summary: `python3 $PLAN_CLI summary .design/plan.json`. Display a rich end-of-run summary:
+2. Summary: `python3 $PLAN_CLI summary .design/plan.json`. Display a rich end-of-run summary:
 
 ```
 Design Complete: {goal}
@@ -324,13 +320,13 @@ Memories applied: {count or "none"}
 Run /do:execute to begin.
 ```
 
-5. **Trace** — Emit completion trace:
+3. **Trace** — Emit completion trace:
 
    ```bash
    python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event skill-complete --skill design --payload '{"outcome":"<completed|partial|failed|aborted>","roleCount":N,"expertsSpawned":N,"crossReviewPhases":["A"|"B"|"C"],"specsGenerated":N}' || true
    ```
 
-6. **Next action** — Suggest the next steps. Always include `/do:reflect` first:
+4. **Next action** — Suggest the next steps. Always include `/do:reflect` first:
 
    ```
    Next: /do:reflect (review this design for gaps and missed opportunities)
