@@ -59,17 +59,7 @@ python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "{goal}" --stack "{s
 
 If `ok: false` or no memories → proceed without injection. Otherwise inject **top 3-5** into agent prompts. **Show user**: "Memory: injecting {count} past learnings — {keyword summaries}."
 
-### Reflection Prepend
-
-When `plan-health-summary` returns `unresolvedImprovements` (non-empty), the lead MUST inject matching items into each agent's spawn prompt. This is not optional — agents that don't receive past lessons repeat past mistakes.
-
-**Procedure** (at agent spawn time, after memory injection):
-1. Take the `unresolvedImprovements` list from the `plan-health-summary` output stored during Lifecycle Context.
-2. For each agent being spawned, filter items where the item's `text` contains the agent's role name, goal keywords, or scope directory names. Also include all items where `failureClass` matches a pattern relevant to this agent type (e.g., `incorrect-verification` for workers, `spec-disobey` for any agent).
-3. If matches found (even 1), prepend to the agent's prompt: "Lessons from prior runs — you MUST apply these:\n{bullet list of matching fix texts}"
-4. **Show user**: "Reflection prepend: {agent-name} ← {count} lessons from prior runs."
-
-If `unresolvedImprovements` is empty, skip silently. Memories provide general knowledge; reflection prepend provides specific corrections from recent failures.
+> **Note**: Runtime lesson injection (formerly "Reflection Prepend") has been removed. Recurring issues are resolved by improving SKILL.md instructions permanently via `/do:reflect fix-skill`, not by patching agent prompts at runtime. Memory injection provides domain knowledge; SKILL.md improvements provide process corrections.
 
 ---
 
@@ -81,7 +71,7 @@ Run at skill start (Step 1 of pre-flight), before trace emit:
 python3 $PLAN_CLI plan-health-summary .design
 ```
 
-Display to user: "Recent runs: {reflection summaries}. {plan status}." If `unresolvedImprovements` is non-empty, also display: "Unresolved from prior runs: {count} items" and list the top 3 (these are concrete prompt fixes or doNextTime items that keep recurring). Skip if all fields empty.
+Display to user: "Recent runs: {reflection summaries}. {plan status}." Skip if all fields empty.
 
 Then emit skill-start trace (with payload per Trace Emission table):
 ```bash
@@ -170,7 +160,7 @@ Each entry MUST have all 5 fields:
 
 ### Lifecycle Feedback
 
-`plan-health-summary` surfaces `unresolvedImprovements` (deduplicated promptFixes from last 5 runs, sorted failures-first). Skills display these at startup so the lead can act on recurring issues.
+`plan-health-summary` surfaces run history and outcomes. Skills display these at startup for context. Recurring process issues are resolved by improving SKILL.md instructions via `/do:reflect fix-skill`, not by runtime injection.
 
 Ordering rules: `reflection-add` before `trace-add skill-complete`. Non-fatal: if reflection-add fails, proceed.
 
