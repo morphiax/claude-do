@@ -139,7 +139,11 @@ All phases follow: **maximum 2 rounds** of negotiation per conflict. If no conve
 **Announce to user**: "Synthesizing expert findings into role briefs."
 
 1. Collect all expert findings from `.design/expert-*.json` files via Bash (`python3 -c "import json; ..."`).
-2. **Evaluate expert claims**: Use `sequential-thinking` before writing role briefs: "For each key expert claim, is it grounded in verified evidence (data files checked, outputs inspected, code tested) or inferred from code structure alone? What gaps exist between expert findings and the actual project state? What assumptions am I encoding into role constraints that haven't been verified against reality?"
+2. **Evaluate expert claims**: Use `sequential-thinking` before writing role briefs. Run through these three adversarial checkpoints in a single thinking sequence:
+   - **Could you be wrong?** "What assumptions from expert findings did we NOT verify with direct evidence? What information did we have access to (live systems, data files, actual outputs) but didn't check? What do we claim with high confidence that is actually uncertain?"
+   - **Pre-mortem** "A worker takes this plan, builds it, and it fails. What was missing from our expert findings that they needed? What was misleading? What real-world condition (stale URLs, changed APIs, missing data) did we not account for?"
+   - **Backward chaining** "What would the ideal plan contain for a worker to succeed on the first attempt? Do we have verified URLs, confirmed selectors, tested endpoints? What specific investigations would have produced that ideal — and which did we skip?"
+   If any checkpoint surfaces a concrete gap (not a hypothetical), address it before writing role briefs: fetch the URL, check the file, verify the endpoint. A 5-second WebFetch now prevents a failed execute run later.
 3. **Resolve conflicts from cross-review** (if debate occurred): For each challenge, evaluate trade-offs and decide. Document resolution in plan.json under `designDecisions[]` (schema: {conflict, experts, decision, reasoning}). **Show user each decision**: "Decision: {conflict} → {chosen approach} ({one-line reasoning})."
 3. **Incorporate interface contracts**: If `.design/interfaces.json` was produced in Step 4, add each interface as a constraint on the relevant producer and consumer roles. Interface contracts are binding — workers must implement the agreed interface shape.
 4. Identify the specialist roles needed to execute this goal:

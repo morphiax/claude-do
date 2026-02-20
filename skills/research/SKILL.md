@@ -132,7 +132,11 @@ The lead assembles pre-tagged findings into knowledge sections and writes recomm
 **Announce to user**: "Synthesizing {N} researcher findings into knowledge sections and recommendations."
 
 1. Collect all researcher findings from `.design/expert-*.json` files via Bash (`python3 -c "import json; ..."`).
-2. **Evaluate finding quality**: Use `sequential-thinking` to assess: "For each researcher's key claims, is the evidence concrete (specific files, line numbers, measurements) or abstract ('the code uses X pattern')? Are findings corroborated by multiple researchers or single-sourced? What did researchers have access to but didn't investigate? What claims are stated with high confidence but rest on thin evidence?"
+2. **Evaluate finding quality**: Use `sequential-thinking` to assess findings through three adversarial checkpoints:
+   - **Could you be wrong?** "Which researcher claims rest on thin or single-sourced evidence? What did researchers have access to (live systems, docs, actual outputs) but didn't check? What's stated with high confidence but is actually uncertain or inferred from stale sources?"
+   - **Pre-mortem** "Someone acts on these recommendations — adopts the library, follows the pattern, uses the architecture. It fails. What did our research miss? What was misleading? What real-world condition (deprecation, breaking changes, edge cases) did we not account for?"
+   - **Backward chaining** "What would ideal research findings contain for the user to make a confident decision? Verified compatibility, tested examples, confirmed APIs? Which of those did our researchers actually produce vs infer?"
+   If any checkpoint surfaces a concrete gap, note it in `researchGaps[]` with severity. For gaps addressable now (a URL to fetch, a version to check), resolve them before writing recommendations.
 3. **Delegation check**: If researchers produced >15 total findings across >3 domains, spawn a single synthesis Task agent via `Task(subagent_type: "general-purpose", model: "sonnet")` to perform assembly. Otherwise, lead synthesizes directly.
 4. **Assemble sections**: Group findings by their section[] tags into the 5 knowledge sections. For each section, merge corroborating findings, surface contradictions, note gaps.
 4. **Contradiction detection**: Scan for findings from different researchers that recommend opposing positions on the same area. If found, add to `contradictions[]` in research.json. Do NOT resolve via agent messaging — surface both positions for user decision.
