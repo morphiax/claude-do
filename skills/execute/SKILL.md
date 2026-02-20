@@ -16,12 +16,6 @@ Before starting the Flow, Read `lead-protocol-core.md` and `lead-protocol-teams.
 
 ---
 
-## Worker Protocol (Inline)
-
-This protocol is included directly in each worker's spawn prompt below (no separate file needed).
-
----
-
 ## Flow
 
 ### 1. Setup
@@ -127,7 +121,7 @@ Event-driven loop — process worker messages as they arrive.
 
 **On role completion**: Worker reports what they achieved, acceptance criteria results, and handoff context.
 1. **Completion report validation**: Parse worker message as JSON and validate structure via `echo $WORKER_MSG | python3 $PLAN_CLI worker-completion-validate`. If validation fails (`ok: false`), reject with SendMessage: "Completion report malformed. Required fields: role, achieved, filesChanged (array), acceptanceCriteria (array of {criterion, passed, evidence}), keyDecisions (array), contextForDependents (string). Re-submit with correct structure." Do NOT proceed to verification if JSON is invalid. On validation failure, allow ONE re-submission with explicit schema example shown to worker; if second attempt fails, escalate to user for manual review.
-2. **Lead-side verification** (trust but verify): For each criterion in `plan.json roles[N].acceptanceCriteria`, run the `check` command via Bash independently. **Before rejecting, verify the actual file state** — run `git diff --name-only HEAD` and `ls -la {relevant files}` to confirm the worker's changes are actually present on disk. Stale diagnostics from cached state or previous runs can produce false rejections. Only reject if the check fails AND the file state confirms the work is genuinely absent. If any check exits non-zero after confirming actual file state, reject completion with SendMessage: "Verification failed for {role.name}: criterion '{criterion}' did not pass. Check output: {output}. Fix and re-report." Do NOT proceed to status update if verification fails. **AC gradient capture**: Append to the `acGradients` list (initialized in Step 1.8): `{"role": "{name}", "criterion": "{text}", "check": "{command}", "exitCode": N, "stderr": "{output}"}`. This list is passed to the reflection in Step 7.
+2. **Lead-side verification** (trust but verify): For each criterion in `plan.json roles[N].acceptanceCriteria`, run the `check` command via Bash independently. **Before rejecting, verify the actual file state** — run `git diff --name-only HEAD` and `ls -la {relevant files}` to confirm the worker's changes are actually present on disk. Stale diagnostics from cached state or previous runs can produce false rejections. Only reject if the check fails AND the file state confirms the work is genuinely absent. If any check exits non-zero after confirming actual file state, reject completion with SendMessage: "Verification failed for {role.name}: criterion '{criterion}' did not pass. Check output: {output}. Fix and re-report." Do NOT proceed to status update if verification fails. **AC gradient capture**: Append to the `acGradients` list (initialized in Step 1.9): `{"role": "{name}", "criterion": "{text}", "check": "{command}", "exitCode": N, "stderr": "{output}"}`. This list is passed to the reflection in Step 7.
 3. Update plan.json: `echo '[{"roleIndex": N, "status": "completed", "result": "..."}]' | python3 $PLAN_CLI update-status .design/plan.json`. Then: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event completion --skill execute --agent "{worker-name}" --payload '{"acPassed":N,"acTotal":N,"filesChanged":N,"firstAttempt":true|false}' || true`
 4. Handle cascaded dependencies: For each roleIndex in the `cascaded[]` array returned by update-status: `TaskUpdate(taskId: roleIdMapping[roleIndex], status: pending)` and output progress update "⊘ Skipped: {role.name} (dependency failed)".
 5. **Worker-to-worker handoff**: If the completed role is a dependency for other roles, extract `keyDecisions` and `contextForDependents` from the worker's completion report. When waking dependent workers, inject this context via SendMessage: "Dependency completed: {role.name}. Key decisions: {keyDecisions}. Context: {contextForDependents}. Files changed: {filesChanged}."

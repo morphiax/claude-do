@@ -22,13 +22,9 @@ Before starting the Flow, Read `lead-protocol-core.md`. It defines the canonical
 | Research scope is unbounded with no focus | Question is specific enough to guide research |
 | User intent unclear (evaluate vs audit vs migrate) | Any reasonable interpretation leads to similar research |
 
-Research tolerates vague inputs better than design. "Should we adopt GraphQL?" is valid. "Research things" with no context is not.
-
 ---
 
 ## Knowledge Sections
-
-Five structured knowledge domains that together constitute a complete research artifact:
 
 | Section | What it captures | Design handoff |
 |---|---|---|
@@ -37,8 +33,6 @@ Five structured knowledge domains that together constitute a complete research a
 | `usagePatterns` | Proven patterns that work. What "good" looks like in practice. Evolution paths ("start with X, refactor to Y as you scale"). | `expertContext[]` for workers |
 | `failurePatterns` | How this breaks in production. Anti-patterns, post-mortem sourced where possible. | `constraints[]` and `rollbackTriggers[]` |
 | `productionReadiness` | Operational concerns: observability, scaling, security, operational overhead. Team adoption factors: learning timeline, doc quality, community support. | `acceptanceCriteria[]` checks |
-
-Researchers tag each finding with which section(s) it informs. Lead assembles pre-tagged findings during synthesis — no reclassification needed.
 
 ---
 
@@ -196,8 +190,6 @@ On failure: proceed (not blocking).
 ---
 
 ## Output Contract: research.json (schemaVersion 1)
-
-The lead writes `.design/research.json` — this is NOT `.design/plan.json`. Research output is structurally different from a plan (knowledge sections + recommendations vs decomposed roles).
 
 ```json
 {

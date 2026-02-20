@@ -104,7 +104,7 @@ When an agent sends a message prefixed with `INSIGHT:`, display it to the user i
 
 ## Self-Monitoring
 
-Every skill MUST call `reflection-add` at end of each run. **Purpose: produce data that directly improves SKILL.md prompts.** Generic observations ("worked well", "was useful") are worthless — record only what would change the prompt text.
+Every skill MUST call `reflection-add` at end of each run. Record only what would change SKILL.md prompt text — generic observations are worthless.
 
 ### Reflection Procedure (mandatory — follow these steps in order)
 

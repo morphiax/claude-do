@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.26.4] - 2026-02-20
+
+### Changed
+
+- **Step numbering fixed**: Eliminated `2b.` sub-step in design Step 5 (renumbered to sequential 1-10). Fixed stale "Step 1.8" → "Step 1.9" reference in execute. Fixed stale "Step 4.5" → "Step 6" reference in CLAUDE.md.
+- **Dead schema fields removed**: Removed `interfaceContracts` and `complexityTier` from design Contracts (no downstream consumer). Removed prose-only lines across all SKILL.md files (explanatory asides, preambles, purpose clauses that don't change lead behavior).
+- **Liveness tracking deduplication**: Removed inline liveness tracking instructions from design and simplify — both already reference lead-protocol-teams.md which defines the canonical procedure.
+- **AC anti-pattern deduplication**: Simplified simplify's AC anti-pattern list to reference-only (canonical list in design Step 5).
+- **CLAUDE.md validation commands**: Added `validate-auxiliary-report` and `worker-completion-validate` to documented runtime-invoked validation commands.
+- **Empty section removed**: Removed vacuous "Worker Protocol (Inline)" section from execute SKILL.md.
+
 ## [2.26.3] - 2026-02-20
 
 ### Added

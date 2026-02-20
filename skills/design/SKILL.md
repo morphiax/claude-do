@@ -95,8 +95,7 @@ Create the team and spawn experts in parallel.
    - Instruct: "Then SendMessage to the lead with a summary."
    - Instruct: "If you discover a surprising finding, SendMessage to lead with prefix INSIGHT: followed by one sentence. Maximum one insight message — choose the most surprising."
 
-   Expert artifacts flow directly to execution workers — they are structured JSON with sections that can be referenced selectively.
-6. **Expert liveness pipeline**: You MUST follow the Liveness Pipeline procedure in lead-protocol-teams.md step-by-step — do not skip steps. Track completion per expert: (a) SendMessage received AND (b) artifact file exists (`ls .design/expert-{name}.json`). Show user status: "Expert progress: {name} done ({M}/{N} complete)."
+6. **Expert liveness pipeline**: You MUST follow the Liveness Pipeline procedure in lead-protocol-teams.md step-by-step — do not skip steps.
 
 ### 4. Interface Negotiation & Cross-Review
 
@@ -141,18 +140,16 @@ All phases follow: **maximum 2 rounds** of negotiation per conflict. If no conve
 
 **Announce to user**: "Synthesizing expert findings into role briefs."
 
-The lead collects expert findings and writes the plan.
-
 1. Collect all expert findings (messages and `.design/expert-*.json` files).
 2. **Resolve conflicts from cross-review** (if debate occurred): For each challenge, evaluate trade-offs and decide. Document resolution in plan.json under `designDecisions[]` (schema: {conflict, experts, decision, reasoning}). **Show user each decision**: "Decision: {conflict} → {chosen approach} ({one-line reasoning})."
-2b. **Incorporate interface contracts**: If `.design/interfaces.json` was produced in Step 4, add each interface as a constraint on the relevant producer and consumer roles. Interface contracts are binding — workers must implement the agreed interface shape.
-3. Identify the specialist roles needed to execute this goal:
+3. **Incorporate interface contracts**: If `.design/interfaces.json` was produced in Step 4, add each interface as a constraint on the relevant producer and consumer roles. Interface contracts are binding — workers must implement the agreed interface shape.
+4. Identify the specialist roles needed to execute this goal:
    - Each role scopes a **coherent problem domain** for one worker
    - If a role would cross two unrelated domains, split into two roles
    - Workers decide HOW to implement — briefs define WHAT and WHY
-4. Write `.design/plan.json` with role briefs (see schema below).
-5. For each role, include `expertContext[]` referencing specific expert artifacts and the sections relevant to that role. **Do not lossy-compress expert findings into terse fields** — reference the full artifacts.
-6. Write criteria-based `acceptanceCriteria` — define WHAT should work, not WHICH files should exist. Workers verify against criteria, not file lists. **Every criterion MUST have a `check` that is a concrete, independently runnable shell command** (e.g., `"bun run build"`, `"bun test --run"`). Never leave checks as prose descriptions — workers execute these literally. If a role touches compiled code, include BOTH a build check AND a test check as separate criteria. **Checks must verify functional correctness, not just pattern existence.** A grep confirming a CSS rule exists is insufficient — the check must verify the rule actually takes effect (e.g., start a dev server and curl the page, or verify that referenced classes/imports resolve to definitions). At least one criterion per role should test end-to-end behavior, not just file contents. **Check commands must fail-fast with non-zero exit codes on failure.**
+5. Write `.design/plan.json` with role briefs (see schema below).
+6. For each role, include `expertContext[]` referencing specific expert artifacts and the sections relevant to that role. **Do not lossy-compress expert findings into terse fields** — reference the full artifacts.
+7. Write criteria-based `acceptanceCriteria` — define WHAT should work, not WHICH files should exist. Workers verify against criteria, not file lists. **Every criterion MUST have a `check` that is a concrete, independently runnable shell command** (e.g., `"bun run build"`, `"bun test --run"`). Never leave checks as prose descriptions — workers execute these literally. If a role touches compiled code, include BOTH a build check AND a test check as separate criteria. **Checks must verify functional correctness, not just pattern existence.** A grep confirming a CSS rule exists is insufficient — the check must verify the rule actually takes effect (e.g., start a dev server and curl the page, or verify that referenced classes/imports resolve to definitions). At least one criterion per role should test end-to-end behavior, not just file contents. **Check commands must fail-fast with non-zero exit codes on failure.**
 
    **Learn from past AC mutations**: If `plan-health-summary` returned `acMutations` from recent execute runs, review them before writing checks. Each mutation shows a check that design got wrong and execute had to fix. Common patterns to avoid: wrong test data (e.g., `--skill test` when only design/execute/research/simplify are valid), fragile position checks (e.g., checking first 30 lines when content may shift), version comparisons that pass trivially (e.g., `int(patch) > 0` passes for any non-zero patch). Use the `after` field as a template for better checks.
 
@@ -181,9 +178,9 @@ The lead collects expert findings and writes the plan.
    | Count lines/entries in output | `python3 -c "import json; d=json.load(open('f.json')); assert len(d['items'])>=3"` |
    | Shell script file is executable and exits 0 | `bash path/to/script.sh` |
 
-7. Add `auxiliaryRoles[]` (see Auxiliary Roles section).
-8. Write to `.design/plan.json` (do NOT run finalize yet — that happens in Step 6).
-9. **Draft plan review** (complex/high-stakes tier only): Display the draft plan to the user before finalization:
+8. Add `auxiliaryRoles[]` (see Auxiliary Roles section).
+9. Write to `.design/plan.json` (do NOT run finalize yet — that happens in Step 6).
+10. **Draft plan review** (complex/high-stakes tier only): Display the draft plan to the user before finalization:
    ```
    Draft Plan ({roleCount} roles):
    - Role 0: {name} — {goal one-line} [{model}]
@@ -356,9 +353,7 @@ Run /do:execute to begin.
 
 ### plan.json (schemaVersion 4)
 
-The authoritative interface between design and execute. Execute reads this file; design produces it.
-
-**Top-level fields**: schemaVersion (4), goal, context {stack, conventions, testCommand, buildCommand, lsp, complexityTier (trivial|standard|complex|high-stakes)}, expertArtifacts [{name, path, summary}], interfaceContracts (path to .design/interfaces.json, if produced), designDecisions [], verificationSpecs [] (optional), roles[], auxiliaryRoles[], progress {completedRoles: []}
+**Top-level fields**: schemaVersion (4), goal, context {stack, conventions, testCommand, buildCommand, lsp}, expertArtifacts [{name, path, summary}], designDecisions [], verificationSpecs [] (optional), roles[], auxiliaryRoles[], progress {completedRoles: []}
 
 **designDecisions fields**: conflict, experts (array), decision, reasoning. Documents lead's resolution of expert disagreements.
 

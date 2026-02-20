@@ -60,7 +60,7 @@ A single `shared/plan.py` at the repo root provides all deterministic operations
 
 - **Query** (runtime-invoked): team-name, status, summary, overlap-matrix, tasklist-data, worker-pool, retry-candidates, circuit-breaker, memory-search, plan-health-summary
 - **Mutation** (runtime-invoked): update-status, memory-add, memory-feedback, reflection-add, resume-reset, archive, trace-add
-- **Validation** (runtime-invoked): expert-validate, validate-checks, research-validate, research-summary
+- **Validation** (runtime-invoked): expert-validate, validate-checks, validate-auxiliary-report, worker-completion-validate, research-validate, research-summary
 - **Build** (1 command): finalize — validates role briefs, computes directory overlaps, validates state transitions, and computes SHA256 checksums for verification specs in one atomic operation
 - **Test** (1 command): self-test — exercises every command against synthetic fixtures in a temp directory, reports pass/fail per command as JSON
 - **Developer inspection tools** (not invoked by skills at runtime): reflection-search, memory-review, health-check, plan-diff, sync-check, trace-search, trace-summary, reflection-validate, memory-summary, trace-validate
@@ -97,7 +97,7 @@ Skills communicate through structured JSON files in `.design/` (gitignored). Two
 
 **Status fields** (initialized by finalize): status (`pending`), result (null), attempts (0), directoryOverlaps (computed)
 
-**Verification spec fields**: `verificationSpecs[]` — top-level array of `{role, path, runCommand, properties, sha256}`. See SKILL.md Step 4.5 for authorship and content guidelines.
+**Verification spec fields**: `verificationSpecs[]` — top-level array of `{role, path, runCommand, properties, sha256}`. See design/SKILL.md Step 6 for authorship and content guidelines.
 
 **Auxiliary roles** — standalone Task tool agents (not team members) that improve quality without directly implementing features:
 - `challenger` (pre-execution) — reviews plan, challenges assumptions, finds gaps. Blocking issues are mandatory gates: lead must address each one before proceeding
@@ -115,8 +115,6 @@ Skills communicate through structured JSON files in `.design/` (gitignored). Two
 - **Design handoff fields**: source, element, material, usage — preserves expert building blocks so /do:design can read research.json without re-reading expert artifacts
 
 ### Execution Model
-
-All four skills use the **main conversation as team lead** with Agent Teams (or Task for single-agent skills). Runtime behavior is defined in each SKILL.md file — this section covers structural facts only.
 
 - **Lead** (main conversation): orchestration only via `TeamCreate`, `SendMessage`, `TaskCreate`/`TaskUpdate`/`TaskList`, `Bash` (scripts, git, verification), `AskUserQuestion`. Never reads project source files.
 - **Teammates**: specialist agents spawned into the team. Discover lead name via `~/.claude/teams/{team-name}/config.json`.

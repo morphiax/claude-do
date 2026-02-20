@@ -8,8 +8,6 @@ argument-hint: "<target-path> [--scope <pattern>]"
 
 Analyze code or text for simplification opportunities using cascade thinking — one insight eliminates multiple components — and produce `.design/plan.json` with preservation-focused worker roles executable via `/do:execute`.
 
-Works on any target: application code, scripts, SKILL.md prompts, configuration files, documentation. The cascade framework applies equally to code duplication and prose redundancy.
-
 Before starting the Flow, Read `lead-protocol-core.md` and `lead-protocol-teams.md`. They define the canonical lead protocol (boundaries, team setup, trace emission, liveness, memory injection). Substitute: {skill}=simplify, {agents}=analysts.
 
 **CRITICAL BOUNDARY: /do:simplify analyzes and plans — it does NOT execute simplifications. Output is `.design/plan.json` for `/do:execute`. This skill is NOT `/do:design` (which decomposes arbitrary goals).**
@@ -204,7 +202,7 @@ Each analyst finding must include:
 - **Tools denied**: Edit, Write.
 - Focus: component count reduction, interface seam elimination, cross-boundary unification.
 
-5. **Analyst liveness pipeline**: You MUST follow the Liveness Pipeline procedure in lead-protocol-teams.md step-by-step — do not skip steps. Track completion per analyst: (a) SendMessage received AND (b) artifact file exists (`ls .design/expert-{name}.json`). Show user status: "Analyst progress: {name} done ({M}/{N} complete)."
+5. **Analyst liveness pipeline**: You MUST follow the Liveness Pipeline procedure in lead-protocol-teams.md step-by-step — do not skip steps.
 
 ### 4. Cascade-First Resolution
 
@@ -244,7 +242,7 @@ If ALL findings are `organizationalContextNeeded: yes` with no actionable simpli
    - Include rollbackTriggers: test failure, security path detection, organizational context gap.
    - Add constraint: "SKIP recursive algorithms — flag and report instead."
 
-   **Acceptance criteria anti-patterns**: Apply the same anti-patterns and check command authoring rules as design/SKILL.md Step 5 (canonical list). Never use grep-only checks, test -f as sole check, wc -l counts, `|| true` fallbacks, or pipe chains without exit-code handling.
+   **Acceptance criteria anti-patterns**: Apply the anti-patterns and check command authoring rules from design/SKILL.md Step 5 (canonical list).
 
 7. **Anti-pattern guards** (CRITICAL — do NOT proceed to finalize if any guard triggers without user approval):
    - **Token budget** (text targets): Calculate net token delta for proposed changes. If total would increase target beyond its current size, ask user to approve flagged changes explicitly.
