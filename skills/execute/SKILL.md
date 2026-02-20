@@ -32,7 +32,7 @@ Before starting the Flow, Read `lead-protocol-core.md` and `lead-protocol-teams.
 
 ### 2. Pre-Execution Auxiliaries
 
-Check `auxiliaryRoles[]` in plan.json for `type: "pre-execution"` roles. **Tier check**: If `roleCount <= 2`, skip challenger and scout — proceed to Step 3 (memory-curator still runs post-execution). Otherwise: **Run Challenger and Scout concurrently in parallel** — they have no data dependency (both only read plan.json and expert artifacts). **Progress update**: "Running challenger and scout in parallel..."
+Check `auxiliaryRoles[]` in plan.json for `type: "pre-execution"` roles. If none exist (the default — `/do:reflect` now handles pre-execution review), skip to Step 3. If pre-execution auxiliaries are present in the plan, run them concurrently in parallel. **Progress update**: "Running {names} in parallel..."
 
 Auxiliaries are standalone Task tool calls (no `team_name`) — they don't need team coordination. The Task tool returns their result directly. Do not use `SendMessage` or `TaskOutput` for auxiliaries.
 
@@ -98,7 +98,7 @@ Spawn workers as teammates using the Task tool. Each worker prompt MUST include:
 1. **Identity**: "You are a specialist: {role.name}. Your goal: {role.goal}"
 2. **Brief location**: "Read your full role brief from `.design/plan.json` at `roles[{roleIndex}]`."
 3. **Expert context**: "Read these expert artifacts for context: {expertContext entries with artifact paths and relevance notes}." If a scout report exists: "Also read `.design/scout-report.json` for codebase reality check."
-4. **Past learnings** (if memories found): "Relevant past learnings: {bullet list of memories with format: '- {category}: {summary} (from {created})'}" You MUST follow the Reflection Prepend procedure in lead-protocol-core.md step-by-step — do not skip steps. Match `unresolvedImprovements` against this role's name, goal, and scope.
+4. **Past learnings** (if memories found): "Relevant past learnings: {bullet list of memories with format: '- {category}: {summary} (from {created})'}"
 5. **Process**: "Explore your scope directories ({scope.directories}). Plan your own approach based on what you find in the actual codebase. Implement, test, verify against your acceptance criteria."
 6. **Constraints**: "Constraints from role brief — read them from plan.json roles[{roleIndex}].constraints."
 7. **Done when**: "Done when — read acceptance criteria from plan.json roles[{roleIndex}].acceptanceCriteria."

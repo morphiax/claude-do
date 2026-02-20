@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.29.0] - 2026-02-20
+
+### Changed
+
+- **Design ambiguity check**: Pre-flight now uses sequential-thinking to assess goal ambiguity and scope assumptions before proceeding. Added scope change gate for when existing solutions would alter what gets built.
+- **Reflect skill expanded**: Significant expansion of reflect SKILL.md with deeper adversarial review and fix-skill capabilities.
+- **Minor refinements**: Execute, research, and simplify SKILL.md adjustments for consistency with reflect extraction.
+
 ## [2.28.1] - 2026-02-20
 
 ### Changed

@@ -54,7 +54,7 @@ Before starting the Flow, Read `lead-protocol-core.md` and `lead-protocol-teams.
 5. **Anti-pattern guards** (text targets — snapshot for regression check):
    - Copy target file(s) to `.design/skill-snapshot.md` (or `.design/text-snapshot/`) via Bash for baseline comparison.
    - **Circular simplification detection**: Check `.design/history/` for recent simplify runs targeting the same files: `ls .design/history/*/expert-*.json 2>/dev/null | tail -5`. If found, warn user: "Previous simplify runs detected. Review history to avoid circular changes."
-6. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "simplify {target}" --keywords "simplification,cascade,preservation"`. If `ok: false` or no memories, proceed without injection. Otherwise inject top 3-5 into analyst prompts. **Show user**: "Memory: injecting {count} past learnings — {keyword summaries}." You MUST follow the Reflection Prepend procedure in lead-protocol-core.md step-by-step — do not skip steps.
+6. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "simplify {target}" --keywords "simplification,cascade,preservation"`. If `ok: false` or no memories, proceed without injection. Otherwise inject top 3-5 into analyst prompts. **Show user**: "Memory: injecting {count} past learnings — {keyword summaries}."
 7. **Announce to user**: "Simplify ({target type}): analyzing {scope description}. Spawning {N} analysts ({names}). Auxiliaries: {list — challenger+scout+integration-verifier+memory-curator for Standard+, memory-curator+integration-verifier only for Trivial tier (roleCount <= 2)}."
 
 ### 3. Spawn Analysts

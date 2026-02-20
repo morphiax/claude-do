@@ -28,7 +28,7 @@ Before starting the Flow, Read `lead-protocol-core.md` and `lead-protocol-teams.
 ### 1. Pre-flight
 
 1. **Lifecycle context**: Run Lifecycle Context protocol (see lead-protocol-core.md).
-2. **Check for ambiguity**: If the goal has multiple valid interpretations per the Clarification Protocol, use `AskUserQuestion` before proceeding.
+2. **Check for ambiguity**: Use `sequential-thinking` to assess: "Is this goal genuinely unambiguous? What assumptions am I making about scope? Does the goal's wording imply something different from what I'm planning to build? Would a reasonable person read this goal and expect a different output?" If any ambiguity surfaces, use `AskUserQuestion` before proceeding. **Scope change gate**: If during design you discover existing solutions that would change what gets built (e.g., "build X" becomes "import from existing X"), use `AskUserQuestion` before proceeding. The user asked for X — building Y instead requires explicit consent, even if Y is more efficient.
 3. If >5 roles likely needed, suggest phases. Design only phase 1.
 4. Check existing plan: `python3 $PLAN_CLI status .design/plan.json`. If `ok` and `isResume`: ask user "Existing plan has {counts} roles. Overwrite?" If declined, stop.
 5. Archive stale artifacts: `python3 $PLAN_CLI archive .design`
@@ -48,7 +48,7 @@ The lead directly assesses the goal to determine needed perspectives.
 | Complex (cross-cutting concerns) | 4-6 |
 | High-stakes (production, security, data) | 3-8 |
 
-4. Select auxiliary roles. If complexity tier is Trivial (1-2 roles): only memory-curator runs. Otherwise: challenger and integration-verifier always run; scout runs when the goal touches code (implementation, refactoring, bug fixes — not pure docs/research/config).
+4. Select auxiliary roles. For all tiers: integration-verifier and memory-curator. No pre-execution auxiliaries — `/do:reflect` handles plan review and artifact fixes between design and execute.
 5. **Announce to user**: Display planned team composition, complexity tier, and auxiliaries: "Design: {complexity tier}, spawning {N} experts ({names}). Auxiliaries: {list}."
 
 **Expert Selection**
@@ -82,7 +82,7 @@ Create the team and spawn experts in parallel.
 
 1. `TeamDelete(team_name: $TEAM_NAME)` (ignore errors), `TeamCreate(team_name: $TEAM_NAME)`. If TeamCreate fails, tell user Agent Teams is required and stop. If TeamDelete succeeds, a previous session's team was cleaned up.
 2. **TeamCreate health check**: Verify team is reachable. If verification fails, `TeamDelete`, then retry `TeamCreate` once. If retry fails, abort with clear error message.
-3. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "{goal}" --stack "{stack}"`. If `ok: false` or no memories → proceed without injection. Otherwise inject top 3-5 into expert prompts. **Show user**: "Memory: injecting {count} past learnings — {keyword summaries}." You MUST follow the Reflection Prepend procedure in lead-protocol-core.md step-by-step — do not skip steps.
+3. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "{goal}" --stack "{stack}"`. If `ok: false` or no memories → proceed without injection. Otherwise inject top 3-5 into expert prompts. **Show user**: "Memory: injecting {count} past learnings — {keyword summaries}."
 4. `TaskCreate` for each expert.
 5. Spawn experts as teammates using the Task tool. For each expert:
    - Before Task call: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event spawn --skill design --agent "{expert-name}" --payload '{"model":"sonnet","memoriesInjected":N}' || true`
@@ -90,6 +90,7 @@ Create the team and spawn experts in parallel.
    - Write prompts appropriate to the goal and each expert's focus area. Ask them to score relevant dimensions and trace scenarios.
    - **Behavioral traits**: Include behavioral instructions — tell experts HOW to think, not WHO to be. Examples: "Question assumptions that feel obvious", "Reject solutions that add complexity without clear benefit", "Focus on failure modes before success paths", "Assume prior art exists — search before inventing." Tailor traits to the expert's focus (e.g., architect: "Prefer composable patterns over monolithic solutions"; security specialist: "Assume every input is hostile until validated").
    - **Measurable estimates**: Instruct experts: "Base verification properties and estimates on actual code metrics (file counts, line counts, test coverage, dependency depth) where possible. Read codebase samples to ground estimates. Avoid theoretical predictions — anchor to observable reality."
+   - **Verify claims against reality**: Instruct experts: "When claiming existing code/data/infrastructure works, verify by checking actual outputs — not just code structure. Read data files, run scripts, inspect results. A scraper that exists in code but produces empty output is not 'fully functional'. Report what you verified vs what you inferred."
    - Every expert prompt MUST end with: "In your findings JSON, include a `verificationProperties` section: an array of properties that should hold regardless of implementation (behavioral invariants, boundary conditions, cross-role contracts). Format: `[{\"property\": \"...\", \"category\": \"invariant|boundary|integration\", \"testableVia\": \"how to test this with concrete commands/endpoints\"}]`. Provide concrete, externally observable properties that can be tested without reading source code. When suggesting testableVia commands, avoid anti-patterns: grep-only checks (verifies text exists, not that feature works), `test -f` as sole check (file exists but may contain errors), `wc -l` counts (size not correctness), `|| echo` or `|| true` fallbacks (always exits 0), pipe chains without exit-code handling (may mask failures)."
    - Instruct: "Save your complete findings to `.design/expert-{name}.json` as structured JSON."
    - Instruct: "Then SendMessage to the lead with a summary."
@@ -113,7 +114,7 @@ Expert coordination prevents **integration failures** (domains don't fit togethe
 
 #### Phase Execution Pattern
 
-All phases follow: **maximum 2 rounds** of negotiation per conflict. If no convergence after 2 rounds, lead decides and documents reasoning.
+All phases follow: **maximum 2 rounds** of negotiation per conflict. If no convergence after 2 rounds, lead decides and documents reasoning. **When resolving conflicts**, use `sequential-thinking` to weigh each position: "What evidence supports each side? What would failure look like if I choose wrong? Is there a synthesis that preserves both positions' strengths?"
 
 **Phase A steps**:
 1. Lead identifies domain boundaries (API shapes, schemas, file formats, shared state)
@@ -141,7 +142,8 @@ All phases follow: **maximum 2 rounds** of negotiation per conflict. If no conve
 **Announce to user**: "Synthesizing expert findings into role briefs."
 
 1. Collect all expert findings (messages and `.design/expert-*.json` files).
-2. **Resolve conflicts from cross-review** (if debate occurred): For each challenge, evaluate trade-offs and decide. Document resolution in plan.json under `designDecisions[]` (schema: {conflict, experts, decision, reasoning}). **Show user each decision**: "Decision: {conflict} → {chosen approach} ({one-line reasoning})."
+2. **Evaluate expert claims**: Use `sequential-thinking` before writing role briefs: "For each key expert claim, is it grounded in verified evidence (data files checked, outputs inspected, code tested) or inferred from code structure alone? What gaps exist between expert findings and the actual project state? What assumptions am I encoding into role constraints that haven't been verified against reality?"
+3. **Resolve conflicts from cross-review** (if debate occurred): For each challenge, evaluate trade-offs and decide. Document resolution in plan.json under `designDecisions[]` (schema: {conflict, experts, decision, reasoning}). **Show user each decision**: "Decision: {conflict} → {chosen approach} ({one-line reasoning})."
 3. **Incorporate interface contracts**: If `.design/interfaces.json` was produced in Step 4, add each interface as a constraint on the relevant producer and consumer roles. Interface contracts are binding — workers must implement the agreed interface shape.
 4. Identify the specialist roles needed to execute this goal:
    - Each role scopes a **coherent problem domain** for one worker
@@ -150,6 +152,8 @@ All phases follow: **maximum 2 rounds** of negotiation per conflict. If no conve
 5. Write `.design/plan.json` with role briefs (see schema below).
 6. For each role, include `expertContext[]` referencing specific expert artifacts and the sections relevant to that role. **Do not lossy-compress expert findings into terse fields** — reference the full artifacts.
 7. Write criteria-based `acceptanceCriteria` — define WHAT should work, not WHICH files should exist. Workers verify against criteria, not file lists. **Every criterion MUST have a `check` that is a concrete, independently runnable shell command** (e.g., `"bun run build"`, `"bun test --run"`). Never leave checks as prose descriptions — workers execute these literally. If a role touches compiled code, include BOTH a build check AND a test check as separate criteria. **Checks must verify functional correctness, not just pattern existence.** A grep confirming a CSS rule exists is insufficient — the check must verify the rule actually takes effect (e.g., start a dev server and curl the page, or verify that referenced classes/imports resolve to definitions). At least one criterion per role should test end-to-end behavior, not just file contents. **Check commands must fail-fast with non-zero exit codes on failure.**
+
+   **Data-dependent roles**: For roles that import, serve, or display data, at least one AC check MUST verify that data actually exists and is correct — not just that the response shape is valid. A check that asserts `'data' in response` passes on empty arrays. Instead: assert `len(response['data']) > 0` or verify specific field values. Include fixture/sample data in the plan so data-dependent checks have something to verify against.
 
    **Learn from past AC mutations**: If `plan-health-summary` returned `acMutations` from recent execute runs, review them before writing checks. Each mutation shows a check that design got wrong and execute had to fix. Common patterns to avoid: wrong test data (e.g., `--skill test` when only design/execute/research/simplify are valid), fragile position checks (e.g., checking first 30 lines when content may shift), version comparisons that pass trivially (e.g., `int(patch) > 0` passes for any non-zero patch). Use the `after` field as a template for better checks.
 
@@ -270,24 +274,10 @@ Additional requirements for all cases: expert artifacts contain verificationProp
 
 ### 7. Auxiliary Roles
 
-Add auxiliary roles to `auxiliaryRoles[]` in plan.json. For Trivial tier (1-2 roles): only memory-curator. For Standard and above: challenger and integration-verifier are always included; scout is included when the goal touches code. These are meta-agents that improve quality without directly implementing features.
+Add auxiliary roles to `auxiliaryRoles[]` in plan.json. For all tiers: integration-verifier and memory-curator. Challenger and scout are NOT included — their functions are absorbed by `/do:reflect`, which runs between design and execute to review artifacts and fix issues with full conversation context.
 
 ```json
 [
-  {
-    "name": "challenger",
-    "type": "pre-execution",
-    "goal": "Review plan and expert artifacts. Challenge assumptions, find gaps, identify risks, propose alternatives.",
-    "model": "sonnet",
-    "trigger": "before-execution"
-  },
-  {
-    "name": "scout",
-    "type": "pre-execution",
-    "goal": "Read actual codebase structure in scope directories. Map patterns, conventions, integration points. Flag discrepancies with expert assumptions.",
-    "model": "sonnet",
-    "trigger": "before-execution"
-  },
   {
     "name": "integration-verifier",
     "type": "post-execution",

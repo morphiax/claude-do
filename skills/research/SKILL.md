@@ -56,7 +56,7 @@ Before starting the Flow, Read `lead-protocol-core.md`. It defines the canonical
 
 Spawn researchers as parallel standalone Task() subagents.
 
-1. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "{topic}" --keywords "{relevant keywords}"`. If `ok: false` or no memories, proceed without injection. Otherwise inject top 3-5 into researcher prompts. **Show user**: "Memory: injecting {count} past learnings — {keyword summaries}." You MUST follow the Reflection Prepend procedure in lead-protocol-core.md step-by-step — do not skip steps.
+1. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "{topic}" --keywords "{relevant keywords}"`. If `ok: false` or no memories, proceed without injection. Otherwise inject top 3-5 into researcher prompts. **Show user**: "Memory: injecting {count} past learnings — {keyword summaries}."
 2. **Spawn all 3 researchers in the same response** (parallel). Use `Task(subagent_type: "general-purpose", model: "sonnet")` for each — no `team_name` or `name` parameter. Task() returns their result directly when done — no SendMessage or liveness tracking needed.
    - Include scope bounds: "Focus your investigation on {directories/areas}. Do not explore unrelated areas."
    - Inject relevant memories if available.
@@ -129,8 +129,9 @@ The lead assembles pre-tagged findings into knowledge sections and writes recomm
 **Announce to user**: "Synthesizing {N} researcher findings into knowledge sections and recommendations."
 
 1. Collect all researcher findings from `.design/expert-*.json` files via Bash (`python3 -c "import json; ..."`).
-2. **Delegation check**: If researchers produced >15 total findings across >3 domains, spawn a single synthesis Task agent via `Task(subagent_type: "general-purpose", model: "sonnet")` to perform assembly. Otherwise, lead synthesizes directly.
-3. **Assemble sections**: Group findings by their section[] tags into the 5 knowledge sections. For each section, merge corroborating findings, surface contradictions, note gaps.
+2. **Evaluate finding quality**: Use `sequential-thinking` to assess: "For each researcher's key claims, is the evidence concrete (specific files, line numbers, measurements) or abstract ('the code uses X pattern')? Are findings corroborated by multiple researchers or single-sourced? What did researchers have access to but didn't investigate? What claims are stated with high confidence but rest on thin evidence?"
+3. **Delegation check**: If researchers produced >15 total findings across >3 domains, spawn a single synthesis Task agent via `Task(subagent_type: "general-purpose", model: "sonnet")` to perform assembly. Otherwise, lead synthesizes directly.
+4. **Assemble sections**: Group findings by their section[] tags into the 5 knowledge sections. For each section, merge corroborating findings, surface contradictions, note gaps.
 4. **Contradiction detection**: Scan for findings from different researchers that recommend opposing positions on the same area. If found, add to `contradictions[]` in research.json. Do NOT resolve via agent messaging — surface both positions for user decision.
 5. **Write recommendations**: Synthesize all sections into `recommendations[]`. Each recommendation has an `action` (adopt|adapt|investigate|defer|reject) and a concrete `designGoal` for `/do:design` (required when action is adopt or adapt).
 6. **Minimum threshold check**: Verify combined findings meet minimums: >=3 production post-mortems/lessons-learned in failurePatterns, >=5 beginner mistakes across all sections. If thresholds not met, add specific gaps to `researchGaps[]` (e.g., "Need 2 more production post-mortems for failure patterns"). Non-blocking — proceed with available findings.
