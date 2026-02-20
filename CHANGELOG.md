@@ -9,8 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **AC mutation tracking**: New `acMutations` reflection field captures every plan.json modification the lead makes before workers spawn — challenger AC fixes, scout constraint injections, pre-validation broken-check repairs, always-pass classifications. Each entry has `source`, `role`, `category`, `before`, `after`, `reason`. Surfaced via `plan-health-summary` so `/do:design` sees the gap between what it produced and what `/do:execute` needed, closing the AC quality feedback loop.
 - **High-value instruction tracking**: New `highValueInstructions` reflection field records which SKILL.md instructions demonstrably drove good outcomes. Each entry has `instruction`, `section`, and `evidence`. Surfaced via `plan-health-summary` so `/do:simplify` can see proven-impact instructions before removing them.
-- **Lead-side workaround capture**: New Step C in Reflection Procedure captures plan.json mutations the lead made during execution (AC fixes from challenger, constraint injections from scout). Generates `promptFixes` targeting upstream design skill even on fully successful runs.
+- **Lead-side workaround capture**: New Step C in Reflection Procedure captures plan.json mutations the lead made during execution. Generates `promptFixes` targeting upstream design skill even on fully successful runs.
 
 ### Fixed
 

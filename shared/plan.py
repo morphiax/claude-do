@@ -2942,6 +2942,7 @@ def _read_recent_reflections(design_dir: str) -> list[dict[str, Any]]:
         what_failed = evaluation.get("whatFailed", [])
         prompt_fixes = evaluation.get("promptFixes", [])
         high_value = evaluation.get("highValueInstructions", [])
+        ac_mutations = evaluation.get("acMutations", [])
         entry: dict[str, Any] = {
             "summary": f"{skill}: {outcome} ({status})",
             "goal": goal,
@@ -2951,6 +2952,8 @@ def _read_recent_reflections(design_dir: str) -> list[dict[str, Any]]:
         }
         if high_value:
             entry["highValueInstructions"] = high_value
+        if ac_mutations:
+            entry["acMutations"] = ac_mutations
         results.append(entry)
     return results
 

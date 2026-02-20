@@ -154,6 +154,8 @@ Each entry MUST have all 5 fields:
 | `no-verification` | Agent skipped verification entirely |
 | `reasoning-action-mismatch` | Agent stated correct plan but executed differently |
 
+**`acMutations`** (execute only — from Step C): Lead-side plan.json modifications made before workers spawn. Each entry: `{"source": "challenger|pre-validation|scout", "role": "affected role", "category": "issue type", "before": "original", "after": "modified or null", "reason": "why"}`. Feeds back to `/do:design` to improve AC authoring quality. This field captures the gap between what design produced and what execute needed — the exact signal design needs to stop generating the same anti-patterns.
+
 **`acGradients`** (execute only — from Step A): The raw `(check, exitCode, stderr)` triples that make prompt fixes evidence-based rather than speculative.
 
 **`stepsSkipped`** — protocol steps that were skipped and why (e.g., `"Step 2.3: AC pre-validation skipped — plan had no check commands"`)

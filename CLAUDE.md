@@ -78,7 +78,7 @@ Skills communicate through structured JSON files in `.design/` (gitignored). Two
 - Authoritative state; TaskList is a derived view. Schema version 4 required.
 - Roles use name-based dependencies resolved to indices by `finalize`.
 - **Persistent `.design/` files** (survive archiving): `memory.jsonl`, `reflection.jsonl`, `research.json`, `trace.jsonl`. Everything else archived to `.design/history/{timestamp}/`
-- **Reflection fields**: `promptFixes` (primary — captures failure-driven AND lead-side workarounds), `highValueInstructions` (proven instructions to protect from simplification), `acGradients` (execute only), `stepsSkipped`, `instructionsIgnored`, `whatWorked`/`whatFailed`
+- **Reflection fields**: `promptFixes` (primary — captures failure-driven AND lead-side workarounds), `acMutations` (execute only — lead-side plan.json fixes before workers spawn, feeds back to design), `highValueInstructions` (proven instructions to protect from simplification), `acGradients` (execute only — runtime AC failures), `stepsSkipped`, `instructionsIgnored`, `whatWorked`/`whatFailed`
 - Verification specs: optional `verificationSpecs[]` in plan.json. `finalize` computes SHA256 checksums for tamper detection.
 
 **Top-level fields**: schemaVersion (4), goal, context {stack, conventions, testCommand, buildCommand, lsp}, expertArtifacts [{name, path, summary}], designDecisions [{conflict, experts, decision, reasoning}], verificationSpecs [] (optional), roles[], auxiliaryRoles[], progress {completedRoles: []}
