@@ -149,6 +149,8 @@ Process results: blocking issues feed into Step 4 (Resolution) as mandatory patc
 
 This phase proposes permanent improvements to SKILL.md files so the same class of error is prevented in ALL future runs, not just patched for this project.
 
+**IMPORTANT: Always edit the MARKETPLACE copy of SKILL.md files** at `~/.claude/plugins/marketplaces/do/skills/{skill}/SKILL.md` — NOT the cache copy at `~/.claude/plugins/cache/do/do/*/skills/{skill}/SKILL.md`. The cache is regenerated from the marketplace; edits to cache files will be lost.
+
 **Process**:
 
 1. From the adversarial thinking (Step 2) and resolution (Step 4), identify findings that are **general** — they would prevent the same error class regardless of project, goal, or technology stack. Filter out project-specific findings.

@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.1] - 2026-02-21
+
+### Changed
+
+- **Reflect: marketplace path guidance**: Added note to always edit marketplace copy of SKILL.md files, not the cache copy which is regenerated.
+- **Research: user context check**: Added mandatory pre-spawn check to clarify user situation before researching. Prevents broad landscape surveys when the user has a specific use case.
+- **Research: adaptive researcher composition**: Researcher roles are now tailored to the topic instead of fixed 3-role template.
+- **Research: audience-targeted recommendations**: Recommendations now lead with the audience matching the clarified user context.
+
 ## [3.0.0] - 2026-02-21
 
 ### Changed
