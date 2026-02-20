@@ -208,14 +208,11 @@ Integration: {PASS|FAIL|SKIPPED — with details}
 {if failures: "Recommended: /do:execute to retry failed roles, or /do:design to redesign."}
 {if all passed: "All roles complete. Review reflection.jsonl for patterns across runs."}
 ```
-2. **Self-reflection** — You MUST follow the Self-Monitoring procedure (Reflection Procedure, Steps A through E) in lead-protocol-core.md step-by-step — do not skip steps. Use the `acGradients` list from Step 1.9 as input to Step A (already collected during monitoring). Use the `acMutations` list from Step 1.9 as input to Step C (already collected during Step 2). Execute-specific fields alongside the base schema: `roleQuality`, `coordinationNotes`.
+2. **Trace** — Emit completion trace:
 
    ```bash
-   echo '{"roleQuality":"<N of M roles completed first attempt>","coordinationNotes":"<any team/worker observations>","acGradients":[...from session list...],"acMutations":[...from session list...],"auxiliaryEffectiveness":[...per auxiliary ran this session...],"highValueInstructions":[...from Step D...],"promptFixes":[...derived via Lamarckian Step B + Step C...],"stepsSkipped":[...],"instructionsIgnored":[...],"whatWorked":[...],"whatFailed":[...]}' | python3 $PLAN_CLI reflection-add .design/reflection.jsonl --skill execute --goal "<the goal from plan.json>" --outcome "<completed|partial|failed|aborted>" --goal-achieved <true|false>
    python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event skill-complete --skill execute --payload '{"outcome":"<completed|partial|failed|aborted>","rolesCompleted":N,"rolesFailed":N,"retries":N,"auxiliariesRun":["..."],"auxiliariesSkipped":["..."]}' || true
    ```
-
-   On failure: proceed (not blocking).
 
 3. **Memory curation** — Spawn memory-curator via `Task(subagent_type: "general-purpose")`:
 
@@ -255,9 +252,9 @@ Wait for curator completion. **Show user**: "Memory curation: {count} learnings 
 
    This boosts memories that correlated with first-attempt success (+1 importance) and decays memories that correlated with failure (-1 importance). Ambiguous cases (succeeded on retry) are left unchanged. All entries get `usage_count` incremented. On failure: proceed (non-blocking).
 
-4. **Next action** — Suggest the next step per the Next Action Suggestion protocol in lead-protocol-core.md:
-   - All roles passed: "Next: review the output" or suggest `/do:simplify {target}` if significant code was added.
-   - Partial/failed: suggest `/do:execute` to retry, or `/do:design {goal}` if failures are structural.
+4. **Next action** — Always include `/do:reflect` first, then the situation-specific follow-up:
+   - All roles passed: "Next: `/do:reflect`" then "review the output" or `/do:simplify {target}` if significant code was added.
+   - Partial/failed: "Next: `/do:reflect`" then `/do:execute` to retry, or `/do:design {goal}` if failures are structural.
 
 5. Archive: If all completed, move artifacts to history:
    ```bash

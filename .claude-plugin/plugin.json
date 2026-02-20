@@ -1,6 +1,6 @@
 {
   "name": "do",
-  "version": "2.27.0",
+  "version": "2.28.0",
   "description": "Structured planning, dependency-graph execution, comprehensive knowledge research, and cascade simplification for code and text — /do:design, /do:execute, /do:research, and /do:simplify. All four skills self-monitor and write episodic observations to .design/.",
   "author": {
     "name": "morphiax",

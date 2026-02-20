@@ -324,19 +324,17 @@ Memories applied: {count or "none"}
 Run /do:execute to begin simplification.
 ```
 
-5. **Self-reflection** — You MUST follow the Self-Monitoring procedure in lead-protocol-core.md step-by-step — do not skip steps. Skill-specific fields to include alongside the base schema:
+5. **Trace** — Emit completion trace:
 
-```bash
-echo '{"targetType":"<code|text|mixed>","analystQuality":"<which analysts contributed most/least>","cascadeDepth":"<deep structural|mostly surface>","preservationConfidence":"<high|medium|low>","organizationalContextItems":<count>, ...base fields from lead-protocol-core.md...}' | python3 $PLAN_CLI reflection-add .design/reflection.jsonl --skill simplify --goal "<the target>" --outcome "<completed|partial|failed|aborted>" --goal-achieved <true|false>
-python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event skill-complete --skill simplify --payload '{"outcome":"<completed|partial|failed|aborted>","targetType":"<code|text|mixed>","roleCount":N,"analystsSpawned":N,"cascadeChains":N,"auxiliariesSkipped":["..."]}' || true
-```
+   ```bash
+   python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event skill-complete --skill simplify --payload '{"outcome":"<completed|partial|failed|aborted>","targetType":"<code|text|mixed>","roleCount":N,"analystsSpawned":N,"cascadeChains":N,"auxiliariesSkipped":["..."]}' || true
+   ```
 
-On failure: proceed (not blocking).
-
-6. **Next action** — Suggest the next step per the Next Action Suggestion protocol in lead-protocol-core.md. For simplify, this is always:
+6. **Next action** — Always include `/do:reflect` first:
 
    ```
-   Next: /do:execute
+   Next: /do:reflect (review this simplification for gaps and missed opportunities)
+   Then: /do:execute
    ```
 
 **Fallback** (if finalize fails):

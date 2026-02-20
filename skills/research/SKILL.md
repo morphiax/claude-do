@@ -176,20 +176,24 @@ To act on this research: /do:design {designGoal from primary adopt/adapt recomme
 2. If contradictions exist, display separately: "Contradiction in {area}: {positionA} vs {positionB}. {userDecisionNeeded}."
 3. **Summary**: Run `python3 $PLAN_CLI research-summary .design/research.json` and display.
 
-### 6. Reflection
+### 6. Completion
 
-1. **Self-reflection** — You MUST follow the Self-Monitoring procedure in lead-protocol-core.md step-by-step — do not skip steps. Skill-specific fields to include alongside the base schema:
+1. **Trace** — Emit completion trace:
 
-```bash
-echo '{"researchQuality":"<assessment>","sectionCoverage":"<complete|partial>","scopeDiscipline":"<stayed focused|drifted>", ...base fields from lead-protocol-core.md...}' | python3 $PLAN_CLI reflection-add .design/reflection.jsonl --skill research --goal "<the investigated topic>" --outcome "<completed|partial|failed|aborted>" --goal-achieved <true|false>
-python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event skill-complete --skill research --payload '{"outcome":"<completed|partial|failed|aborted>","researchersSpawned":N,"findingsCount":N,"recommendationsProduced":N,"contradictionsFound":N,"sectionsComplete":N}' || true
-```
+   ```bash
+   python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event skill-complete --skill research --payload '{"outcome":"<completed|partial|failed|aborted>","researchersSpawned":N,"findingsCount":N,"recommendationsProduced":N,"contradictionsFound":N,"sectionsComplete":N}' || true
+   ```
 
-On failure: proceed (not blocking).
+2. **Next action** — Suggest the next steps. Always include `/do:reflect` first, then the skill-specific follow-up:
 
-2. **Next action** — Suggest the next step per the Next Action Suggestion protocol in lead-protocol-core.md. For research, derive from the `recommendations` array in research.json:
+   ```
+   Next: /do:reflect (review this research for gaps and missed opportunities)
+   Then: /do:design {designGoal from primary adopt/adapt recommendation}
+   ```
+
+   For the design suggestion, derive from the `recommendations` array in research.json:
    - For each recommendation with action `adopt` or `adapt`, use its `designGoal` field.
-   - Show up to 3 as numbered options: `1. Next: /do:design {designGoal}`.
+   - Show up to 3 as numbered options.
    - If no adopt/adapt recommendations exist, suggest `/do:design` with a goal synthesized from the top finding.
 
 ---

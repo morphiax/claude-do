@@ -334,19 +334,17 @@ Memories applied: {count or "none"}
 Run /do:execute to begin.
 ```
 
-5. **Self-reflection** — You MUST follow the Self-Monitoring procedure in lead-protocol-core.md step-by-step — do not skip steps. Skill-specific fields to include alongside the base schema:
+5. **Trace** — Emit completion trace:
 
    ```bash
-   echo '{"expertQuality":"<which experts contributed most/least>","crossReviewValue":"<useful|redundant|skipped>","planCompleteness":"<assessment>", ...base fields from lead-protocol-core.md...}' | python3 $PLAN_CLI reflection-add .design/reflection.jsonl --skill design --goal "<the goal>" --outcome "<completed|partial|failed|aborted>" --goal-achieved <true|false>
    python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event skill-complete --skill design --payload '{"outcome":"<completed|partial|failed|aborted>","roleCount":N,"expertsSpawned":N,"crossReviewPhases":["A"|"B"|"C"],"specsGenerated":N}' || true
    ```
 
-   On failure: proceed (not blocking).
-
-6. **Next action** — Suggest the next step per the Next Action Suggestion protocol in lead-protocol-core.md. For design, this is always:
+6. **Next action** — Suggest the next steps. Always include `/do:reflect` first:
 
    ```
-   Next: /do:execute
+   Next: /do:reflect (review this design for gaps and missed opportunities)
+   Then: /do:execute
    ```
 
 **Fallback** (if finalize fails):

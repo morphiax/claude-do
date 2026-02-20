@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.28.0] - 2026-02-20
+
+### Added
+
+- **`/do:reflect` skill**: New standalone reflection skill that runs self-monitoring as a separate step rather than inline at the end of each skill. Supports all existing reflection fields (promptFixes, acGradients, acMutations, highValueInstructions, etc.).
+
+### Changed
+
+- **Self-reflection extracted from skills**: Design, execute, research, and simplify no longer run inline `reflection-add`. Instead, next-action suggestions route through `/do:reflect` first. Trace emission remains in each skill.
+- **Next action routing**: All skills now suggest `/do:reflect` as the first next step, followed by the skill-specific follow-up.
+
 ## [2.27.0] - 2026-02-20
 
 ### Added

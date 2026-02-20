@@ -1981,9 +1981,9 @@ def cmd_reflection_add(args: argparse.Namespace) -> NoReturn:
     outcome = args.outcome
     goal_achieved = args.goal_achieved
 
-    if skill not in ("design", "execute", "research", "simplify"):
+    if skill not in ("design", "execute", "research", "simplify", "reflect"):
         error_exit(
-            f"Invalid skill '{skill}'. Must be one of: design, execute, research, simplify"
+            f"Invalid skill '{skill}'. Must be one of: design, execute, research, simplify, reflect"
         )
 
     if outcome not in ("completed", "partial", "failed", "aborted"):
