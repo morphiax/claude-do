@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.2] - 2026-02-21
+
+### Added
+
+- **Design: external system verification**: Experts now verify live external systems (URLs, APIs, page structure) via WebFetch/WebSearch when accessible, instead of relying on potentially stale code assumptions.
+- **Design: external integration AC requirements**: Roles connecting to external systems must have at least one AC testing actual connectivity or end-to-end logic with fixtures.
+- **Design: secrets guard**: Plan artifacts must never contain plaintext credentials — reference by env var name only.
+
 ## [3.0.1] - 2026-02-21
 
 ### Changed
