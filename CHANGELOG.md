@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.26.2] - 2026-02-20
+
+### Added
+
+- **High-value instruction tracking**: New `highValueInstructions` reflection field records which SKILL.md instructions demonstrably drove good outcomes. Each entry has `instruction`, `section`, and `evidence`. Surfaced via `plan-health-summary` so `/do:simplify` can see proven-impact instructions before removing them.
+- **Lead-side workaround capture**: New Step C in Reflection Procedure captures plan.json mutations the lead made during execution (AC fixes from challenger, constraint injections from scout). Generates `promptFixes` targeting upstream design skill even on fully successful runs.
+
+### Fixed
+
+- **CLAUDE.md mutation count**: Corrected "6 mutation" → "7 mutation" commands (trace-add was uncounted). Total 35 commands unchanged (17+7+9+1+1).
+
 ## [2.26.1] - 2026-02-20
 
 ### Changed

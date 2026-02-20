@@ -116,7 +116,11 @@ Every skill MUST call `reflection-add` at end of each run. **Purpose: produce da
 
 Do NOT skip Step 1. The ideal outcome forces specificity — without it, fixes drift into vague advice. If you cannot describe the ideal outcome, the failure is not understood well enough to fix.
 
-**Step C — Build reflection JSON**: Assemble the fields below and pipe to `reflection-add`:
+**Step C — Lead-side workarounds** (all skills, even on full success): Review any plan.json mutations the lead made during the run — AC check fixes from challenger findings, constraint injections from scout, pre-validation workarounds, nested quoting fixes. For each, write a `promptFix` targeting the *upstream* skill (usually design) to prevent the issue from recurring. Example: if the lead fixed a broken AC check command before spawning workers, the promptFix targets design's Step 5 (AC authoring) to prevent that class of check from being generated.
+
+**Step D — High-value instructions** (all skills): Review which SKILL.md instructions demonstrably drove good outcomes this run. Record these in `highValueInstructions` — an array of `{"instruction": "brief description of what the instruction says", "section": "SKILL.md section", "evidence": "what happened that proves it worked"}`. Purpose: protect these instructions from future simplification. If a `/do:simplify` run targets these files, the simplification analyst will see which instructions have proven impact and avoid removing them.
+
+**Step E — Build reflection JSON**: Assemble the fields below and pipe to `reflection-add`:
 
 ```bash
 echo '{"promptFixes":[...],"acGradients":[...],"stepsSkipped":[...],"instructionsIgnored":[...],"whatWorked":[...],"whatFailed":[...]}' \
@@ -128,7 +132,7 @@ echo '{"promptFixes":[...],"acGradients":[...],"stepsSkipped":[...],"instruction
 
 All arrays. Each skill adds skill-specific fields in its SKILL.md.
 
-**`promptFixes`** (PRIMARY — if empty, the reflection is too vague):
+**`promptFixes`** (PRIMARY — captures both failure-driven fixes AND lead-side workarounds from successful runs):
 
 Each entry MUST have all 5 fields:
 - `section` — which SKILL.md section (e.g., "Step 3", "Worker Protocol")
@@ -155,6 +159,8 @@ Each entry MUST have all 5 fields:
 **`stepsSkipped`** — protocol steps that were skipped and why (e.g., `"Step 2.3: AC pre-validation skipped — plan had no check commands"`)
 
 **`instructionsIgnored`** — SKILL.md instructions that agents didn't follow despite being told (e.g., `"Workers didn't use CoVe verification — reported completion without running checks"`)
+
+**`highValueInstructions`** — instructions that demonstrably drove good outcomes (from Step D). Each entry: `{"instruction": "...", "section": "...", "evidence": "..."}`. Protects proven instructions from future simplification.
 
 **`whatWorked`** / **`whatFailed`** — kept for backward compatibility but secondary to promptFixes.
 

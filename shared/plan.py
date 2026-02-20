@@ -2941,15 +2941,17 @@ def _read_recent_reflections(design_dir: str) -> list[dict[str, Any]]:
         do_next_time = evaluation.get("doNextTime", [])
         what_failed = evaluation.get("whatFailed", [])
         prompt_fixes = evaluation.get("promptFixes", [])
-        results.append(
-            {
-                "summary": f"{skill}: {outcome} ({status})",
-                "goal": goal,
-                "doNextTime": do_next_time,
-                "whatFailed": what_failed,
-                "promptFixes": prompt_fixes,
-            }
-        )
+        high_value = evaluation.get("highValueInstructions", [])
+        entry: dict[str, Any] = {
+            "summary": f"{skill}: {outcome} ({status})",
+            "goal": goal,
+            "doNextTime": do_next_time,
+            "whatFailed": what_failed,
+            "promptFixes": prompt_fixes,
+        }
+        if high_value:
+            entry["highValueInstructions"] = high_value
+        results.append(entry)
     return results
 
 

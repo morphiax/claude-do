@@ -27,7 +27,7 @@ All four skills must be tested end-to-end. Changes to design, execute, research,
 
 - `.claude-plugin/plugin.json` — Plugin manifest (name, version, metadata)
 - `.claude-plugin/marketplace.json` — Marketplace distribution config
-- `shared/plan.py` — Shared helper script (35 commands: 17 query, 6 mutation, 9 validation, 1 build, 2 test)
+- `shared/plan.py` — Shared helper script (35 commands: 17 query, 7 mutation, 9 validation, 1 build, 1 test)
 - `shared/lead-protocol-core.md` — Canonical lead protocol core (boundaries, no-polling, trace, memory, phase announcements, INSIGHT handling). Consumed by all team-based skills at startup.
 - `shared/lead-protocol-teams.md` — Lead protocol teams patterns (TeamCreate enforcement, liveness pipeline, team patterns). Consumed by design/execute/simplify at startup.
 - `skills/design/SKILL.md` — `/do:design` skill definition
@@ -78,6 +78,7 @@ Skills communicate through structured JSON files in `.design/` (gitignored). Two
 - Authoritative state; TaskList is a derived view. Schema version 4 required.
 - Roles use name-based dependencies resolved to indices by `finalize`.
 - **Persistent `.design/` files** (survive archiving): `memory.jsonl`, `reflection.jsonl`, `research.json`, `trace.jsonl`. Everything else archived to `.design/history/{timestamp}/`
+- **Reflection fields**: `promptFixes` (primary — captures failure-driven AND lead-side workarounds), `highValueInstructions` (proven instructions to protect from simplification), `acGradients` (execute only), `stepsSkipped`, `instructionsIgnored`, `whatWorked`/`whatFailed`
 - Verification specs: optional `verificationSpecs[]` in plan.json. `finalize` computes SHA256 checksums for tamper detection.
 
 **Top-level fields**: schemaVersion (4), goal, context {stack, conventions, testCommand, buildCommand, lsp}, expertArtifacts [{name, path, summary}], designDecisions [{conflict, experts, decision, reasoning}], verificationSpecs [] (optional), roles[], auxiliaryRoles[], progress {completedRoles: []}
