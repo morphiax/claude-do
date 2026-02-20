@@ -187,6 +187,11 @@ python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event
 
 On failure: proceed (not blocking).
 
+2. **Next action** — Suggest the next step per the Next Action Suggestion protocol in lead-protocol-core.md. For research, derive from the `recommendations` array in research.json:
+   - For each recommendation with action `adopt` or `adapt`, use its `designGoal` field.
+   - Show up to 3 as numbered options: `1. Next: /do:design {designGoal}`.
+   - If no adopt/adapt recommendations exist, suggest `/do:design` with a goal synthesized from the top finding.
+
 ---
 
 ## Output Contract: research.json (schemaVersion 1)

@@ -255,11 +255,15 @@ Wait for curator completion. **Show user**: "Memory curation: {count} learnings 
 
    This boosts memories that correlated with first-attempt success (+1 importance) and decays memories that correlated with failure (-1 importance). Ambiguous cases (succeeded on retry) are left unchanged. All entries get `usage_count` incremented. On failure: proceed (non-blocking).
 
-4. Archive: If all completed, move artifacts to history:
+4. **Next action** — Suggest the next step per the Next Action Suggestion protocol in lead-protocol-core.md:
+   - All roles passed: "Next: review the output" or suggest `/do:simplify {target}` if significant code was added.
+   - Partial/failed: suggest `/do:execute` to retry, or `/do:design {goal}` if failures are structural.
+
+5. Archive: If all completed, move artifacts to history:
    ```bash
    python3 $PLAN_CLI archive .design
    ```
    If partial (failures remain): leave artifacts in `.design/` for resume.
-5. Cleanup: `TeamDelete(team_name: $TEAM_NAME)`.
+6. Cleanup: `TeamDelete(team_name: $TEAM_NAME)`.
 
 **Arguments**: $ARGUMENTS

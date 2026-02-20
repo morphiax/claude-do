@@ -333,6 +333,12 @@ python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event
 
 On failure: proceed (not blocking).
 
+6. **Next action** — Suggest the next step per the Next Action Suggestion protocol in lead-protocol-core.md. For simplify, this is always:
+
+   ```
+   Next: /do:execute
+   ```
+
 **Fallback** (if finalize fails):
 1. Fix validation errors and re-run finalize.
 2. If structure is fundamentally broken: rebuild plan inline from analyst findings, one role at a time.

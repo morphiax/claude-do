@@ -173,3 +173,22 @@ Each entry MUST have all 5 fields:
 `plan-health-summary` surfaces `unresolvedImprovements` (deduplicated promptFixes from last 5 runs, sorted failures-first). Skills display these at startup so the lead can act on recurring issues.
 
 Ordering rules: `reflection-add` before `trace-add skill-complete`. Non-fatal: if reflection-add fails, proceed.
+
+## Next Action Suggestion
+
+After the completion summary (and after reflection/trace), suggest the logical next skill invocation. The suggestion MUST include a complete, copy-pasteable prompt with the user's goal contextualized from the current run.
+
+**Format** (display as the final output of the skill):
+
+```
+Next: /do:{skill} {comprehensive goal description derived from this run}
+```
+
+**Routing by skill**:
+- **research** → `/do:design` using the top `adopt`/`adapt` recommendation's `designGoal` field. If multiple recommendations, show up to 3 as numbered options.
+- **design** → `/do:execute` (no arguments needed, reads plan.json).
+- **execute** (all passed) → Suggest reviewing the output OR `/do:simplify {target}` if the codebase grew significantly.
+- **execute** (partial/failed) → `/do:execute` to retry failed roles, or `/do:design {goal}` to redesign if failures are structural.
+- **simplify** → `/do:execute` (no arguments needed, reads plan.json).
+
+The goal description must be specific and comprehensive — not a generic label but a sentence capturing what the user is building, the key technologies, and the target outcome. Derive this from `plan.json`'s goal, context.stack, and role names.
