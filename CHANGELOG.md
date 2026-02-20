@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.26.3] - 2026-02-20
+
+### Added
+
+- **Design consumes AC mutations**: Design Step 5 now reads `acMutations` from `plan-health-summary` before authoring acceptance criteria. Common anti-patterns (wrong test data, fragile position checks, trivially-passing comparisons) are documented with the `after` field as a template for better checks.
+- **Simplify protects proven instructions**: Analyst prompts include a 6th mandatory constraint: check `highValueInstructions` in reflection.jsonl before recommending removal. Instructions with recorded evidence are flagged `provenValue: true`.
+- **Auxiliary effectiveness tracking**: New `auxiliaryEffectiveness` reflection field records per-auxiliary ROI (ran, findings, blockingFindings, prevented). `plan-health-summary` aggregates across last 5 runs and flags `lowROI` auxiliaries with 3+ consecutive zero-finding runs.
+
 ## [2.26.2] - 2026-02-20
 
 ### Added

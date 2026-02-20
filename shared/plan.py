@@ -2954,6 +2954,9 @@ def _read_recent_reflections(design_dir: str) -> list[dict[str, Any]]:
             entry["highValueInstructions"] = high_value
         if ac_mutations:
             entry["acMutations"] = ac_mutations
+        aux_eff = evaluation.get("auxiliaryEffectiveness", [])
+        if aux_eff:
+            entry["auxiliaryEffectiveness"] = aux_eff
         results.append(entry)
     return results
 
@@ -3020,6 +3023,65 @@ def _extract_unresolved_improvements(design_dir: str) -> list[dict[str, Any]]:
     return deduped
 
 
+def _count_consecutive_empty(runs: list[dict[str, Any]]) -> int:
+    """Count consecutive runs with zero findings from the start of the list."""
+    count = 0
+    for r in runs:
+        if r.get("findings", 0) == 0:
+            count += 1
+        else:
+            break
+    return count
+
+
+def _collect_aux_data(design_dir: str) -> dict[str, list[dict[str, Any]]]:
+    """Collect auxiliaryEffectiveness entries grouped by auxiliary name."""
+    reflection_path = os.path.join(design_dir, "reflection.jsonl")
+    try:
+        entries = _read_jsonl(reflection_path)
+    except OSError:
+        return {}
+
+    entries.sort(key=lambda x: _parse_timestamp(x.get("timestamp", 0)), reverse=True)
+
+    aux_data: dict[str, list[dict[str, Any]]] = {}
+    for ref in entries[:5]:
+        for ae in ref.get("evaluation", {}).get("auxiliaryEffectiveness", []):
+            name = ae.get("auxiliary", "")
+            if name:
+                aux_data.setdefault(name, []).append(ae)
+    return aux_data
+
+
+def _aggregate_auxiliary_effectiveness(design_dir: str) -> list[dict[str, Any]]:
+    """Aggregate auxiliary effectiveness across recent reflections.
+
+    Returns per-auxiliary summary with run count, total findings,
+    blocking findings, and a flag if 3+ consecutive runs had zero findings.
+    """
+    aux_data = _collect_aux_data(design_dir)
+    if not aux_data:
+        return []
+
+    results: list[dict[str, Any]] = []
+    for name, runs in aux_data.items():
+        consecutive_empty = _count_consecutive_empty(runs)
+        entry: dict[str, Any] = {
+            "auxiliary": name,
+            "runsTracked": len(runs),
+            "totalFindings": sum(r.get("findings", 0) for r in runs),
+            "totalBlocking": sum(r.get("blockingFindings", 0) for r in runs),
+        }
+        if consecutive_empty >= 3:
+            entry["lowROI"] = True
+            entry["suggestion"] = (
+                f"Zero findings in {consecutive_empty} consecutive runs"
+                " — consider skipping"
+            )
+        results.append(entry)
+    return results
+
+
 def _read_plan_status(design_dir: str) -> str:
     """Read current plan completion status."""
     plan_path = os.path.join(design_dir, "plan.json")
@@ -3049,16 +3111,18 @@ def cmd_plan_health_summary(args: argparse.Namespace) -> NoReturn:
     summaries = [r["summary"] for r in recent]
     plan_status = _read_plan_status(design_dir)
     unresolved = _extract_unresolved_improvements(design_dir)
+    aux_roi = _aggregate_auxiliary_effectiveness(design_dir)
 
-    output_json(
-        {
-            "ok": True,
-            "reflections": summaries,
-            "recentRuns": recent,
-            "plan": plan_status,
-            "unresolvedImprovements": unresolved,
-        }
-    )
+    result: dict[str, Any] = {
+        "ok": True,
+        "reflections": summaries,
+        "recentRuns": recent,
+        "plan": plan_status,
+        "unresolvedImprovements": unresolved,
+    }
+    if aux_roi:
+        result["auxiliaryROI"] = aux_roi
+    output_json(result)
 
 
 def cmd_memory_review(args: argparse.Namespace) -> NoReturn:

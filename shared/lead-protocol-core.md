@@ -164,6 +164,8 @@ Each entry MUST have all 5 fields:
 
 **`highValueInstructions`** — instructions that demonstrably drove good outcomes (from Step D). Each entry: `{"instruction": "...", "section": "...", "evidence": "..."}`. Protects proven instructions from future simplification.
 
+**`auxiliaryEffectiveness`** — per-auxiliary outcome tracking for cross-run ROI analysis. Each entry: `{"auxiliary": "challenger|scout|integration-verifier|memory-curator", "ran": true|false, "findings": N, "blockingFindings": N, "prevented": "description of what would have gone wrong without this auxiliary, or 'unknown' if unclear"}`. When an auxiliary finds nothing actionable across 3+ consecutive runs, `plan-health-summary` flags it so the lead can consider skipping it (token savings). When an auxiliary consistently prevents failures, it's evidence for keeping it even if it seems expensive.
+
 **`whatWorked`** / **`whatFailed`** — kept for backward compatibility but secondary to promptFixes.
 
 ### Lifecycle Feedback

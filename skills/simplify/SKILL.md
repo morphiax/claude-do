@@ -75,13 +75,14 @@ Create the team and spawn analysts in parallel.
 
 **Analyst Prompts**:
 
-All analyst prompts MUST include these 5 mandatory constraints in order:
+All analyst prompts MUST include these 6 mandatory constraints in order:
 
 1. **PRESERVATION FIRST**: Never change behavior, only how it's achieved. Test suite must pass before and after every change. For text targets: all original capabilities, instructions, and behavioral outcomes must remain intact.
 2. **SYMPTOM-FIRST**: Identify complexity signals before proposing removals. Evidence before recommendation.
 3. **BALANCE WARNING**: Simplification that reduces clarity is NOT simplification. Reducing cyclomatic complexity by obscuring logic is a failure. Tightening prose by losing nuance is a failure.
 4. **ORGANIZATIONAL CONTEXT**: Flag items where you cannot determine if complexity is intentional. Mark as `organizationalContextNeeded: yes` rather than recommending removal.
 5. **CASCADE THINKING**: For every simplification opportunity, ask "If this is true, what else becomes unnecessary?" Report the elimination chain.
+6. **PROVEN INSTRUCTIONS**: Check `.design/reflection.jsonl` for `highValueInstructions` entries. Any instruction with recorded evidence of driving good outcomes MUST NOT be recommended for removal. Flag it as `provenValue: true` with the evidence. If no reflection.jsonl exists or no highValueInstructions are found, skip this constraint silently.
 
 Additional constraint for all analysts: **SKIP recursive algorithms — 42% LLM success rate is too risky for autonomous simplification. Flag and report instead.**
 
