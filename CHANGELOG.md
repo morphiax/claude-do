@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.5] - 2026-02-21
+
+### Changed
+
+- **Research: question-type distinction**: Scope assessment now distinguishes landscape surveys from integration questions, matching researcher composition to question type. Novel user ideas get dedicated researcher focus.
+- **Research: preserve user framing**: Synthesis must validate or challenge user-proposed terminology rather than silently replacing it with academic alternatives.
+
 ## [3.0.4] - 2026-02-21
 
 ### Added
