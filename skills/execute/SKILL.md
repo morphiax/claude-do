@@ -188,6 +188,11 @@ Integration: {PASS|FAIL|SKIPPED — with details}
 
 {if failures: "Recommended: /do:execute to retry failed roles, or /do:design to redesign."}
 {if all passed: "All roles complete."}
+
+{if goal involves external system (API, website, database, third-party service):
+"Manual Validation Required:
+  {specific command to run against live system, e.g. 'cd scraper && npm run scrape -- --headed --max-resorts 1'}
+  Automated tests used fixture/mock data. Verify against the live system before relying on this in production."}
 ```
 2. **Trace** — Emit completion trace:
 

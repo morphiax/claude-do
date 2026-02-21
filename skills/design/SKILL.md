@@ -150,6 +150,7 @@ All phases follow: **maximum 2 rounds** of negotiation per conflict. If no conve
    - Each role scopes a **coherent problem domain** for one worker
    - If a role would cross two unrelated domains, split into two roles
    - **Shared file check**: If a role modifies a file that exists identically in multiple directories (e.g., shared protocol files, copied configs), the plan MUST scope ALL copies for update — either in the same role or in a dependent role. Run `find` or `ls` to detect duplicates before finalizing scope.
+   - **Type/interface ownership**: When multiple roles produce or consume the same data contract (interface, type, schema), designate ONE role as the canonical owner of the definition. Other roles must import from the canonical source, not redefine it. Flag if the same interface already exists in multiple files — add a constraint for one role to consolidate.
    - Workers decide HOW to implement — briefs define WHAT and WHY
 5. Write `.design/plan.json` with role briefs (see schema below).
 6. For each role, include `expertContext[]` referencing specific expert artifacts and the sections relevant to that role. **Do not lossy-compress expert findings into terse fields** — reference the full artifacts.
