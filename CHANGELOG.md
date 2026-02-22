@@ -5,6 +5,52 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.4] - 2026-02-22
+
+### Changed
+
+- **Reflect: user experience perspective in Pre-mortem (Step 4)**: Pre-mortem now explicitly prompts for user friction analysis — what was unclear, what required intervention, what output lacked context. Catches communication failures proactively instead of relying on user to flag them.
+
+## [3.1.3] - 2026-02-22
+
+### Added
+
+- **Reflect: memory cross-reference step (Step 2.5)**: After adversarial thinking, reflect now searches `memory.jsonl` for findings that match prior learnings. Detects recurring patterns (same issue flagged before — SKILL.md fix didn't prevent recurrence), already-known issues (lowers novelty), and genuinely new findings (stronger memory curation candidates). Runs after independent analysis to avoid biasing the adversarial thinking.
+
+## [3.1.2] - 2026-02-22
+
+### Changed
+
+- **Reflect: proposal titles in AskUserQuestion**: Fix-skill approval gate now lists proposal titles in the question text before asking apply/review/skip, preventing the "like what 3?" class of vague approval requests.
+- **Reflect: meta-review --skill attribution**: Added exception for meta-reviews — `--skill reflect` is correct when reflect is reviewing itself, despite the general "NOT reflect" guidance.
+- **Reflect: proposal cap distinction**: The 3-proposal cap now explicitly applies to adversarial-thinking findings only; user-requested improvements during the run are uncapped.
+
+## [3.1.1] - 2026-02-22
+
+### Changed
+
+- **Completion display quality across all skills**: Standardized end-of-run summaries to use markdown tables for structured data (roles, acceptance criteria, design decisions, cascade metrics). Applies to design, execute, simplify, and reflect. Research already used tables. Pattern: header with result, tables for tabular data, bullets for prose, clear next-action call-to-action.
+- **Execute: `in_progress` status before worker spawn**: Added explicit `in_progress` status update before each Task() spawn, preventing state machine rejection on the `pending→completed` transition.
+- **Execute: pipe-to-plan.py fix**: Replaced `echo | python3 $PLAN_CLI` pipe pattern with `python3 -c subprocess.run` to avoid `__main__` module resolution failure when working directory is a Python package.
+- **Execute: INSIGHT callout in display**: Worker INSIGHTs now have a dedicated display slot in the completion summary template.
+- **Reflect: tabular resolutions and improvements**: Resolution and skill improvement sections use markdown tables when items are present, falling back to one-line summaries when empty.
+
+## [3.1.0] - 2026-02-22
+
+### Added
+
+- **Persistent behavioral spec store (`spec.json`)**: New `.design/spec.json` file stores validated behavioral invariants, boundary contracts, and architectural decisions across execute cycles. Survives archive (added to persistent file set alongside `memory.jsonl`, `reflection.jsonl`, `trace.jsonl`).
+- **4 new plan.py spec commands** (`spec-search`, `spec-add`, `spec-validate`, `spec-compact`): `spec-search` retrieves entries by keyword with category-weighted ranking (behavioral-invariant > boundary-contract > architectural-decision); `spec-add` creates entries with uuid4 IDs and SHA256 tamper detection on the check field; `spec-validate` verifies schema version and SHA256 integrity for all entries; `spec-compact` prunes low-importance entries with a protected floor (behavioral-invariants with importance >= 8 are never removed).
+- **EARS notation guidance in design**: AC authorship section now specifies EARS format (`WHEN <trigger> THE <system> SHALL <response>`) as mandatory for behavioral-invariant and boundary-contract spec categories. Architectural-decision category uses prose format (EARS requires observable triggers which architectural decisions lack).
+- **Spec-curator post-execution step in execute**: Mandatory post-execution auxiliary step after integration-verifier. Spec-curator reviews `acGradients`, `acMutations`, and `highValueInstructions` from the cycle, promotes qualifying patterns to `spec.json` via `spec-add`, and records a skip-justification in reflection if 0 promotions result.
+- **acMutations recording instruction in execute**: Mandatory pre-worker phase instruction to record every plan.json modification the lead makes before workers spawn (challenger AC fixes, scout constraint injections, pre-validation repairs, always-pass classifications) into the `acMutations` reflection field.
+
+### Changed
+
+- **`_is_surface_only()` hardening**: Replaced the blanket `&&`/`||` short-circuit (which allowed compound bypass patterns through) with explicit compound-bypass pattern detection. Now catches `grep ... && true`, `test -f ... && echo found`, and `any command || true` as surface-only. Legitimate negation checks (`grep ... && exit 1`) and fallback-fail patterns (`command || exit 1`) remain unaffected.
+- **Dual-point spec injection in design**: Spec context injected at two points — a summary count at Step 1 (lifecycle context) and per-role `spec-search --goal --keywords` at Step 5 during role brief authorship — rather than a single pre-flight dump that causes attention dilution across long design runs.
+- **plan.py command count**: 35 → 39 commands (17 query, 7 mutation, 9 validation, 4 spec, 1 build, 1 test).
+
 ## [3.0.5] - 2026-02-21
 
 ### Changed

@@ -130,6 +130,24 @@ def _read_jsonl(path: str, filter_fn=None) -> list[dict[str, Any]]:
     return entries
 
 
+def _load_sorted_jsonl(
+    design_dir: str, filename: str, limit: int | None = None
+) -> list[dict[str, Any]]:
+    """Load a JSONL file from design_dir, sorted by timestamp descending.
+
+    Returns up to `limit` entries (all if None). Returns [] on missing file or OSError.
+    """
+    path = os.path.join(design_dir, filename)
+    try:
+        entries = _read_jsonl(path)
+    except OSError:
+        return []
+    entries.sort(key=lambda x: _parse_timestamp(x.get("timestamp", 0)), reverse=True)
+    if limit is not None:
+        return entries[:limit]
+    return entries
+
+
 def resolve_dependencies(
     roles: list[dict[str, Any]], name_index: dict[str, int]
 ) -> list[list[int]]:
@@ -851,6 +869,23 @@ _SURFACE_ONLY_PATTERNS = [
     ),  # File existence
 ]
 
+# Compound bypass patterns: commands that short-circuit to always-pass
+# These are detected BEFORE the bare surface-only check
+_COMPOUND_BYPASS_PATTERNS = [
+    # grep ... && true/echo/exit 0 — grep succeeds on match but RHS is no-op
+    re.compile(
+        r"(grep|egrep|fgrep|rg)\s[^|&]*&&\s*(true|echo|exit\s+0)\b",
+        re.IGNORECASE,
+    ),
+    # test -f file && true/echo/exit 0 — file existence with no-op RHS
+    re.compile(
+        r"(test\s+-[fedsrwx]|\[\s+-[fedsrwx])\s[^|&]*&&\s*(true|echo|exit\s+0)\b",
+        re.IGNORECASE,
+    ),
+    # any command || true  or  any command || echo — makes check impossible to fail
+    re.compile(r"\|\|\s*(true|echo\b)", re.IGNORECASE),
+]
+
 
 def _is_surface_only(check: str) -> bool:
     """Return True if a check command is purely surface-level (grep, file existence).
@@ -859,16 +894,25 @@ def _is_surface_only(check: str) -> bool:
     - Direct grep commands (grep, egrep, fgrep, rg)
     - Piped grep as the final command (e.g., 'cat file | grep pattern')
     - File existence checks (test -f, [ -f ], [[ -f ]])
+    - Compound bypass patterns that short-circuit to always-pass:
+        - grep ... && true/echo/exit 0
+        - test -f ... && true/echo/exit 0
+        - any command || true  or  any command || echo
 
-    Excludes legitimate patterns like:
-    - wc -l (legitimate for counting output lines)
-    - tail/head (legitimate for truncating output)
-    - Compound commands with && (legitimate for exit-code checks)
+    Preserves legitimate patterns like:
+    - grep ... && exit 1  (legitimate negation check)
+    - any command || exit 1  (legitimate fallback-fail)
+    - wc -l  (legitimate for counting output lines)
     """
     # Strip leading shell constructs like `! ` (negation)
     stripped = re.sub(r"^[!\s]+", "", check.strip())
 
-    # If there's && or || after the command, it's a compound command (not surface-only)
+    # Check compound bypass patterns first (before the &&/|| short-circuit)
+    if any(pattern.search(stripped) for pattern in _COMPOUND_BYPASS_PATTERNS):
+        return True
+
+    # For remaining compound commands with &&/||, they are not surface-only
+    # (e.g., grep ... && exit 1 is a legitimate negation check)
     if "&&" in stripped or "||" in stripped:
         return False
 
@@ -1298,17 +1342,19 @@ def cmd_validate_checks(args: argparse.Namespace) -> NoReturn:
     """Validate acceptance criteria check commands.
 
     Extracts each acceptanceCriteria[].check, detects Python inline checks
-    (python3 -c '...'), validates their syntax with compile(), and reports
-    errors per role/criterion.
+    (python3 -c '...'), validates their syntax with compile(), detects
+    surface-only and compound-bypass patterns, and reports errors per
+    role/criterion.
 
     JSON output: {ok: true/false, results: [{roleIndex, roleName, criterionIndex,
-                 criterion, valid, error}]}
+                 criterion, valid, error}], errors: [str]}
     """
     plan_path = args.plan_path
     plan = load_plan(plan_path)
 
     roles = plan.get("roles", [])
     results = []
+    errors: list[str] = []
     all_valid = True
 
     for role_idx, role in enumerate(roles):
@@ -1321,6 +1367,7 @@ def cmd_validate_checks(args: argparse.Namespace) -> NoReturn:
 
             if not check:
                 # Empty check is invalid
+                msg = f"Role {role_idx} ({role_name}) criterion {crit_idx}: empty check command"
                 results.append(
                     {
                         "roleIndex": role_idx,
@@ -1331,6 +1378,27 @@ def cmd_validate_checks(args: argparse.Namespace) -> NoReturn:
                         "error": "Empty check command",
                     }
                 )
+                errors.append(msg)
+                all_valid = False
+                continue
+
+            # Detect surface-only and compound-bypass patterns
+            if _is_surface_only(check):
+                msg = (
+                    f"Role {role_idx} ({role_name}) criterion {crit_idx} "
+                    f"({criterion!r}): surface-only or compound-bypass check: {check!r}"
+                )
+                results.append(
+                    {
+                        "roleIndex": role_idx,
+                        "roleName": role_name,
+                        "criterionIndex": crit_idx,
+                        "criterion": criterion,
+                        "valid": False,
+                        "error": "Surface-only or compound-bypass check",
+                    }
+                )
+                errors.append(msg)
                 all_valid = False
                 continue
 
@@ -1347,9 +1415,13 @@ def cmd_validate_checks(args: argparse.Namespace) -> NoReturn:
                 }
             )
             if not valid:
+                errors.append(
+                    f"Role {role_idx} ({role_name}) criterion {crit_idx} "
+                    f"({criterion!r}): {error}"
+                )
                 all_valid = False
 
-    output_json({"ok": all_valid, "results": results})
+    output_json({"ok": all_valid, "results": results, "errors": errors})
 
 
 # ============================================================================
@@ -1496,20 +1568,6 @@ def cmd_health_check(args: argparse.Namespace) -> NoReturn:
     )
 
 
-def _count_criteria_changes(
-    criteria_a: dict[str, Any], criteria_b: dict[str, Any]
-) -> tuple[int, int, int]:
-    """Count criteria changes. Returns (added, removed, modified)."""
-    added = sum(1 for c in criteria_b if c not in criteria_a)
-    removed = sum(1 for c in criteria_a if c not in criteria_b)
-    modified = sum(
-        1
-        for c in criteria_a
-        if c in criteria_b and criteria_a[c].get("check") != criteria_b[c].get("check")
-    )
-    return (added, removed, modified)
-
-
 def _compare_acceptance_criteria(
     role_a: dict[str, Any], role_b: dict[str, Any]
 ) -> list[str]:
@@ -1518,7 +1576,14 @@ def _compare_acceptance_criteria(
     criteria_a = {c.get("criterion"): c for c in role_a.get("acceptanceCriteria", [])}
     criteria_b = {c.get("criterion"): c for c in role_b.get("acceptanceCriteria", [])}
 
-    added, removed, modified = _count_criteria_changes(criteria_a, criteria_b)
+    keys_a, keys_b = set(criteria_a), set(criteria_b)
+    added = len(keys_b - keys_a)
+    removed = len(keys_a - keys_b)
+    modified = sum(
+        1
+        for c in keys_a & keys_b
+        if criteria_a[c].get("check") != criteria_b[c].get("check")
+    )
 
     if added > 0:
         changes.append(f"+{added} acceptance criteria")
@@ -1701,18 +1766,32 @@ def _format_memory_result(score: float, entry: dict[str, Any]) -> dict[str, Any]
     }
 
 
+def _rank_entries(
+    entries: list[dict[str, Any]],
+    scorer: Any,
+    formatter: Any,
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Score, filter zeros, sort descending, format top-N.
+
+    scorer(entry) -> float, formatter(score, entry) -> dict.
+    """
+    scored = [(s, e) for e in entries if (s := scorer(e)) > 0]
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [formatter(s, e) for s, e in scored[:limit]]
+
+
 def _rank_memories(
     entries: list[dict[str, Any]], query_tokens: set[str], limit: int
 ) -> list[dict[str, Any]]:
     """Score, rank, and return top memory entries."""
     current_time = time.time()
-    scored = [
-        (score, entry)
-        for entry in entries
-        if (score := _score_memory(entry, query_tokens, current_time)) > 0
-    ]
-    scored.sort(key=lambda x: x[0], reverse=True)
-    return [_format_memory_result(score, entry) for score, entry in scored[:limit]]
+    return _rank_entries(
+        entries,
+        scorer=lambda e: _score_memory(e, query_tokens, current_time),
+        formatter=_format_memory_result,
+        limit=limit,
+    )
 
 
 def cmd_memory_search(args: argparse.Namespace) -> NoReturn:
@@ -2300,17 +2379,12 @@ def cmd_expert_validate(args: argparse.Namespace) -> NoReturn:
     artifact_path = args.artifact_path
     data = _load_json_file(artifact_path, "artifact")
 
-    # Check required fields
-    missing = []
-    if "summary" not in data:
-        missing.append("summary")
-    if "verificationProperties" not in data:
-        missing.append("verificationProperties")
+    # Check required fields via shared validator
+    errors = _validate_json_schema(data, ["summary", "verificationProperties"], {})
+    if errors:
+        error_exit(errors[0])
 
-    if missing:
-        error_exit(f"Missing required fields: {', '.join(missing)}")
-
-    # Validate verificationProperties is a list
+    # Keep manual type-check to preserve exact error message
     if not isinstance(data["verificationProperties"], list):
         error_exit("verificationProperties must be an array")
 
@@ -2925,14 +2999,9 @@ def _format_memory_for_review(mem: dict[str, Any]) -> dict[str, Any]:
 
 def _read_recent_reflections(design_dir: str) -> list[dict[str, Any]]:
     """Read last 3 reflections with structured detail."""
-    reflection_path = os.path.join(design_dir, "reflection.jsonl")
-    try:
-        entries = _read_jsonl(reflection_path)
-    except OSError:
-        return []
-    entries.sort(key=lambda x: _parse_timestamp(x.get("timestamp", 0)), reverse=True)
+    entries = _load_sorted_jsonl(design_dir, "reflection.jsonl", limit=3)
     results: list[dict[str, Any]] = []
-    for ref in entries[:3]:
+    for ref in entries:
         skill = ref.get("skill", "unknown")
         outcome = ref.get("outcome", "unknown")
         goal = ref.get("goal", "")
@@ -2969,13 +3038,7 @@ def _extract_unresolved_improvements(design_dir: str) -> list[dict[str, Any]]:
     making the improvement direction visible).
     Deduped by normalized text similarity.
     """
-    reflection_path = os.path.join(design_dir, "reflection.jsonl")
-    try:
-        entries = _read_jsonl(reflection_path)
-    except OSError:
-        return []
-
-    entries.sort(key=lambda x: _parse_timestamp(x.get("timestamp", 0)), reverse=True)
+    entries = _load_sorted_jsonl(design_dir, "reflection.jsonl", limit=5)
 
     # Collect items from last 5 reflections, tagged with success/failure
     raw_items: list[dict[str, Any]] = []
@@ -3036,16 +3099,10 @@ def _count_consecutive_empty(runs: list[dict[str, Any]]) -> int:
 
 def _collect_aux_data(design_dir: str) -> dict[str, list[dict[str, Any]]]:
     """Collect auxiliaryEffectiveness entries grouped by auxiliary name."""
-    reflection_path = os.path.join(design_dir, "reflection.jsonl")
-    try:
-        entries = _read_jsonl(reflection_path)
-    except OSError:
-        return {}
-
-    entries.sort(key=lambda x: _parse_timestamp(x.get("timestamp", 0)), reverse=True)
+    entries = _load_sorted_jsonl(design_dir, "reflection.jsonl", limit=5)
 
     aux_data: dict[str, list[dict[str, Any]]] = {}
-    for ref in entries[:5]:
+    for ref in entries:
         for ae in ref.get("evaluation", {}).get("auxiliaryEffectiveness", []):
             name = ae.get("auxiliary", "")
             if name:
@@ -3361,6 +3418,7 @@ def cmd_archive(args: argparse.Namespace) -> NoReturn:
         "reflection.jsonl",
         "research.json",
         "trace.jsonl",
+        "spec.json",
         "history",
     }
 
@@ -3392,6 +3450,367 @@ def cmd_archive(args: argparse.Namespace) -> NoReturn:
         error_exit(f"Error archiving files: {e}")
 
     output_json({"ok": True, "archivedTo": archive_dir})
+
+
+# ============================================================================
+# Spec Commands
+# ============================================================================
+
+_SPEC_VALID_CATEGORIES = frozenset(
+    {"behavioral-invariant", "boundary-contract", "architectural-decision"}
+)
+
+_CATEGORY_WEIGHTS: dict[str, float] = {
+    "behavioral-invariant": 1.0,
+    "boundary-contract": 0.8,
+    "architectural-decision": 0.5,
+}
+
+_SPEC_REQUIRED_FIELDS = frozenset(
+    {
+        "id",
+        "ears",
+        "description",
+        "check",
+        "category",
+        "source_role",
+        "promoted_at",
+        "importance",
+        "sha256",
+    }
+)
+
+
+def _load_spec_file(spec_path: str) -> dict[str, Any] | None:
+    """Load spec.json; return None if absent, exit on corrupt JSON or OSError."""
+    if not os.path.exists(spec_path):
+        return None
+    try:
+        with open(spec_path) as f:
+            return json.load(f)
+    except json.JSONDecodeError as e:
+        error_exit(f"Invalid JSON in spec file: {e}")
+    except OSError as e:
+        error_exit(f"Error reading spec file: {e}")
+
+
+def _score_spec(entry: dict[str, Any], query_tokens: set[str]) -> float:
+    """Score a spec entry: keyword overlap * importance factor * category weight.
+
+    No recency decay — importance alone signals staleness.
+    """
+    text = " ".join(
+        [entry.get("ears", ""), entry.get("description", ""), entry.get("check", "")]
+    )
+    entry_tokens = _tokenize(text)
+    if not entry_tokens or not query_tokens:
+        return 0.0
+    overlap = len(query_tokens.intersection(entry_tokens))
+    keyword_score = overlap / len(query_tokens)
+    importance_factor = entry.get("importance", 5) / 10
+    category_weight = _CATEGORY_WEIGHTS.get(
+        entry.get("category", "architectural-decision"), 0.5
+    )
+    return keyword_score * importance_factor * category_weight
+
+
+def _format_spec_entry(entry: dict[str, Any], score: float = 0.0) -> dict[str, Any]:
+    """Return a summary dict for a spec entry suitable for search output."""
+    return {
+        "id": entry.get("id", ""),
+        "ears": entry.get("ears", ""),
+        "description": entry.get("description", ""),
+        "check": entry.get("check", ""),
+        "category": entry.get("category", ""),
+        "source_role": entry.get("source_role", ""),
+        "importance": entry.get("importance", 5),
+        "score": round(score, 3),
+    }
+
+
+def _rank_spec_entries(
+    entries: list[dict[str, Any]], query_tokens: set[str], limit: int
+) -> list[dict[str, Any]]:
+    """Score, rank, and return top spec entries for a keyword query."""
+    return _rank_entries(
+        entries,
+        scorer=lambda e: _score_spec(e, query_tokens),
+        formatter=lambda s, e: _format_spec_entry(e, s),
+        limit=limit,
+    )
+
+
+def _search_spec_entries(
+    entries: list[dict[str, Any]], query_tokens: set[str], limit: int
+) -> list[dict[str, Any]]:
+    """Return ranked or importance-sorted entries up to limit."""
+    if not query_tokens:
+        sorted_entries = sorted(
+            entries, key=lambda e: e.get("importance", 5), reverse=True
+        )
+        return [_format_spec_entry(e) for e in sorted_entries[:limit]]
+    return _rank_spec_entries(entries, query_tokens, limit)
+
+
+def cmd_spec_search(args: argparse.Namespace) -> NoReturn:
+    """Search spec.json for relevant entries matching query keywords.
+
+    Returns empty list (not error) when spec.json does not exist.
+    """
+    data = _load_spec_file(args.spec_path)
+    if data is None:
+        output_json({"ok": True, "entries": [], "count": 0})
+
+    entries: list[dict[str, Any]] = data.get("entries", [])
+    category_filter = getattr(args, "category", None)
+    if category_filter:
+        entries = [e for e in entries if e.get("category") == category_filter]
+
+    limit = getattr(args, "limit", 10)
+    parts = [args.goal or "", args.keywords or ""]
+    query_tokens = _tokenize(" ".join(p for p in parts if p))
+    result = _search_spec_entries(entries, query_tokens, limit)
+    output_json({"ok": True, "entries": result, "count": len(result)})
+
+
+def _validate_spec_add_inputs(
+    ears: str, description: str, check: str, category: str, importance: int
+) -> None:
+    """Validate spec-add inputs; call error_exit on first violation."""
+    if not ears:
+        error_exit("ears field is required and cannot be empty")
+    if not description:
+        error_exit("description field is required and cannot be empty")
+    if not check:
+        error_exit("check field is required and cannot be empty")
+    if category not in _SPEC_VALID_CATEGORIES:
+        error_exit(
+            "category must be one of: behavioral-invariant, boundary-contract, architectural-decision"
+        )
+    if importance < 1 or importance > 10:
+        error_exit("importance must be between 1 and 10 (inclusive)")
+
+
+def cmd_spec_add(args: argparse.Namespace) -> NoReturn:
+    """Add a new entry to spec.json.
+
+    Validates required fields, computes SHA256 of check field, uses atomic_write().
+    Creates spec.json and parent dirs if absent.
+    """
+    spec_path = args.spec_path
+    ears = (args.ears or "").strip()
+    description = (args.description or "").strip()
+    check = (args.check or "").strip()
+    category = args.category
+    source_role = getattr(args, "source_role", None) or "unknown"
+    source_cycle = getattr(args, "source_cycle", None) or _now_iso()
+    importance = args.importance
+
+    _validate_spec_add_inputs(ears, description, check, category, importance)
+
+    data = _load_spec_file(spec_path)
+    if data is None:
+        data = {"schemaVersion": 1, "goal": "", "entries": [], "compactionHistory": []}
+
+    sha256_val = hashlib.sha256(check.encode()).hexdigest()
+    entry_id = str(uuid.uuid4())
+
+    entry: dict[str, Any] = {
+        "id": entry_id,
+        "ears": ears,
+        "description": description,
+        "check": check,
+        "category": category,
+        "source_role": source_role,
+        "source_cycle": source_cycle,
+        "promoted_at": _now_iso(),
+        "importance": importance,
+        "sha256": sha256_val,
+    }
+
+    data.setdefault("entries", []).append(entry)
+    data.setdefault("compactionHistory", [])
+
+    try:
+        _ensure_parent_dir(spec_path)
+        atomic_write(spec_path, data)
+    except OSError as e:
+        error_exit(f"Error writing spec file: {e}")
+
+    output_json(
+        {
+            "ok": True,
+            "id": entry_id,
+            "category": category,
+            "importance": importance,
+            "sha256": sha256_val,
+        }
+    )
+
+
+def _check_spec_entry_importance(entry_id: str, imp: Any, issues: list[str]) -> None:
+    """Validate importance field value and range."""
+    if imp is None:
+        return
+    if not isinstance(imp, int):
+        issues.append(f"Entry {entry_id}: importance must be an integer")
+        return
+    if not (1 <= imp <= 10):
+        issues.append(f"Entry {entry_id}: importance {imp} out of range (1-10)")
+
+
+def _check_spec_entry_sha256(
+    entry_id: str, check_val: str, stored_sha: str, issues: list[str]
+) -> None:
+    """Validate SHA256 integrity of a spec entry's check field."""
+    if not check_val or not stored_sha:
+        return
+    expected_sha = hashlib.sha256(check_val.encode()).hexdigest()
+    if expected_sha != stored_sha:
+        issues.append(
+            f"Entry {entry_id}: sha256 mismatch — stored '{stored_sha}' "
+            f"does not match computed '{expected_sha}'"
+        )
+
+
+def _validate_spec_entry(entry: dict[str, Any], index: int, issues: list[str]) -> None:
+    """Validate one spec entry, appending issue strings to issues list."""
+    entry_id = entry.get("id", f"<index {index}>")
+
+    for field in _SPEC_REQUIRED_FIELDS:
+        if field not in entry:
+            issues.append(f"Entry {entry_id}: missing required field '{field}'")
+
+    cat = entry.get("category", "")
+    if cat and cat not in _SPEC_VALID_CATEGORIES:
+        issues.append(
+            f"Entry {entry_id}: invalid category '{cat}'. "
+            "Must be one of: behavioral-invariant, boundary-contract, architectural-decision"
+        )
+
+    _check_spec_entry_importance(entry_id, entry.get("importance"), issues)
+    _check_spec_entry_sha256(
+        entry_id, entry.get("check", ""), entry.get("sha256", ""), issues
+    )
+
+
+def cmd_spec_validate(args: argparse.Namespace) -> NoReturn:
+    """Validate spec.json schema and SHA256 integrity.
+
+    Missing spec.json is valid (feature not yet used).
+    Returns {ok, entryCount, issues, validated}.
+    """
+    spec_path = args.spec_path
+
+    data = _load_spec_file(spec_path)
+    if data is None:
+        output_json({"ok": True, "entryCount": 0, "issues": [], "validated": True})
+
+    issues: list[str] = []
+
+    if data.get("schemaVersion") != 1:
+        issues.append("schemaVersion must be 1, got: " + str(data.get("schemaVersion")))
+
+    entries = data.get("entries")
+    if not isinstance(entries, list):
+        issues.append("entries must be a list")
+        output_json(
+            {"ok": False, "entryCount": 0, "issues": issues, "validated": False}
+        )
+
+    for i, entry in enumerate(entries):
+        _validate_spec_entry(entry, i, issues)
+
+    ok = len(issues) == 0
+    output_json(
+        {"ok": ok, "entryCount": len(entries), "issues": issues, "validated": ok}
+    )
+
+
+def _is_spec_protected(entry: dict[str, Any]) -> bool:
+    """Return True if entry is on the protected floor (never compacted)."""
+    return (
+        entry.get("category") == "behavioral-invariant"
+        and entry.get("importance", 5) >= 8
+    )
+
+
+def _filter_spec_entries(
+    entries: list[dict[str, Any]], min_importance: int
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Split entries into survivors and removed_ids based on importance + protected floor."""
+    survivors: list[dict[str, Any]] = []
+    removed_ids: list[str] = []
+    for entry in entries:
+        if _is_spec_protected(entry) or entry.get("importance", 5) >= min_importance:
+            survivors.append(entry)
+        else:
+            removed_ids.append(entry.get("id", ""))
+    return survivors, removed_ids
+
+
+def _cap_spec_entries(
+    survivors: list[dict[str, Any]], max_entries: int, removed_ids: list[str]
+) -> list[dict[str, Any]]:
+    """Cap survivors to max_entries, never evicting protected entries."""
+    if len(survivors) <= max_entries:
+        return survivors
+    survivors.sort(
+        key=lambda e: (1 if _is_spec_protected(e) else 0, e.get("importance", 5)),
+        reverse=True,
+    )
+    evicted = [e for e in survivors[max_entries:] if not _is_spec_protected(e)]
+    removed_ids.extend(e.get("id", "") for e in evicted)
+    evicted_set = {id(e) for e in evicted}
+    return [e for e in survivors if id(e) not in evicted_set]
+
+
+def cmd_spec_compact(args: argparse.Namespace) -> NoReturn:
+    """Compact spec.json by removing low-importance entries.
+
+    Protected floor: never removes behavioral-invariant entries with importance >= 8.
+    Appends compaction record to compactionHistory[].
+    """
+    spec_path = args.spec_path
+    min_importance = getattr(args, "min_importance", 3)
+    max_entries = getattr(args, "max_entries", 50)
+
+    data = _load_spec_file(spec_path)
+    if data is None:
+        output_json({"ok": True, "removedCount": 0, "keptCount": 0, "newEntryCount": 0})
+
+    entries: list[dict[str, Any]] = data.get("entries", [])
+    original_count = len(entries)
+
+    survivors, removed_ids = _filter_spec_entries(entries, min_importance)
+    survivors = _cap_spec_entries(survivors, max_entries, removed_ids)
+
+    kept_count = len(survivors)
+    history_entry: dict[str, Any] = {
+        "compacted_at": _now_iso(),
+        "entries_before": original_count,
+        "entries_after": kept_count,
+        "entries_removed": removed_ids,
+        "min_importance_threshold": min_importance,
+        "max_entries_cap": max_entries,
+    }
+    data["entries"] = survivors
+    data.setdefault("compactionHistory", []).append(history_entry)
+
+    try:
+        atomic_write(spec_path, data)
+    except OSError as e:
+        error_exit(f"Error writing spec file: {e}")
+
+    removed_count = original_count - kept_count
+    output_json(
+        {
+            "ok": True,
+            "removedCount": removed_count,
+            "keptCount": kept_count,
+            "newEntryCount": kept_count,
+        }
+    )
 
 
 # ============================================================================
@@ -3544,16 +3963,8 @@ def cmd_self_test(args: argparse.Namespace) -> NoReturn:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
-def _create_fixtures(tmp_dir: str) -> dict[str, str]:
-    """Create test fixtures and return their paths."""
-    from datetime import timedelta as _td
-
-    now = datetime.now(timezone.utc)
-    one_day_ago = (now - _td(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    one_week_ago = (now - _td(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    two_days_ago = (now - _td(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-    # Minimal valid plan
+def _create_plan_fixtures(tmp_dir: str, timestamps: dict[str, str]) -> dict[str, str]:
+    """Create plan variant fixtures. Returns path dict."""
     minimal_plan = {
         "schemaVersion": 4,
         "goal": "Test goal",
@@ -3619,29 +4030,26 @@ def _create_fixtures(tmp_dir: str) -> dict[str, str]:
         "progress": {"completedRoles": []},
     }
 
-    minimal_plan_path = os.path.join(tmp_dir, "minimal_plan.json")
-    with open(minimal_plan_path, "w") as f:
+    paths: dict[str, str] = {}
+
+    paths["minimal_plan"] = os.path.join(tmp_dir, "minimal_plan.json")
+    with open(paths["minimal_plan"], "w") as f:
         json.dump(minimal_plan, f)
 
-    # Failed plan (role 0 failed)
     failed_plan = json.loads(json.dumps(minimal_plan))
     failed_plan["roles"][0]["status"] = "failed"
     failed_plan["roles"][0]["attempts"] = 1
     failed_plan["roles"][0]["result"] = "build error"
-
-    failed_plan_path = os.path.join(tmp_dir, "failed_plan.json")
-    with open(failed_plan_path, "w") as f:
+    paths["failed_plan"] = os.path.join(tmp_dir, "failed_plan.json")
+    with open(paths["failed_plan"], "w") as f:
         json.dump(failed_plan, f)
 
-    # In-progress plan
     in_progress_plan = json.loads(json.dumps(minimal_plan))
     in_progress_plan["roles"][0]["status"] = "in_progress"
-
-    in_progress_plan_path = os.path.join(tmp_dir, "in_progress_plan.json")
-    with open(in_progress_plan_path, "w") as f:
+    paths["in_progress_plan"] = os.path.join(tmp_dir, "in_progress_plan.json")
+    with open(paths["in_progress_plan"], "w") as f:
         json.dump(in_progress_plan, f)
 
-    # Unfinalized plan (no status fields)
     unfin_plan = {
         "schemaVersion": 4,
         "goal": "Test goal",
@@ -3673,123 +4081,16 @@ def _create_fixtures(tmp_dir: str) -> dict[str, str]:
         "auxiliaryRoles": [],
         "progress": {"completedRoles": []},
     }
-
-    unfin_plan_path = os.path.join(tmp_dir, "unfin_plan.json")
-    with open(unfin_plan_path, "w") as f:
+    paths["unfin_plan"] = os.path.join(tmp_dir, "unfin_plan.json")
+    with open(paths["unfin_plan"], "w") as f:
         json.dump(unfin_plan, f)
 
-    # Modified plan (for plan-diff)
     modified_plan = json.loads(json.dumps(minimal_plan))
     modified_plan["roles"][0]["goal"] = "Different goal"
-
-    modified_plan_path = os.path.join(tmp_dir, "modified_plan.json")
-    with open(modified_plan_path, "w") as f:
+    paths["modified_plan"] = os.path.join(tmp_dir, "modified_plan.json")
+    with open(paths["modified_plan"], "w") as f:
         json.dump(modified_plan, f)
 
-    # Memory file
-    memory_entries = [
-        {
-            "id": "mem-1",
-            "timestamp": one_day_ago,
-            "category": "pattern",
-            "keywords": ["api", "rest"],
-            "content": "REST APIs should use consistent error format",
-            "source": "execute",
-            "goal_context": "API development",
-            "importance": 7,
-            "usage_count": 2,
-        },
-        {
-            "id": "mem-2",
-            "timestamp": one_week_ago,
-            "category": "mistake",
-            "keywords": ["test", "timeout"],
-            "content": "Integration tests need explicit timeouts",
-            "source": "execute",
-            "goal_context": "Testing",
-            "importance": 8,
-            "usage_count": 0,
-        },
-    ]
-
-    memory_file_path = os.path.join(tmp_dir, "memory.jsonl")
-    with open(memory_file_path, "w") as f:
-        for entry in memory_entries:
-            f.write(json.dumps(entry) + "\n")
-
-    # Reflection file
-    reflection_entries = [
-        {
-            "id": "ref-1",
-            "timestamp": one_day_ago,
-            "skill": "execute",
-            "goal": "Build API",
-            "outcome": "completed",
-            "goalAchieved": True,
-            "evaluation": {
-                "whatWorked": ["Clear criteria"],
-                "whatFailed": ["Slow tests"],
-                "doNextTime": ["Parallel tests"],
-            },
-        },
-        {
-            "id": "ref-2",
-            "timestamp": two_days_ago,
-            "skill": "design",
-            "goal": "Design auth",
-            "outcome": "partial",
-            "goalAchieved": False,
-            "evaluation": {
-                "whatWorked": ["Expert debate"],
-                "whatFailed": ["Missing edge cases"],
-                "doNextTime": ["Security expert"],
-            },
-        },
-    ]
-
-    reflection_file_path = os.path.join(tmp_dir, "reflection.jsonl")
-    with open(reflection_file_path, "w") as f:
-        for entry in reflection_entries:
-            f.write(json.dumps(entry) + "\n")
-
-    # Expert artifact
-    expert_artifact = {
-        "summary": "Architecture recommendations",
-        "verificationProperties": [
-            {
-                "property": "All endpoints return JSON",
-                "category": "interface",
-                "testableVia": "curl + jq",
-            }
-        ],
-    }
-
-    expert_artifact_path = os.path.join(tmp_dir, "expert-architect.json")
-    with open(expert_artifact_path, "w") as f:
-        json.dump(expert_artifact, f)
-
-    # Design directory for health-check and plan-health-summary
-    design_dir = os.path.join(tmp_dir, "test_design")
-    os.makedirs(design_dir, exist_ok=True)
-
-    shutil.copy(minimal_plan_path, os.path.join(design_dir, "plan.json"))
-    shutil.copy(memory_file_path, os.path.join(design_dir, "memory.jsonl"))
-    shutil.copy(reflection_file_path, os.path.join(design_dir, "reflection.jsonl"))
-
-    # Archive directory (for testing archive command)
-    archive_dir = os.path.join(tmp_dir, "test_archive")
-    os.makedirs(archive_dir, exist_ok=True)
-
-    # Create some files to archive
-    shutil.copy(minimal_plan_path, os.path.join(archive_dir, "plan.json"))
-    shutil.copy(expert_artifact_path, os.path.join(archive_dir, "expert-test.json"))
-
-    # Add persistent files that should NOT be archived
-    shutil.copy(memory_file_path, os.path.join(archive_dir, "memory.jsonl"))
-    with open(os.path.join(archive_dir, "research.json"), "w") as f:
-        f.write('{"schemaVersion": 1, "goal": "test"}')
-
-    # Plan with bad Python check syntax
     bad_check_plan = {
         "schemaVersion": 4,
         "goal": "Test bad checks",
@@ -3819,12 +4120,96 @@ def _create_fixtures(tmp_dir: str) -> dict[str, str]:
         "auxiliaryRoles": [],
         "progress": {"completedRoles": []},
     }
-
-    bad_check_plan_path = os.path.join(tmp_dir, "bad_check_plan.json")
-    with open(bad_check_plan_path, "w") as f:
+    paths["bad_check_plan"] = os.path.join(tmp_dir, "bad_check_plan.json")
+    with open(paths["bad_check_plan"], "w") as f:
         json.dump(bad_check_plan, f)
 
-    # Research.json fixture
+    return paths
+
+
+def _create_data_fixtures(tmp_dir: str, timestamps: dict[str, str]) -> dict[str, str]:
+    """Create data file fixtures (memory, reflection, expert, research)."""
+    one_day_ago = timestamps["one_day_ago"]
+    one_week_ago = timestamps["one_week_ago"]
+    two_days_ago = timestamps["two_days_ago"]
+    paths: dict[str, str] = {}
+
+    memory_entries = [
+        {
+            "id": "mem-1",
+            "timestamp": one_day_ago,
+            "category": "pattern",
+            "keywords": ["api", "rest"],
+            "content": "REST APIs should use consistent error format",
+            "source": "execute",
+            "goal_context": "API development",
+            "importance": 7,
+            "usage_count": 2,
+        },
+        {
+            "id": "mem-2",
+            "timestamp": one_week_ago,
+            "category": "mistake",
+            "keywords": ["test", "timeout"],
+            "content": "Integration tests need explicit timeouts",
+            "source": "execute",
+            "goal_context": "Testing",
+            "importance": 8,
+            "usage_count": 0,
+        },
+    ]
+    paths["memory_file"] = os.path.join(tmp_dir, "memory.jsonl")
+    with open(paths["memory_file"], "w") as f:
+        for entry in memory_entries:
+            f.write(json.dumps(entry) + "\n")
+
+    reflection_entries = [
+        {
+            "id": "ref-1",
+            "timestamp": one_day_ago,
+            "skill": "execute",
+            "goal": "Build API",
+            "outcome": "completed",
+            "goalAchieved": True,
+            "evaluation": {
+                "whatWorked": ["Clear criteria"],
+                "whatFailed": ["Slow tests"],
+                "doNextTime": ["Parallel tests"],
+            },
+        },
+        {
+            "id": "ref-2",
+            "timestamp": two_days_ago,
+            "skill": "design",
+            "goal": "Design auth",
+            "outcome": "partial",
+            "goalAchieved": False,
+            "evaluation": {
+                "whatWorked": ["Expert debate"],
+                "whatFailed": ["Missing edge cases"],
+                "doNextTime": ["Security expert"],
+            },
+        },
+    ]
+    paths["reflection_file"] = os.path.join(tmp_dir, "reflection.jsonl")
+    with open(paths["reflection_file"], "w") as f:
+        for entry in reflection_entries:
+            f.write(json.dumps(entry) + "\n")
+
+    expert_artifact = {
+        "summary": "Architecture recommendations",
+        "verificationProperties": [
+            {
+                "property": "All endpoints return JSON",
+                "category": "interface",
+                "testableVia": "curl + jq",
+            }
+        ],
+    }
+    paths["expert_artifact"] = os.path.join(tmp_dir, "expert-architect.json")
+    with open(paths["expert_artifact"], "w") as f:
+        json.dump(expert_artifact, f)
+
     research_data = {
         "schemaVersion": 1,
         "goal": "Test research",
@@ -3878,16 +4263,18 @@ def _create_fixtures(tmp_dir: str) -> dict[str, str]:
         ],
         "timestamp": "2026-01-01T00:00:00Z",
     }
-
-    research_file_path = os.path.join(tmp_dir, "research.json")
-    with open(research_file_path, "w") as f:
+    paths["research_file"] = os.path.join(tmp_dir, "research.json")
+    with open(paths["research_file"], "w") as f:
         json.dump(research_data, f)
 
-    # Create test skills directory for sync-check
+    return paths
+
+
+def _create_skills_fixtures(tmp_dir: str) -> dict[str, str]:
+    """Create skills directory fixtures for sync-check tests."""
     skills_dir = os.path.join(tmp_dir, "skills")
     os.makedirs(skills_dir, exist_ok=True)
 
-    # Create mock SKILL.md files with shared blocks
     shared_script_setup = """### Script Setup
 
 Resolve plugin root. All script calls: `python3 $PLAN_CLI <command> [args]` via Bash.
@@ -3935,8 +4322,17 @@ End of skill.
         with open(skill_md, "w") as f:
             f.write(content)
 
-    # Trace file with events across 2 sessions
-    trace_file_path = os.path.join(tmp_dir, "trace.jsonl")
+    return {"skills_dir": skills_dir}
+
+
+def _create_trace_fixtures(
+    tmp_dir: str, timestamps: dict[str, str], minimal_plan_path: str
+) -> dict[str, str]:
+    """Create trace file and trace directory fixtures."""
+    one_day_ago = timestamps["one_day_ago"]
+    two_days_ago = timestamps["two_days_ago"]
+    paths: dict[str, str] = {}
+
     trace_entries = [
         {
             "id": "t-1",
@@ -3977,42 +4373,64 @@ End of skill.
             "payload": {"model": "haiku"},
         },
     ]
-    with open(trace_file_path, "w") as f:
+    paths["trace_file"] = os.path.join(tmp_dir, "trace.jsonl")
+    with open(paths["trace_file"], "w") as f:
         for entry in trace_entries:
             f.write(json.dumps(entry) + "\n")
 
-    # Archive dir for trace persistence test
     trace_archive_dir = os.path.join(tmp_dir, "trace_archive")
     os.makedirs(trace_archive_dir, exist_ok=True)
     shutil.copy(minimal_plan_path, os.path.join(trace_archive_dir, "plan.json"))
     with open(os.path.join(trace_archive_dir, "trace.jsonl"), "w") as f:
         f.write(json.dumps(trace_entries[0]) + "\n")
+    paths["trace_archive_dir"] = trace_archive_dir
 
-    # Design dir for health-check trace test
     trace_design_dir = os.path.join(tmp_dir, "trace_design")
     os.makedirs(trace_design_dir, exist_ok=True)
     shutil.copy(minimal_plan_path, os.path.join(trace_design_dir, "plan.json"))
     with open(os.path.join(trace_design_dir, "trace.jsonl"), "w") as f:
         f.write(json.dumps(trace_entries[0]) + "\n")
+    paths["trace_design_dir"] = trace_design_dir
 
-    return {
-        "minimal_plan": minimal_plan_path,
-        "failed_plan": failed_plan_path,
-        "in_progress_plan": in_progress_plan_path,
-        "unfin_plan": unfin_plan_path,
-        "modified_plan": modified_plan_path,
-        "bad_check_plan": bad_check_plan_path,
-        "memory_file": memory_file_path,
-        "reflection_file": reflection_file_path,
-        "expert_artifact": expert_artifact_path,
-        "design_dir": design_dir,
-        "archive_dir": archive_dir,
-        "research_file": research_file_path,
-        "skills_dir": skills_dir,
-        "trace_file": trace_file_path,
-        "trace_archive_dir": trace_archive_dir,
-        "trace_design_dir": trace_design_dir,
+    return paths
+
+
+def _create_fixtures(tmp_dir: str) -> dict[str, str]:
+    """Create test fixtures and return their paths."""
+    from datetime import timedelta as _td
+
+    now = datetime.now(timezone.utc)
+    timestamps = {
+        "one_day_ago": (now - _td(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "one_week_ago": (now - _td(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "two_days_ago": (now - _td(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
+
+    paths: dict[str, str] = {}
+    paths.update(_create_plan_fixtures(tmp_dir, timestamps))
+    paths.update(_create_data_fixtures(tmp_dir, timestamps))
+
+    # Composite directories depending on plan + data fixtures
+    design_dir = os.path.join(tmp_dir, "test_design")
+    os.makedirs(design_dir, exist_ok=True)
+    shutil.copy(paths["minimal_plan"], os.path.join(design_dir, "plan.json"))
+    shutil.copy(paths["memory_file"], os.path.join(design_dir, "memory.jsonl"))
+    shutil.copy(paths["reflection_file"], os.path.join(design_dir, "reflection.jsonl"))
+    paths["design_dir"] = design_dir
+
+    archive_dir = os.path.join(tmp_dir, "test_archive")
+    os.makedirs(archive_dir, exist_ok=True)
+    shutil.copy(paths["minimal_plan"], os.path.join(archive_dir, "plan.json"))
+    shutil.copy(paths["expert_artifact"], os.path.join(archive_dir, "expert-test.json"))
+    shutil.copy(paths["memory_file"], os.path.join(archive_dir, "memory.jsonl"))
+    with open(os.path.join(archive_dir, "research.json"), "w") as f:
+        f.write('{"schemaVersion": 1, "goal": "test"}')
+    paths["archive_dir"] = archive_dir
+
+    paths.update(_create_skills_fixtures(tmp_dir))
+    paths.update(_create_trace_fixtures(tmp_dir, timestamps, paths["minimal_plan"]))
+
+    return paths
 
 
 def _run_command(
@@ -5904,11 +6322,206 @@ class TestPlanCommands(unittest.TestCase):
         self.assertEqual(result["reflections"][0]["skill"], "execute")
 
     def test_is_surface_only_checks(self) -> None:
-        """Test _is_surface_only detection."""
+        """Test _is_surface_only detection including compound bypass patterns."""
+        # Existing cases preserved
         self.assertTrue(_is_surface_only("grep -q pattern file"))
         self.assertTrue(_is_surface_only("test -f file.txt"))
         self.assertFalse(_is_surface_only("python3 -m pytest tests/"))
         self.assertFalse(_is_surface_only("grep pattern && exit 1"))
+        # New compound bypass patterns
+        self.assertTrue(_is_surface_only("grep pattern file && true"))
+        self.assertTrue(_is_surface_only("test -f file.txt && echo found"))
+        self.assertTrue(_is_surface_only("curl localhost/health || true"))
+        self.assertTrue(_is_surface_only("some_command || echo ok"))
+        # Legitimate patterns must NOT be flagged
+        self.assertFalse(_is_surface_only("grep pattern file && exit 1"))
+        self.assertFalse(_is_surface_only("curl localhost/health || exit 1"))
+
+    def test_spec_add_creates_entry(self) -> None:
+        """Test cmd_spec_add creates spec.json with correct schema."""
+        spec_file = os.path.join(self.tmp_dir.name, "spec.json")
+        args = argparse.Namespace(
+            spec_path=spec_file,
+            ears="WHEN finalize runs, THE system SHALL validate schema",
+            description="Finalize validates schema version",
+            check="python3 shared/plan.py finalize .design/plan.json",
+            category="behavioral-invariant",
+            source_role="test-role",
+            source_cycle="2026-02-21",
+            importance=8,
+        )
+        exit_code, result = self._run_cmd(cmd_spec_add, args)
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+        self.assertIn("id", result)
+        self.assertIn("sha256", result)
+        self.assertEqual(result["category"], "behavioral-invariant")
+        self.assertEqual(result["importance"], 8)
+        # Verify file on disk
+        with open(spec_file) as f:
+            data = json.load(f)
+        self.assertEqual(data["schemaVersion"], 1)
+        self.assertEqual(len(data["entries"]), 1)
+
+    def test_spec_add_rejects_invalid_importance(self) -> None:
+        """Test cmd_spec_add rejects importance outside 1-10."""
+        spec_file = os.path.join(self.tmp_dir.name, "spec_imp.json")
+        args = argparse.Namespace(
+            spec_path=spec_file,
+            ears="WHEN x, THE y SHALL z",
+            description="desc",
+            check="exit 0",
+            category="behavioral-invariant",
+            source_role="test",
+            source_cycle="2026-02-21",
+            importance=0,
+        )
+        exit_code, result = self._run_cmd(cmd_spec_add, args)
+        self.assertEqual(exit_code, 1)
+        self.assertFalse(result["ok"])
+
+    def test_spec_search_finds_entry(self) -> None:
+        """Test cmd_spec_search returns matching entries."""
+        spec_file = os.path.join(self.tmp_dir.name, "search_spec.json")
+        # Add an entry first
+        add_args = argparse.Namespace(
+            spec_path=spec_file,
+            ears="WHEN archive runs, THE system SHALL preserve memory",
+            description="Archive preserves memory file",
+            check="test -f .design/memory.jsonl",
+            category="behavioral-invariant",
+            source_role="test",
+            source_cycle="2026-02-21",
+            importance=7,
+        )
+        self._run_cmd(cmd_spec_add, add_args)
+        # Search
+        search_args = argparse.Namespace(
+            spec_path=spec_file,
+            goal="archive memory preservation",
+            keywords=None,
+            category=None,
+            limit=10,
+        )
+        exit_code, result = self._run_cmd(cmd_spec_search, search_args)
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+        self.assertGreater(result["count"], 0)
+
+    def test_spec_search_missing_file(self) -> None:
+        """Test cmd_spec_search returns empty list when spec.json absent."""
+        args = argparse.Namespace(
+            spec_path=os.path.join(self.tmp_dir.name, "nonexistent.json"),
+            goal="anything",
+            keywords=None,
+            category=None,
+            limit=10,
+        )
+        exit_code, result = self._run_cmd(cmd_spec_search, args)
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["entries"], [])
+        self.assertEqual(result["count"], 0)
+
+    def test_spec_validate_detects_sha256_tamper(self) -> None:
+        """Test cmd_spec_validate catches SHA256 tampering."""
+        spec_file = os.path.join(self.tmp_dir.name, "tamper_spec.json")
+        add_args = argparse.Namespace(
+            spec_path=spec_file,
+            ears="WHEN x, THE y SHALL z",
+            description="desc",
+            check="python3 -m pytest tests/",
+            category="boundary-contract",
+            source_role="test",
+            source_cycle="2026-02-21",
+            importance=5,
+        )
+        self._run_cmd(cmd_spec_add, add_args)
+        # Tamper with sha256
+        with open(spec_file) as f:
+            data = json.load(f)
+        data["entries"][0]["sha256"] = "tampered000000"
+        with open(spec_file, "w") as f:
+            json.dump(data, f)
+        # Validate should detect tamper
+        val_args = argparse.Namespace(spec_path=spec_file)
+        exit_code, result = self._run_cmd(cmd_spec_validate, val_args)
+        self.assertEqual(exit_code, 0)  # validates ok=False, not exit 1
+        self.assertFalse(result["ok"])
+        self.assertTrue(any("sha256" in i.lower() for i in result["issues"]))
+
+    def test_spec_validate_missing_file(self) -> None:
+        """Test cmd_spec_validate returns ok=True for absent spec.json."""
+        args = argparse.Namespace(
+            spec_path=os.path.join(self.tmp_dir.name, "no_spec.json")
+        )
+        exit_code, result = self._run_cmd(cmd_spec_validate, args)
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["entryCount"], 0)
+
+    def test_spec_compact_protected_floor(self) -> None:
+        """Test cmd_spec_compact never removes behavioral-invariant with importance>=8."""
+        spec_file = os.path.join(self.tmp_dir.name, "compact_spec.json")
+        # Add protected entry (importance=9, behavioral-invariant)
+        for ears, cat, imp in [
+            ("WHEN x, THE y SHALL z", "behavioral-invariant", 9),
+            ("WHEN a, THE b SHALL c", "boundary-contract", 2),
+        ]:
+            add_args = argparse.Namespace(
+                spec_path=spec_file,
+                ears=ears,
+                description="desc",
+                check="echo test",
+                category=cat,
+                source_role="test",
+                source_cycle="2026-02-21",
+                importance=imp,
+            )
+            self._run_cmd(cmd_spec_add, add_args)
+        # Compact with high min_importance to try to remove protected entry
+        compact_args = argparse.Namespace(
+            spec_path=spec_file, min_importance=9, max_entries=50
+        )
+        exit_code, result = self._run_cmd(cmd_spec_compact, compact_args)
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+        # Protected entry must survive
+        with open(spec_file) as f:
+            data = json.load(f)
+        protected = [
+            e
+            for e in data["entries"]
+            if e["category"] == "behavioral-invariant" and e["importance"] >= 8
+        ]
+        self.assertEqual(len(protected), 1)
+
+    def test_spec_compact_max_entries(self) -> None:
+        """Test cmd_spec_compact caps total entries to --max-entries."""
+        spec_file = os.path.join(self.tmp_dir.name, "cap_spec.json")
+        # Add 3 entries
+        for i in range(3):
+            add_args = argparse.Namespace(
+                spec_path=spec_file,
+                ears=f"WHEN test {i}, THE y SHALL z",
+                description="desc",
+                check=f"echo {i}",
+                category="boundary-contract",
+                source_role="test",
+                source_cycle="2026-02-21",
+                importance=5,
+            )
+            self._run_cmd(cmd_spec_add, add_args)
+        # Compact to max 2
+        compact_args = argparse.Namespace(
+            spec_path=spec_file, min_importance=1, max_entries=2
+        )
+        exit_code, result = self._run_cmd(cmd_spec_compact, compact_args)
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+        with open(spec_file) as f:
+            data = json.load(f)
+        self.assertLessEqual(len(data["entries"]), 2)
 
     def test_validate_role_brief_missing_model(self) -> None:
         """Test _validate_role_brief detects missing model."""
@@ -6211,6 +6824,72 @@ def main() -> None:
     )
     p.add_argument("design_dir", help="Design directory to archive (e.g., .design)")
     p.set_defaults(func=cmd_archive)
+
+    # Spec commands
+    p = subparsers.add_parser(
+        "spec-search", help="Search spec.json for relevant entries"
+    )
+    p.add_argument("spec_path", nargs="?", default=".design/spec.json")
+    p.add_argument("--goal", type=str, help="Goal or role goal text")
+    p.add_argument("--keywords", type=str, help="Additional search keywords")
+    p.add_argument(
+        "--category",
+        choices=["behavioral-invariant", "boundary-contract", "architectural-decision"],
+        help="Filter by category",
+    )
+    p.add_argument("--limit", type=int, default=10, help="Max results to return")
+    p.set_defaults(func=cmd_spec_search)
+
+    p = subparsers.add_parser("spec-add", help="Add a new entry to spec.json")
+    p.add_argument("spec_path", nargs="?", default=".design/spec.json")
+    p.add_argument("--ears", required=True, help="EARS behavioral statement")
+    p.add_argument("--description", required=True, help="Human-readable explanation")
+    p.add_argument("--check", required=True, help="Shell command to verify invariant")
+    p.add_argument(
+        "--category",
+        required=True,
+        choices=["behavioral-invariant", "boundary-contract", "architectural-decision"],
+        help="Spec category",
+    )
+    p.add_argument(
+        "--source-role", default="unknown", help="Role that produced this entry"
+    )
+    p.add_argument(
+        "--source-cycle", default=None, help="ISO timestamp of execute cycle"
+    )
+    p.add_argument(
+        "--importance",
+        type=int,
+        default=5,
+        help="Importance rating 1-10 (default: 5)",
+    )
+    p.set_defaults(func=cmd_spec_add)
+
+    p = subparsers.add_parser(
+        "spec-validate", help="Validate spec.json schema and SHA256 integrity"
+    )
+    p.add_argument("spec_path", nargs="?", default=".design/spec.json")
+    p.set_defaults(func=cmd_spec_validate)
+
+    p = subparsers.add_parser(
+        "spec-compact", help="Compact spec.json by removing low-importance entries"
+    )
+    p.add_argument("spec_path", nargs="?", default=".design/spec.json")
+    p.add_argument(
+        "--min-importance",
+        type=int,
+        default=3,
+        dest="min_importance",
+        help="Remove entries below this importance threshold (default: 3)",
+    )
+    p.add_argument(
+        "--max-entries",
+        type=int,
+        default=50,
+        dest="max_entries",
+        help="Hard cap on total entries kept (default: 50)",
+    )
+    p.set_defaults(func=cmd_spec_compact)
 
     # Build commands
     p = subparsers.add_parser(

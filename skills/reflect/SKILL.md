@@ -46,10 +46,13 @@ Identify what to reflect on. Do this silently — no user output needed.
 3. **Parse arguments**: Check if `$ARGUMENTS` contains `fix-skill`. If present, enable the Skill Improvement phase (Step 5). Everything else in `$ARGUMENTS` is the focus scope.
 4. If the user provided a focus argument (excluding `fix-skill`), scope the reflection to that aspect.
 5. If no recent skill artifacts exist, tell the user: "No recent skill output found in `.design/`. Run a skill first, then reflect."
+6. **User input during reflection**: If the user provides observations or feedback during the reflection run (mid-conversation messages), incorporate them as high-priority signal. User observations are the highest-quality input available — they see things the model rationalizes away. Integrate user feedback into the thinking steps and, if relevant, into fix-skill proposals.
 
 ### 2. Adversarial Thinking
 
-Use `sequential-thinking` (the MCP tool) to work through five steps. Each step builds on the previous. **Do not rush. Do not be kind to yourself. The value of this skill is proportional to its honesty.**
+Use `sequential-thinking` (the MCP tool) to work through adversarial steps. **Do not rush. Do not be kind to yourself. The value of this skill is proportional to its honesty.**
+
+**Adaptive depth**: For simple reviews (1-2 roles, no cross-review, clear outcome), use 3 steps: AAR (Step 1) + Could You Be Wrong (Step 3) + Pre-mortem (Step 4). For complex reviews (3+ roles, cross-review occurred, expert artifacts present, or ambiguous outcome), use all 5 steps. Steps 2 (Backward Chaining) and 5 (Double-loop) have diminishing returns on simple reviews but are essential when the approach itself might be wrong.
 
 **Step 1 — After Action Review: Intended vs Actual**
 
@@ -67,11 +70,32 @@ This step is the highest-leverage single intervention. Research shows it accesse
 
 **Step 4 — Pre-mortem: Assume failure**
 
-> "Imagine someone takes this output and acts on it — builds the system, follows the recommendation, uses the design. It fails. What went wrong? What was missing from our output that they needed? What was misleading? What edge case or real-world condition did we not account for?"
+> "Imagine someone takes this output and acts on it — builds the system, follows the recommendation, uses the design. It fails. What went wrong? What was missing from our output that they needed? What was misleading? What edge case or real-world condition did we not account for? Also consider the user's experience during this run: what was unclear, what required them to intervene or ask for clarification, what output did they have to interpret without enough context? User friction during the run is a pre-mortem signal — if the user had to ask a clarifying question, the skill's output failed to communicate something."
 
 **Step 5 — Double-loop: Was the approach right?**
 
 > "Step back from execution quality. Was the approach itself correct? Should we have used a different skill, scoped differently, asked different questions, or framed the problem differently? If we started completely over with what we know now, what would we do instead? This isn't about doing the same thing better — it's about whether we did the right thing."
+
+**After structural analysis, evaluate instructional quality**: Is the written output (SKILL.md changes, plan.json instructions, expert guidance) clear enough that a new lead would follow it correctly on first read? Ambiguous instructions are gaps, not style issues. Reflect gravitates toward testable/structural issues (CLI flags, file existence) — actively resist this bias by also evaluating clarity, specificity, and potential for misinterpretation.
+
+### 2.5. Memory Cross-Reference
+
+After adversarial thinking produces findings, cross-reference against `.design/memory.jsonl` to detect recurrence patterns. This step enriches the synthesis without biasing the thinking — memories are consulted AFTER independent analysis, not before.
+
+```bash
+PLAN_CLI=<resolved path>
+# For each significant finding from Step 2, search memory by keywords:
+python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "{finding summary}" --keywords "{finding keywords}"
+```
+
+For each match:
+- **Recurring pattern**: The same issue was stored as a memory from a prior run → note this in the synthesis. If a SKILL.md fix was applied for it previously (check the memory's content), flag that the fix didn't prevent recurrence — this is high-severity signal.
+- **Already known**: The finding duplicates an existing memory → lower its novelty in the synthesis. Still worth mentioning if it recurred despite being "known."
+- **Genuinely new**: No memory matches → stronger candidate for memory curation after this run.
+
+**Show user** (if any matches found): "Memory cross-reference: {N} findings match prior learnings. {recurring_count} are recurring patterns."
+
+Skip this step if `.design/memory.jsonl` doesn't exist or if adversarial thinking produced no significant findings.
 
 ### 3. Synthesis
 
@@ -94,10 +118,11 @@ Spawn a single Task agent:
 Task(subagent_type: "general-purpose", model: "sonnet")
 ```
 
-Prompt:
+Prompt — **scope the verification to risks identified by thinking steps**, not generic "check everything":
 - "Read `.design/plan.json` and all `.design/expert-*.json` artifacts."
 - "Read actual project files in each role's scope.directories."
-- "Cross-reference: Do field names in the plan schema match actual data source field names? Do referenced files contain expected data (not empty)? Do AC check commands reference valid paths and tools? Do interface contracts match actual code signatures?"
+- "**Priority verifications** (from adversarial thinking): {list the specific risks, unverified claims, and CLI signature questions identified in Steps 1-5}. These are the highest-value checks — verify them first."
+- "**Standard cross-reference**: Do field names in the plan schema match actual data source field names? Do referenced files contain expected data (not empty)? Do AC check commands reference valid paths and tools? Do interface contracts match actual code signatures?"
 - "Save findings to `.design/plan-verification.json`: `{\"verified\": [{\"claim\": \"...\", \"source\": \"...\", \"actual\": \"...\", \"match\": true|false}], \"issues\": [{\"severity\": \"blocking|high-risk|low-risk\", \"description\": \"...\", \"affectedRoles\": [...], \"recommendation\": \"...\"}]}`"
 
 Process results: blocking issues feed into Step 4 (Resolution) as mandatory patches. High-risk issues become warnings in the prose. This replaces challenger+scout — one focused agent instead of two, with reflect's full conversation context informing what to verify.
@@ -129,7 +154,9 @@ Process results: blocking issues feed into Step 4 (Resolution) as mandatory patc
    - For other artifacts: same pattern
    - After modifying plan.json: re-run `python3 $PLAN_CLI validate-checks .design/plan.json` and `python3 $PLAN_CLI finalize .design/plan.json` to ensure integrity
 
-4. Record what was applied in the reflection output under `resolutionsApplied[]`.
+4. **Verify fixes**: After applying any artifact fix that changes a CLI command pattern or interface, run the corrected pattern against a test file to verify it works. Do not deploy untested fixes — structural plausibility is not proof of correctness.
+
+5. Record what was applied in the reflection output under `resolutionsApplied[]`.
 
 **What resolution can do:**
 - Add or modify constraints on roles
@@ -166,13 +193,15 @@ This phase proposes permanent improvements to SKILL.md files so the same class o
    - Exact text: the specific addition or modification (keep small — one sentence or one bullet)
    - Rationale: what class of error this prevents
 
-3. Present each proposed change to user via `AskUserQuestion` with a preview showing the before/after context:
+3. Present proposals to user via `AskUserQuestion`. **Always list the proposal titles in the question text** so the user knows what they're approving before choosing a review strategy:
    ```
-   "Proposed SKILL.md improvement for {skill}/{section}:"
+   "{N} SKILL.md improvements proposed: (1) {title}, (2) {title}, (3) {title}. Apply all?"
    Options:
-   - "Apply" — edit the SKILL.md file now
-   - "Skip" — don't apply this one
+   - "Apply all" — apply all proposals
+   - "Review each" — present each individually with before/after context
+   - "Skip" — record in reflection only
    ```
+   If "Review each" is selected, present each proposal individually with before/after context and "Apply" / "Skip" options.
 
 4. If approved, apply using Edit tool on the target SKILL.md file.
 
@@ -182,7 +211,7 @@ This phase proposes permanent improvements to SKILL.md files so the same class o
 - Only propose **additive** changes (add a check, add a bullet, strengthen a requirement). Never restructure or rewrite sections.
 - Each change must be **small and specific** — one sentence or one bullet point, not paragraphs.
 - The change must prevent a **class** of errors, not a specific instance.
-- Maximum 3 proposals per reflect run — focus on the highest-impact ones.
+- Maximum 3 proposals from adversarial thinking per reflect run — focus on the highest-impact ones. User-requested improvements during the run (mid-conversation feedback) are separate and not counted against this cap.
 - Never modify the frontmatter (name, description, argument-hint) — those are interface contracts.
 
 ### 6. Save
@@ -206,7 +235,7 @@ The `reflection` field is primary — it's the free-form prose. The other arrays
 
 **Important**: `reflection-add` will reject the entry if `whatFailed` is non-empty but `promptFixes` is empty. For the reflect skill, either include a `promptFixes` array (even if simple — just `{"section":"n/a","problem":"...","idealOutcome":"...","fix":"...","failureClass":"spec-disobey"}`) or leave `whatFailed` empty and put the failure detail in the prose `reflection` field only.
 
-**IMPORTANT**: The `--skill` argument must be the skill being reviewed (identified in Step 1 — e.g., `design`, `execute`, `research`), NOT `reflect`. This reflection is an evaluation OF that skill's run, so the entry must be attributed to it.
+**IMPORTANT**: The `--skill` argument must be the skill being reviewed (identified in Step 1 — e.g., `design`, `execute`, `research`). This reflection is an evaluation OF that skill's run, so the entry must be attributed to it. **Exception**: For meta-reviews (reflect reviewing reflect itself), `--skill reflect` IS correct — the reviewed skill is reflect.
 
 Save via `reflection-add`:
 
@@ -233,13 +262,25 @@ Gap severity: {minor|moderate|significant|fundamental}
 Approach correct: {yes|no — one sentence why}
 
 What worked:
-- {specific strength}
+- {specific strength — name concrete files, patterns, or decisions}
 
 Top omissions:
-- {specific gap}
+- {specific gap — name what was missing and why it matters}
 
-Resolutions: {N applied | skipped | n/a (minor severity)}
-Skill improvements: {N applied, M skipped | not requested (no fix-skill flag)}
+{if resolutions applied:}
+Resolutions:
+| Artifact | Change | Impact |
+|----------|--------|--------|
+| {file} | {what changed} | {why it matters} |
+
+{if skill improvements applied:}
+Skill improvements:
+| Skill | Section | Change |
+|-------|---------|--------|
+| {skill} | {section} | {one-line description} |
+
+{else: "Resolutions: {N applied | skipped | n/a (minor severity)}"}
+{else: "Skill improvements: {N applied, M skipped | not requested (no fix-skill flag)}"}
 
 Full reflection saved to .design/reflection.jsonl
 ```

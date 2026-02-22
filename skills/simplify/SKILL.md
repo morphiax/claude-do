@@ -213,7 +213,7 @@ When both complexity-analyst and pattern-recognizer target the same file or area
 
 1. Collect all analyst findings from `.design/expert-*.json` files via Bash.
 2. Validate artifacts: `python3 $PLAN_CLI expert-validate .design/expert-{name}.json` for each.
-3. **Organizational context gate**: Collect all findings with `organizationalContextNeeded: yes`. Present to user as a review block:
+3. **Organizational context gate** (MANDATORY — do not skip): Collect all findings with `organizationalContextNeeded: yes`. Present to user as a review block via `AskUserQuestion`:
 
 ```
 Organizational Context Review:
@@ -230,6 +230,7 @@ If ALL findings are `organizationalContextNeeded: yes` with no actionable simpli
 
 4. **Filter and prioritize**: Group actionable findings by type (eliminate, unify, clarify). Prioritize by `eliminationCount` (higher = more cascade impact).
 5. **Map cascades to roles**: One role per cascade chain. A cascade chain is a single unifying insight and all the eliminations it enables. Use dependency ordering: abstraction-first, elimination-after. Example: Role 0 implements new abstraction, Role 1 eliminates old implementation A (depends on Role 0), Role 2 eliminates old implementation B (depends on Role 0).
+   **Single-file rule**: When all cascade chains target the same file, prefer 1 role with an ordered task list over N sequential roles. Multiple roles for one file adds serial spawn overhead without safety benefit — one worker with full file context handles change interactions naturally.
 6. **Write plan.json** with role briefs. For every role:
    - `constraints[0]` MUST be: "PRESERVATION FIRST: Never change behavior, only how it's achieved. All original features, outputs, and behaviors must remain intact."
    - `acceptanceCriteria[0]` MUST be: `{"criterion": "All existing tests pass", "check": "{context.testCommand}"}` — test-suite-pass is always first and mandatory. For text-only targets without a test command, use a structural check instead (e.g., YAML frontmatter parses, referenced commands exist).
@@ -237,7 +238,7 @@ If ALL findings are `organizationalContextNeeded: yes` with no actionable simpli
    - Include rollbackTriggers: test failure, security path detection, organizational context gap.
    - Add constraint: "SKIP recursive algorithms — flag and report instead."
 
-   **Acceptance criteria anti-patterns**: Apply the anti-patterns and check command authoring rules from design/SKILL.md Step 5 (canonical list).
+   **Acceptance criteria anti-patterns**: Apply the anti-patterns and check command authoring rules from design/SKILL.md Step 5 (canonical list, includes AC gate pre-check rule).
 
 7. **Anti-pattern guards** (CRITICAL — do NOT proceed to finalize if any guard triggers without user approval):
    - **Token budget** (text targets): Calculate net token delta for proposed changes. If total would increase target beyond its current size, ask user to approve flagged changes explicitly.
@@ -302,19 +303,26 @@ Organizational context items: {approved count}/{total count}
 Simplification Analysis Complete: {target}
 Target type: {code|text|mixed}
 
-Roles ({roleCount}):
-  - Role 0: {name} ({model}) — {goal one-line}
-  - Role 1: {name} ({model}) [after: {dependencies}] — {goal one-line}
+Roles:
+| # | Name | Model | Dependencies | Goal |
+|---|------|-------|-------------|------|
+| 0 | {name} | {model} | — | {goal one-line} |
+| 1 | {name} | {model} | after: {dep} | {goal one-line} |
 
 Cascade Impact:
-- Total elimination count: {sum of eliminationCount across findings}
-- Cascade chains: {count of distinct cascade chains}
+| Metric | Value |
+|--------|-------|
+| Total eliminations | {sum of eliminationCount across findings} |
+| Cascade chains | {count of distinct cascade chains} |
+| Design decisions | {count} |
 
-Design Decisions: {count}
-Organizational Context: {approved}/{total} items approved by user
+Acceptance Criteria: {total AC count across all roles}
+| Role | Criteria | Key check |
+|------|----------|-----------|
+| {name} | {count} | {most important check command, abbreviated} |
+
+Organizational context: {approved}/{total} items approved by user
 Memories applied: {count or "none"}
-
-Run /do:execute to begin simplification.
 ```
 
 3. **Trace** — Emit completion trace:

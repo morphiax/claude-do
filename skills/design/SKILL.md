@@ -27,11 +27,12 @@ Before starting the Flow, Read `lead-protocol-core.md`. It defines the canonical
 
 ### 1. Pre-flight
 
-1. **Lifecycle context**: Run Lifecycle Context protocol (see lead-protocol-core.md).
-2. **Check for ambiguity**: Use `sequential-thinking` to assess: "Is this goal genuinely unambiguous? What assumptions am I making about scope? Does the goal's wording imply something different from what I'm planning to build? Would a reasonable person read this goal and expect a different output?" If any ambiguity surfaces, use `AskUserQuestion` before proceeding. **Scope change gate**: If during design you discover existing solutions that would change what gets built (e.g., "build X" becomes "import from existing X"), use `AskUserQuestion` before proceeding. The user asked for X — building Y instead requires explicit consent, even if Y is more efficient.
-3. If >5 roles likely needed, suggest phases. Design only phase 1.
-4. Check existing plan: `python3 $PLAN_CLI status .design/plan.json`. If `ok` and `isResume`: ask user "Existing plan has {counts} roles. Overwrite?" If declined, stop.
-5. Archive stale artifacts: `python3 $PLAN_CLI archive .design`
+1. **Lifecycle context**: Run Lifecycle Context protocol (see lead-protocol-core.md). This runs `python3 $PLAN_CLI plan-health-summary .design` and emits the skill-start trace.
+2. **Spec check**: If `.design/spec.json` exists, run `python3 $PLAN_CLI spec-search .design/spec.json` and report the entry count and category breakdown to the user. Do NOT load all entries here — spec entries are injected per-role during Step 5 role brief authorship.
+3. **Check for ambiguity**: Use `sequential-thinking` to assess: "Is this goal genuinely unambiguous? What assumptions am I making about scope? Does the goal's wording imply something different from what I'm planning to build? Would a reasonable person read this goal and expect a different output?" If any ambiguity surfaces, use `AskUserQuestion` before proceeding. **Scope change gate**: If during design you discover existing solutions that would change what gets built (e.g., "build X" becomes "import from existing X"), use `AskUserQuestion` before proceeding. The user asked for X — building Y instead requires explicit consent, even if Y is more efficient.
+4. If >5 roles likely needed, suggest phases. Design only phase 1.
+5. Check existing plan: `python3 $PLAN_CLI status .design/plan.json`. If `ok` and `isResume`: ask user "Existing plan has {counts} roles. Overwrite?" If declined, stop.
+6. Archive stale artifacts: `python3 $PLAN_CLI archive .design`
 
 ### 2. Lead Research
 
@@ -89,6 +90,7 @@ Spawn experts as parallel standalone Task() subagents.
    - **Verify claims against reality**: Instruct experts: "When claiming existing code/data/infrastructure works, verify by checking actual outputs — not just code structure. Read data files, run scripts, inspect results. A scraper that exists in code but produces empty output is not 'fully functional'. Report what you verified vs what you inferred."
    - **Verify external systems when accessible**: Instruct experts: "When the goal involves integrating with an external system (website, API, service) and the system is accessible, use WebFetch or WebSearch to verify assumptions about the live system — don't rely solely on existing code that may be stale. At minimum, fetch public pages (login pages, docs, status endpoints) to confirm URLs, form fields, and page structure. Report discrepancies between existing code assumptions and live observations."
    - Every expert prompt MUST end with: "In your findings JSON, include a `verificationProperties` section: an array of properties that should hold regardless of implementation (behavioral invariants, boundary conditions, cross-role contracts). Format: `[{\"property\": \"...\", \"category\": \"invariant|boundary|integration\", \"testableVia\": \"how to test this with concrete commands/endpoints\"}]`. Provide concrete, externally observable properties that can be tested without reading source code. When suggesting testableVia commands, avoid anti-patterns: grep-only checks (verifies text exists, not that feature works), `test -f` as sole check (file exists but may contain errors), `wc -l` counts (size not correctness), `|| echo` or `|| true` fallbacks (always exits 0), pipe chains without exit-code handling (may mask failures)."
+   - **High-leverage content drafting**: When an expert's domain includes template text, example content, or canonical guidance that workers will copy verbatim into the codebase, instruct the expert to draft that content in their findings. Examples: EARS notation examples for an AC authorship expert, API schema examples for an architect, error message templates for a UX specialist. Workers focused on file editing should not have to invent canonical examples — experts with domain context produce better ones.
    - Instruct: "Save your complete findings to `.design/expert-{name}.json` as structured JSON."
    - Instruct: "Return a one-paragraph summary when done."
 3. After all Tasks return, verify artifacts exist: `ls .design/expert-{name}.json` for each expert. If any is missing but Task returned output, write the output to the missing artifact file. If Task errored, spawn a replacement Task() with the same prompt (max 1 retry per expert).
@@ -152,9 +154,10 @@ All phases follow: **maximum 2 rounds** of negotiation per conflict. If no conve
    - **Shared file check**: If a role modifies a file that exists identically in multiple directories (e.g., shared protocol files, copied configs), the plan MUST scope ALL copies for update — either in the same role or in a dependent role. Run `find` or `ls` to detect duplicates before finalizing scope.
    - **Type/interface ownership**: When multiple roles produce or consume the same data contract (interface, type, schema), designate ONE role as the canonical owner of the definition. Other roles must import from the canonical source, not redefine it. Flag if the same interface already exists in multiple files — add a constraint for one role to consolidate.
    - Workers decide HOW to implement — briefs define WHAT and WHY
-5. Write `.design/plan.json` with role briefs (see schema below).
-6. For each role, include `expertContext[]` referencing specific expert artifacts and the sections relevant to that role. **Do not lossy-compress expert findings into terse fields** — reference the full artifacts.
-7. Write criteria-based `acceptanceCriteria` — define WHAT should work, not WHICH files should exist. Workers verify against criteria, not file lists. **Every criterion MUST have a `check` that is a concrete, independently runnable shell command** (e.g., `"bun run build"`, `"bun test --run"`). Never leave checks as prose descriptions — workers execute these literally. If a role touches compiled code, include BOTH a build check AND a test check as separate criteria. **Checks must verify functional correctness, not just pattern existence.** A grep confirming a CSS rule exists is insufficient — the check must verify the rule actually takes effect (e.g., start a dev server and curl the page, or verify that referenced classes/imports resolve to definitions). At least one criterion per role should test end-to-end behavior, not just file contents. **Check commands must fail-fast with non-zero exit codes on failure.**
+5. **Spec injection per role**: If `.design/spec.json` exists, for each role run: `python3 $PLAN_CLI spec-search .design/spec.json --goal "{role goal}" --keywords "{role name} {scope directories joined by space}"`. Take the top 3 returned entries and inject each as a role constraint with the prefix: `"Spec invariant — workers must preserve this behavior: {spec entry ears or description} (spec.json entry '{id}')"`. Spec-derived constraints are invariants — workers must not change system behavior that a spec entry describes, even if their role brief does not explicitly prohibit the change. If spec.json does not exist or spec-search returns zero entries, proceed without injection.
+6. Write `.design/plan.json` with role briefs (see schema below).
+7. For each role, include `expertContext[]` referencing specific expert artifacts and the sections relevant to that role. **Do not lossy-compress expert findings into terse fields** — reference the full artifacts.
+8. Write criteria-based `acceptanceCriteria` — define WHAT should work, not WHICH files should exist. Workers verify against criteria, not file lists. **Every criterion MUST have a `check` that is a concrete, independently runnable shell command** (e.g., `"bun run build"`, `"bun test --run"`). Never leave checks as prose descriptions — workers execute these literally. If a role touches compiled code, include BOTH a build check AND a test check as separate criteria. **Checks must verify functional correctness, not just pattern existence.** A grep confirming a CSS rule exists is insufficient — the check must verify the rule actually takes effect (e.g., start a dev server and curl the page, or verify that referenced classes/imports resolve to definitions). At least one criterion per role should test end-to-end behavior, not just file contents. **Check commands must fail-fast with non-zero exit codes on failure.**
 
    **Data-dependent roles**: For roles that import, serve, or display data, at least one AC check MUST verify that data actually exists and is correct — not just that the response shape is valid. A check that asserts `'data' in response` passes on empty arrays. Instead: assert `len(response['data']) > 0` or verify specific field values. Include fixture/sample data in the plan so data-dependent checks have something to verify against.
 
@@ -170,7 +173,14 @@ All phases follow: **maximum 2 rounds** of negotiation per conflict. If no conve
    - `cmd 2>&1 | tail -N` — anti-pattern: pipe may mask exit code unless `set -o pipefail` is used
    - `! grep -q "removed_thing" file` as sole check — anti-pattern: verifies removal but not that the replacement works. Always pair removal checks with positive checks verifying the new pattern exists in the correct context (e.g., `! grep -q 'old_pattern' f && grep -q 'Task(' f`)
 
+   **EARS notation for behavioral criteria**: When writing criteria that describe system responses to triggers, use EARS (Easy Approach to Requirements Syntax) structure: `"WHEN [trigger condition], THE system SHALL [observable response]"`. Apply EARS only to behavioral-invariant and boundary-contract style criteria — not to build/test runner checks (e.g., `"bun run build"`) and not to architectural-decision criteria. Each EARS criterion must be paired with a `check` that independently verifies the observable response described — not that code implementing it exists. Correct examples:
+   - Criterion: `"WHEN 10 requests arrive within 1 second, THE system SHALL return HTTP 429 on the 11th"` → Check: `for i in $(seq 1 11); do curl -s -o /dev/null -w '%{http_code}\n' http://localhost:3000/api/health; done | tail -1 | grep -q 429`
+   - Criterion: `"WHEN a required field is missing from POST /users, THE system SHALL return HTTP 400 with an 'errors' field"` → Check: `curl -s -X POST http://localhost:3000/users -H 'Content-Type: application/json' -d '{}' | python3 -c "import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get('errors') else 1)"`
+   - Criterion: `"WHEN finalize runs on a plan.json with schemaVersion != 4, THE system SHALL exit non-zero"` → Check: `python3 -c "import json,subprocess,sys; p=json.load(open('.design/plan.json')); p['schemaVersion']=99; open('/tmp/bad_plan.json','w').write(json.dumps(p)); r=subprocess.run(['python3','scripts/plan.py','finalize','/tmp/bad_plan.json'],capture_output=True); sys.exit(0 if r.returncode!=0 else 1)"`
+   When uncertain whether EARS applies, ask: does this criterion describe what the system does in response to an event? If yes, use EARS. If it is a boundary-contract (external API response codes, file format guarantees) or a behavioral-invariant (system must always preserve X), EARS is the right format.
+
    **Check command authoring rules** (apply when writing `check` fields):
+   - **AC gate pre-check**: Every structural AC must FAIL against the current codebase before execution and PASS after. If a check passes without changes, it verifies nothing — rewrite it to detect the actual before-state.
    - **Ban f-strings in inline Python**: `python3 -c "..."` check commands must NOT use f-strings — nested quotes and backslash escapes inside `"..."` cause `SyntaxError`. Use `.format()` or `%` formatting instead, or move complex logic to a script file.
    - **Prefer script files for complex checks**: When a check requires >1 logical step, write it to a temp file (`python3 /tmp/check_role.py`) instead of inlining with `-c`. Inline `-c` is limited to simple one-liners.
    - **Fail-fast required**: Every check must exit non-zero on failure with no fallback (`|| true`, `|| echo`) that masks the result.
@@ -188,9 +198,9 @@ All phases follow: **maximum 2 rounds** of negotiation per conflict. If no conve
    | Count lines/entries in output | `python3 -c "import json; d=json.load(open('f.json')); assert len(d['items'])>=3"` |
    | Shell script file is executable and exits 0 | `bash path/to/script.sh` |
 
-8. Add `auxiliaryRoles[]` (see Auxiliary Roles section).
-9. Write to `.design/plan.json` (do NOT run finalize yet — that happens in Step 6).
-10. **Draft plan review** (complex/high-stakes tier only): Display the draft plan to the user before finalization:
+9. Add `auxiliaryRoles[]` (see Auxiliary Roles section).
+10. Write to `.design/plan.json` (do NOT run finalize yet — that happens in Step 6).
+11. **Draft plan review** (complex/high-stakes tier only): Display the draft plan to the user before finalization:
    ```
    Draft Plan ({roleCount} roles):
    - Role 0: {name} — {goal one-line} [{model}]
@@ -310,24 +320,30 @@ Add auxiliary roles to `auxiliaryRoles[]` in plan.json. For all tiers: integrati
 
 ```
 Design Complete: {goal}
+Result: {roleCount} roles, max depth {maxDepth}
 
-Roles ({roleCount}, max depth {maxDepth}):
-  Depth 1:
-  - Role 0: {name} ({model}) — {goal one-line}
-  Depth 2:
-  - Role 2: {name} ({model}) [after: role-a] — {goal one-line}
+Roles:
+| # | Name | Model | Dependencies | Goal |
+|---|------|-------|-------------|------|
+| 0 | {name} | {model} | — | {goal one-line} |
+| 1 | {name} | {model} | after: {dep} | {goal one-line} |
 
 Design Decisions:
-- {conflict} → {decision} ({one-line reasoning})
+| Conflict | Decision | Reasoning |
+|----------|----------|-----------|
+| {conflict} | {decision} | {one-line reasoning} |
 
 Expert Highlights:
 - {expert-name}: {key finding one-liner}
 
-Verification: {spec count if any, acceptance criteria count per role}
+Acceptance Criteria: {total AC count across all roles}
+| Role | Criteria | Key check |
+|------|----------|-----------|
+| {name} | {count} | {most important check command, abbreviated} |
+
+Verification specs: {count or "none"}
 Context: {stack}, Test: {testCommand}
 Memories applied: {count or "none"}
-
-Run /do:execute to begin.
 ```
 
 3. **Trace** — Emit completion trace:

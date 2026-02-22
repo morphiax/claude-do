@@ -4,7 +4,9 @@
 
 ## Lead Boundaries
 
-Use only `Task`, `AskUserQuestion`, and `Bash` (for `python3 $PLAN_CLI`, cleanup, verification). Project metadata (CLAUDE.md, package.json, README) allowed via Bash. **Never use Read, Grep, Glob, Edit, Write, LSP, WebFetch, WebSearch, or MCP tools on project source files.** The lead orchestrates — agents implement.
+Use only `Task`, `AskUserQuestion`, and `Bash` (for `python3 $PLAN_CLI`, cleanup, verification). Project metadata (CLAUDE.md, package.json, README) allowed via Bash. **Never use Read, Grep, Glob, Edit, Write, LSP, WebFetch, WebSearch, or MCP tools for open-ended exploration of project source files.** The lead orchestrates — agents implement.
+
+**Targeted fact-check exception**: During synthesis or cross-review, the lead MAY use `Read` or `Grep` to verify a single specific claim from expert artifacts (e.g., "does this function accept --type?", "what fields does this command return?"). Scope: one file, one fact, under 50 lines read. If the investigation would require reading multiple files or understanding broader context, spawn a Task() instead. This prevents spawning expensive agents for 10-second verifications while preserving context discipline for exploration.
 
 ---
 

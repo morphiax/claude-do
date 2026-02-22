@@ -19,7 +19,7 @@ claude --plugin-dir ~/.claude/plugins/marketplaces/do
 /do:execute
 ```
 
-All four skills must be tested end-to-end. Changes to design, execute, research, or simplify may affect the others since they share the `.design/plan.json` contract (or `.design/research.json` for research) and persistent files (`memory.jsonl`, `reflection.jsonl`).
+All four skills must be tested end-to-end. Changes to design, execute, research, or simplify may affect the others since they share the `.design/plan.json` contract (or `.design/research.json` for research) and persistent files (`memory.jsonl`, `reflection.jsonl`, `spec.json`).
 
 ## Architecture
 
@@ -27,7 +27,7 @@ All four skills must be tested end-to-end. Changes to design, execute, research,
 
 - `.claude-plugin/plugin.json` — Plugin manifest (name, version, metadata)
 - `.claude-plugin/marketplace.json` — Marketplace distribution config
-- `shared/plan.py` — Shared helper script (35 commands: 17 query, 7 mutation, 9 validation, 1 build, 1 test)
+- `shared/plan.py` — Shared helper script (40 commands: 17 query, 7 mutation, 9 validation, 4 spec, 1 build, 2 test)
 - `shared/lead-protocol-core.md` — Canonical lead protocol core (boundaries, no-polling, trace, memory, phase announcements, INSIGHT handling). Consumed by all team-based skills at startup.
 - `shared/lead-protocol-teams.md` — Lead protocol teams patterns (TeamCreate enforcement, liveness pipeline, team patterns). Consumed by design/execute/simplify at startup.
 - `skills/design/SKILL.md` — `/do:design` skill definition
@@ -61,8 +61,9 @@ A single `shared/plan.py` at the repo root provides all deterministic operations
 - **Query** (runtime-invoked): team-name, status, summary, overlap-matrix, tasklist-data, worker-pool, retry-candidates, circuit-breaker, memory-search, plan-health-summary
 - **Mutation** (runtime-invoked): update-status, memory-add, memory-feedback, reflection-add, resume-reset, archive, trace-add
 - **Validation** (runtime-invoked): expert-validate, validate-checks, validate-auxiliary-report, worker-completion-validate, research-validate, research-summary
+- **Spec** (runtime-invoked): spec-search, spec-add, spec-validate, spec-compact — persistent behavioral spec store with EARS notation, SHA256 tamper detection, and importance-based compaction
 - **Build** (1 command): finalize — validates role briefs, computes directory overlaps, validates state transitions, and computes SHA256 checksums for verification specs in one atomic operation
-- **Test** (1 command): self-test — exercises every command against synthetic fixtures in a temp directory, reports pass/fail per command as JSON
+- **Test** (2 commands): self-test — exercises every command against synthetic fixtures in a temp directory, reports pass/fail per command as JSON; test-internal — in-process test runner for CI/embedding use
 - **Developer inspection tools** (not invoked by skills at runtime): reflection-search, memory-review, health-check, plan-diff, sync-check, trace-search, trace-summary, reflection-validate, memory-summary, trace-validate
 
 Design uses query + finalize. Execute uses all commands. Research uses query + research-validate + research-summary. `worker-pool` reads roles directly — one worker per role, named by role (e.g., `api-developer`, `test-writer`). Workers read `plan.json` directly — no per-worker task files needed.
@@ -77,7 +78,7 @@ Skills communicate through structured JSON files in `.design/` (gitignored). Two
 
 - Authoritative state; TaskList is a derived view. Schema version 4 required.
 - Roles use name-based dependencies resolved to indices by `finalize`.
-- **Persistent `.design/` files** (survive archiving): `memory.jsonl`, `reflection.jsonl`, `research.json`, `trace.jsonl`. Everything else archived to `.design/history/{timestamp}/`
+- **Persistent `.design/` files** (survive archiving): `memory.jsonl`, `reflection.jsonl`, `research.json`, `trace.jsonl`, `spec.json`. Everything else archived to `.design/history/{timestamp}/`
 - **Reflection fields**: `promptFixes` (primary — captures failure-driven AND lead-side workarounds), `acMutations` (execute only — lead-side plan.json fixes before workers spawn, feeds back to design), `highValueInstructions` (proven instructions to protect from simplification), `acGradients` (execute only — runtime AC failures), `stepsSkipped`, `instructionsIgnored`, `whatWorked`/`whatFailed`
 - Verification specs: optional `verificationSpecs[]` in plan.json. `finalize` computes SHA256 checksums for tamper detection.
 
