@@ -3,7 +3,7 @@
 > Multi-agent planning with structured debate, self-verifying execution, and cross-session memory
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Version](https://img.shields.io/badge/version-3.1.5-green.svg)
+![Version](https://img.shields.io/badge/version-3.2.0-green.svg)
 ![Claude Code](https://img.shields.io/badge/Claude%20Code-2.1.32%2B-orange.svg)
 
 ## What's Novel
@@ -24,11 +24,11 @@
 
 **Acceptance criteria validation** — Design-time syntax validation catches broken `python3 -c` checks (including f-string brace nesting errors) before execution. Shift-left anti-pattern warnings in expert prompts prevent grep-only criteria from entering plans. Lead-side verification re-runs every criterion before marking roles complete (trust-but-verify). Surface-only checks (grep, file-existence) are flagged as anti-patterns. Compound bypass patterns (`grep ... && true`, `command || true`) now detected and rejected.
 
-**Persistent behavioral spec store** — Execute's spec-curator auxiliary promotes validated behavioral invariants, boundary contracts, and architectural decisions to `.design/spec.json` after each cycle. Specs use EARS notation (`WHEN <trigger> THE <system> SHALL <response>`) for behavioral and boundary categories. Design retrieves relevant specs per role via `spec-search` before authoring acceptance criteria, closing the quality feedback loop across sessions. SHA256 tamper detection on check fields. Importance-based compaction with protected floor for high-importance behavioral invariants.
+**Persistent behavioral spec store with TDD** — Design authors and grows `.design/spec.json` as the durable regression contract. New specs are promoted from acceptance criteria through 5 promotion gates, validated via TDD (existing specs must pass, new specs must fail before execution). Execute validates all specs as a regression gate — failures trigger targeted fix workers. Reflect proposes spec tightenings for the next design cycle. Specs use EARS notation (`WHEN <trigger> THE <system> SHALL <response>`), SHA256 tamper detection on check fields, and importance-based compaction with protected floor for high-importance behavioral invariants.
 
 **Execution observability via trace.jsonl** — Append-only event log capturing agent lifecycle events (spawn, completion, failure, respawn) with timestamps and session grouping. `trace-search` and `trace-summary` commands enable post-execution analysis and debugging.
 
-**Automated self-test suite** — `plan.py self-test` exercises all 39 commands against synthetic fixtures in a temp directory, enabling CI-style validation of the helper script.
+**Automated self-test suite** — `plan.py self-test` exercises all 40 commands against synthetic fixtures in a temp directory, enabling CI-style validation of the helper script.
 
 **Shared lead protocol** — Design, execute, research, and simplify skills share canonical lead protocols defined in `shared/lead-protocol-core.md` (boundaries, trace emission, memory injection) and `shared/lead-protocol-teams.md` (team setup, liveness tracking), eliminating protocol drift and ensuring consistent orchestration across all skills.
 

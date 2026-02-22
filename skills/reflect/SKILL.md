@@ -43,10 +43,11 @@ Identify what to reflect on. Do this silently — no user output needed.
    - `plan.json` → design or simplify skill → `--skill design` or `--skill simplify`
    - Worker artifacts, role results → execute skill → `--skill execute`
 2. Read the key output artifact(s) to ground the reflection in what was actually produced.
-3. **Parse arguments**: Check if `$ARGUMENTS` contains `fix-skill`. If present, enable the Skill Improvement phase (Step 5). Everything else in `$ARGUMENTS` is the focus scope.
-4. If the user provided a focus argument (excluding `fix-skill`), scope the reflection to that aspect.
-5. If no recent skill artifacts exist, tell the user: "No recent skill output found in `.design/`. Run a skill first, then reflect."
-6. **User input during reflection**: If the user provides observations or feedback during the reflection run (mid-conversation messages), incorporate them as high-priority signal. User observations are the highest-quality input available — they see things the model rationalizes away. Integrate user feedback into the thinking steps and, if relevant, into fix-skill proposals.
+3. **Spec awareness**: If `.design/spec.json` exists, read it. Run `python3 $PLAN_CLI spec-run .design/spec.json` to get current pass/fail status of all specs. This informs the adversarial thinking — spec failures are regressions, and ACs that should be specs represent missing durable contracts.
+4. **Parse arguments**: Check if `$ARGUMENTS` contains `fix-skill`. If present, enable the Skill Improvement phase (Step 5). Everything else in `$ARGUMENTS` is the focus scope.
+5. If the user provided a focus argument (excluding `fix-skill`), scope the reflection to that aspect.
+6. If no recent skill artifacts exist, tell the user: "No recent skill output found in `.design/`. Run a skill first, then reflect."
+7. **User input during reflection**: If the user provides observations or feedback during the reflection run (mid-conversation messages), incorporate them as high-priority signal. User observations are the highest-quality input available — they see things the model rationalizes away. Integrate user feedback into the thinking steps and, if relevant, into fix-skill proposals.
 
 ### 2. Adversarial Thinking
 
@@ -77,6 +78,13 @@ This step is the highest-leverage single intervention. Research shows it accesse
 > "Step back from execution quality. Was the approach itself correct? Should we have used a different skill, scoped differently, asked different questions, or framed the problem differently? If we started completely over with what we know now, what would we do instead? This isn't about doing the same thing better — it's about whether we did the right thing."
 
 **After structural analysis, evaluate instructional quality**: Is the written output (SKILL.md changes, plan.json instructions, expert guidance) clear enough that a new lead would follow it correctly on first read? Ambiguous instructions are gaps, not style issues. Reflect gravitates toward testable/structural issues (CLI flags, file existence) — actively resist this bias by also evaluating clarity, specificity, and potential for misinterpretation.
+
+**Spec/AC relationship analysis** (if spec.json exists or plan.json has ACs): After the structural thinking steps, evaluate the spec↔AC relationship:
+- **Missing specs**: Are there ACs in plan.json that represent durable behavioral contracts but were NOT promoted to spec.json? These are gaps — the behavior will be lost on archive.
+- **Spec tightening**: Could any existing spec checks be stricter? If spec-run results show a spec passing with wide margins (e.g., checking `len > 0` when the actual count is always exactly 5), propose a tighter check.
+- **Spec regressions**: Did any specs fail in the spec-run from Step 1? These represent regressions that need immediate attention.
+- **Redundant specs**: Are any specs semantically duplicated or testing the same boundary from different angles?
+Record tightening proposals and missing-spec observations in the synthesis. These feed into the next design cycle's spec curation step.
 
 **Output format quality**: Evaluate the reviewed skill's user-facing output (conversation markdown shown to the user, not just artifact files). Did the summary directly answer each part of the user's original question? Could the user take action from the summary alone without reading `.design/` artifacts? Was output organized to mirror the user's question structure (e.g., if they asked 3 things, are all 3 clearly addressed)? Was the most important finding (the "headline") immediately visible, not buried in a table? Poor communication of correct findings is a gap — note it in the prose.
 
@@ -166,6 +174,7 @@ Process results: blocking issues feed into Step 4 (Resolution) as mandatory patc
 - Correct interface contracts in interfaces.json
 - Add missing fields to schema definitions
 - Fix incorrect format assumptions
+- **Propose spec tightenings**: Record tightening proposals in reflection.jsonl for the next design cycle. Reflect does NOT write to spec.json directly — design is the sole author. Format proposals in the reflection entry's `specTightenings` array: `[{"specId": "...", "currentCheck": "...", "proposedCheck": "...", "reasoning": "..."}]`
 
 **What resolution cannot do:**
 - Add or remove entire roles (that's a redesign — suggest re-running `/do:design`)

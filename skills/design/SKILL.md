@@ -291,7 +291,39 @@ Additional requirements for all cases: expert artifacts contain verificationProp
 }
 ```
 
-### 7. Auxiliary Roles
+### 7. Spec Curation (TDD for execute)
+
+After writing plan.json and running finalize, promote durable acceptance criteria into `.design/spec.json`. Specs are the persistent regression contract — they survive archiving and grow across design cycles. Execute's job is to make failing specs pass without regressing passing ones.
+
+**Step 1 — Baseline existing specs**: If `.design/spec.json` exists, run `python3 $PLAN_CLI spec-run .design/spec.json`. All existing specs MUST pass — they represent previously-proven behavioral contracts. If any fail, this is a pre-existing regression. **Show user**: "Spec baseline: {passed}/{total} passing." If failures: "WARNING: {failed} existing specs failing — these represent regressions from a previous cycle." Fix or flag to user before proceeding.
+
+**Step 2 — Promote durable ACs to spec.json**: Review all `acceptanceCriteria` across all roles. For each AC, apply the 5 promotion gates:
+
+1. **Behavioral**: The criterion describes a WHEN→SHALL system response (trigger → observable behavior), not file existence, pattern matching, or structural form
+2. **Durable**: The behavior should hold for ALL future implementations — if the system were reimplemented from scratch, this property must still hold
+3. **Not role-setup-specific**: The check verifies persistent system behavior, not worker environment configuration
+4. **Not semantically duplicated**: The behavioral boundary is not already covered by an existing spec.json entry (check semantic overlap, not exact text match)
+5. **Importance >= 5**: Core system functions and boundary enforcement score 8-10; secondary behavioral contracts score 5-7; below 5 is not worth persisting
+
+**Exclusion patterns** — automatically skip: build/test runner checks (e.g., `bun run build`, `npm test`), implementation-naming checks (grep for specific function/variable names), documentation consistency checks, line-count or file-size checks, checks that use `|| true` or `|| echo` fallbacks.
+
+**Tightening from prior runs**: Check `.design/reflection.jsonl` for spec tightening proposals from previous execute or reflect runs. Apply valid tightenings to existing spec entries.
+
+For each AC that passes all 5 gates, promote via:
+```bash
+python3 $PLAN_CLI spec-add .design/spec.json \
+  --ears "WHEN [trigger], THE system SHALL [observable response]" \
+  --check "{criterion.check}" \
+  --category "behavioral-invariant|boundary-contract" \
+  --source-role "{role.name}" \
+  --importance {score}
+```
+
+**Step 3 — TDD validation**: Run the newly promoted specs against the current codebase: `python3 $PLAN_CLI spec-run .design/spec.json --ids "{comma-separated new entry IDs}"`. New specs MUST fail — they describe behavior that execute will implement. If a new spec already passes, it is redundant (the behavior already exists) — remove it from spec.json or demote to a baseline-only check. **Show user**: "Spec curation: {promoted} new specs promoted ({all_failing} failing as expected). Existing: {existing_count} passing."
+
+**Skip when**: No ACs pass the promotion gates (record in reflection: "0 specs promoted — {reason}").
+
+### 8. Auxiliary Roles
 
 Add auxiliary roles to `auxiliaryRoles[]` in plan.json. For all tiers: integration-verifier and memory-curator. Challenger and scout are NOT included — their functions are absorbed by `/do:reflect`, which runs between design and execute to review artifacts and fix issues with full conversation context.
 
@@ -314,7 +346,7 @@ Add auxiliary roles to `auxiliaryRoles[]` in plan.json. For all tiers: integrati
 ]
 ```
 
-### 8. Complete
+### 9. Complete
 
 1. Validate: `python3 $PLAN_CLI status .design/plan.json`. Stop if `ok: false`.
 2. Summary: `python3 $PLAN_CLI summary .design/plan.json`. Display a rich end-of-run summary:
@@ -343,6 +375,7 @@ Acceptance Criteria: {total AC count across all roles}
 | {name} | {count} | {most important check command, abbreviated} |
 
 Verification specs: {count or "none"}
+Spec curation: {new specs promoted}/{existing specs baseline} (all new specs failing as expected: {yes/no})
 Context: {stack}, Test: {testCommand}
 Memories applied: {count or "none"}
 ```

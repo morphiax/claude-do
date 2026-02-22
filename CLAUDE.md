@@ -27,7 +27,7 @@ All four skills must be tested end-to-end. Changes to design, execute, research,
 
 - `.claude-plugin/plugin.json` — Plugin manifest (name, version, metadata)
 - `.claude-plugin/marketplace.json` — Marketplace distribution config
-- `shared/plan.py` — Shared helper script (40 commands: 17 query, 7 mutation, 9 validation, 4 spec, 1 build, 2 test)
+- `shared/plan.py` — Shared helper script (41 commands: 17 query, 7 mutation, 9 validation, 5 spec, 1 build, 2 test)
 - `shared/lead-protocol-core.md` — Canonical lead protocol core (boundaries, no-polling, trace, memory, phase announcements, INSIGHT handling). Consumed by all team-based skills at startup.
 - `shared/lead-protocol-teams.md` — Lead protocol teams patterns (TeamCreate enforcement, liveness pipeline, team patterns). Consumed by design/execute/simplify at startup.
 - `skills/design/SKILL.md` — `/do:design` skill definition
@@ -61,12 +61,12 @@ A single `shared/plan.py` at the repo root provides all deterministic operations
 - **Query** (runtime-invoked): team-name, status, summary, overlap-matrix, tasklist-data, worker-pool, retry-candidates, circuit-breaker, memory-search, plan-health-summary
 - **Mutation** (runtime-invoked): update-status, memory-add, memory-feedback, reflection-add, resume-reset, archive, trace-add
 - **Validation** (runtime-invoked): expert-validate, validate-checks, validate-auxiliary-report, worker-completion-validate, research-validate, research-summary
-- **Spec** (runtime-invoked): spec-search, spec-add, spec-validate, spec-compact — persistent behavioral spec store with EARS notation, SHA256 tamper detection, and importance-based compaction
+- **Spec** (runtime-invoked): spec-search, spec-add, spec-validate, spec-compact, spec-run — persistent behavioral spec store with EARS notation, SHA256 tamper detection, importance-based compaction, and check execution
 - **Build** (1 command): finalize — validates role briefs, computes directory overlaps, validates state transitions, and computes SHA256 checksums for verification specs in one atomic operation
 - **Test** (2 commands): self-test — exercises every command against synthetic fixtures in a temp directory, reports pass/fail per command as JSON; test-internal — in-process test runner for CI/embedding use
 - **Developer inspection tools** (not invoked by skills at runtime): reflection-search, memory-review, health-check, plan-diff, sync-check, trace-search, trace-summary, reflection-validate, memory-summary, trace-validate
 
-Design uses query + finalize. Execute uses all commands. Research uses query + research-validate + research-summary. `worker-pool` reads roles directly — one worker per role, named by role (e.g., `api-developer`, `test-writer`). Workers read `plan.json` directly — no per-worker task files needed.
+Design uses query + finalize + spec commands (spec-add, spec-run, spec-search). Execute uses all commands except spec-add (execute validates specs via spec-run but does not author them). Research uses query + research-validate + research-summary. `worker-pool` reads roles directly — one worker per role, named by role (e.g., `api-developer`, `test-writer`). Workers read `plan.json` directly — no per-worker task files needed.
 
 Scripts use python3 stdlib only (no dependencies), support Python 3.8+, and follow a consistent CLI pattern: `python3 plan.py <command> [plan_path] [options]`. All output is JSON to stdout with exit code 0 for success, 1 for errors.
 
@@ -79,7 +79,8 @@ Skills communicate through structured JSON files in `.design/` (gitignored). Two
 - Authoritative state; TaskList is a derived view. Schema version 4 required.
 - Roles use name-based dependencies resolved to indices by `finalize`.
 - **Persistent `.design/` files** (survive archiving): `memory.jsonl`, `reflection.jsonl`, `research.json`, `trace.jsonl`, `spec.json`. Everything else archived to `.design/history/{timestamp}/`
-- **Reflection fields**: `promptFixes` (primary — captures failure-driven AND lead-side workarounds), `acMutations` (execute only — lead-side plan.json fixes before workers spawn, feeds back to design), `highValueInstructions` (proven instructions to protect from simplification), `acGradients` (execute only — runtime AC failures), `stepsSkipped`, `instructionsIgnored`, `whatWorked`/`whatFailed`
+- **Reflection fields**: `promptFixes` (primary — captures failure-driven AND lead-side workarounds), `acMutations` (execute only — lead-side plan.json fixes before workers spawn, feeds back to design), `highValueInstructions` (proven instructions to protect from simplification), `acGradients` (execute only — runtime AC failures), `specTightenings` (reflect only — proposals to tighten existing spec.json checks, consumed by next design cycle), `stepsSkipped`, `instructionsIgnored`, `whatWorked`/`whatFailed`
+- **Spec ownership**: Design is the sole author of `spec.json` (creates new specs, applies tightenings). Execute validates against spec.json as a regression gate via `spec-run` (all specs must pass post-execution) but never writes to it. Reflect proposes tightenings via `specTightenings` in reflection.jsonl, consumed by the next design cycle. Design uses TDD: existing specs must pass (baseline), newly promoted specs must fail (proving they test unimplemented behavior that execute will build).
 - Verification specs: optional `verificationSpecs[]` in plan.json. `finalize` computes SHA256 checksums for tamper detection.
 
 **Top-level fields**: schemaVersion (4), goal, context {stack, conventions, testCommand, buildCommand, lsp}, expertArtifacts [{name, path, summary}], designDecisions [{conflict, experts, decision, reasoning}], verificationSpecs [] (optional), roles[], auxiliaryRoles[], progress {completedRoles: []}

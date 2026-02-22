@@ -3694,6 +3694,109 @@ def _validate_spec_entry(entry: dict[str, Any], index: int, issues: list[str]) -
     )
 
 
+def _run_single_spec_check(entry: dict[str, Any], timeout: int) -> dict[str, Any]:
+    """Run one spec entry's check command and return a result dict."""
+    entry_id = entry.get("id", "unknown")
+    ears = entry.get("ears", "")
+    check = entry.get("check", "").strip()
+
+    if not check:
+        return {
+            "id": entry_id,
+            "ears": ears,
+            "passed": False,
+            "exitCode": -1,
+            "error": "empty check command",
+            "skipped": True,
+        }
+
+    try:
+        r = subprocess.run(  # noqa: S602  # nosec B602
+            check, shell=True, capture_output=True, text=True, timeout=timeout
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "id": entry_id,
+            "ears": ears,
+            "passed": False,
+            "exitCode": -1,
+            "error": f"timeout after {timeout}s",
+        }
+    except OSError as e:
+        return {
+            "id": entry_id,
+            "ears": ears,
+            "passed": False,
+            "exitCode": -1,
+            "error": str(e),
+        }
+
+    result: dict[str, Any] = {
+        "id": entry_id,
+        "ears": ears,
+        "passed": r.returncode == 0,
+        "exitCode": r.returncode,
+    }
+    if r.returncode != 0:
+        result["stderr"] = (r.stderr or "")[:500]
+        result["stdout"] = (r.stdout or "")[:500]
+    return result
+
+
+def _select_spec_entries(
+    entries: list[dict[str, Any]], ids_filter: list[str]
+) -> list[dict[str, Any]]:
+    """Filter entries to only those whose id is in ids_filter (if non-empty)."""
+    if not ids_filter:
+        return entries
+    id_set = set(ids_filter)
+    return [e for e in entries if e.get("id", "unknown") in id_set]
+
+
+def cmd_spec_run(args: argparse.Namespace) -> NoReturn:
+    """Run all spec.json check commands and report pass/fail per entry.
+
+    Used by design (TDD: existing specs must pass, new specs must fail)
+    and execute (regression gate: all specs must pass post-execution).
+    Returns {ok, total, passed, failed, skipped, results[]}.
+    """
+    spec_path = args.spec_path
+    timeout = getattr(args, "timeout", 30)
+    raw_ids = getattr(args, "ids", None)
+    ids_filter = [i.strip() for i in raw_ids.split(",") if i.strip()] if raw_ids else []
+
+    data = _load_spec_file(spec_path)
+    if data is None:
+        output_json(
+            {
+                "ok": True,
+                "total": 0,
+                "passed": 0,
+                "failed": 0,
+                "skipped": 0,
+                "results": [],
+            }
+        )
+
+    entries = _select_spec_entries(data.get("entries", []), ids_filter)
+    results = [_run_single_spec_check(e, timeout) for e in entries]
+
+    passed = sum(1 for r in results if r["passed"])
+    skipped = sum(1 for r in results if r.get("skipped"))
+    failed = len(results) - passed - skipped
+
+    output_json(
+        {
+            "ok": failed == 0,
+            "total": len(results),
+            "passed": passed,
+            "failed": failed,
+            "skipped": skipped,
+            "results": results,
+        }
+    )
+
+
 def cmd_spec_validate(args: argparse.Namespace) -> NoReturn:
     """Validate spec.json schema and SHA256 integrity.
 
@@ -6523,6 +6626,84 @@ class TestPlanCommands(unittest.TestCase):
             data = json.load(f)
         self.assertLessEqual(len(data["entries"]), 2)
 
+    def test_spec_run_passes_and_fails(self) -> None:
+        """Test cmd_spec_run reports pass/fail for check commands."""
+        spec_file = os.path.join(self.tmp_dir.name, "run_spec.json")
+        # Add a passing spec
+        add_args = argparse.Namespace(
+            spec_path=spec_file,
+            ears="WHEN true, THE system SHALL exit 0",
+            description="always pass",
+            check="true",
+            category="behavioral-invariant",
+            source_role="test",
+            source_cycle="2026-02-22",
+            importance=8,
+        )
+        self._run_cmd(cmd_spec_add, add_args)
+        # Add a failing spec
+        add_args = argparse.Namespace(
+            spec_path=spec_file,
+            ears="WHEN false, THE system SHALL exit 1",
+            description="always fail",
+            check="false",
+            category="boundary-contract",
+            source_role="test",
+            source_cycle="2026-02-22",
+            importance=6,
+        )
+        self._run_cmd(cmd_spec_add, add_args)
+        # Run all specs
+        run_args = argparse.Namespace(spec_path=spec_file, timeout=10, ids=None)
+        exit_code, result = self._run_cmd(cmd_spec_run, run_args)
+        self.assertEqual(exit_code, 0)
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["passed"], 1)
+        self.assertEqual(result["failed"], 1)
+        self.assertEqual(result["total"], 2)
+
+    def test_spec_run_missing_file(self) -> None:
+        """Test cmd_spec_run returns empty results for absent spec.json."""
+        run_args = argparse.Namespace(
+            spec_path=os.path.join(self.tmp_dir.name, "nope.json"),
+            timeout=10,
+            ids=None,
+        )
+        exit_code, result = self._run_cmd(cmd_spec_run, run_args)
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["total"], 0)
+
+    def test_spec_run_filter_by_ids(self) -> None:
+        """Test cmd_spec_run --ids filters to specific entries."""
+        spec_file = os.path.join(self.tmp_dir.name, "filter_spec.json")
+        add_args = argparse.Namespace(
+            spec_path=spec_file,
+            ears="WHEN true, THE system SHALL pass",
+            description="pass",
+            check="true",
+            category="behavioral-invariant",
+            source_role="test",
+            source_cycle="2026-02-22",
+            importance=8,
+        )
+        self._run_cmd(cmd_spec_add, add_args)
+        # Get the id
+        with open(spec_file) as f:
+            data = json.load(f)
+        entry_id = data["entries"][0]["id"]
+        # Add another entry
+        add_args.ears = "WHEN false, THE system SHALL fail"
+        add_args.check = "false"
+        self._run_cmd(cmd_spec_add, add_args)
+        # Run only the first entry
+        run_args = argparse.Namespace(spec_path=spec_file, timeout=10, ids=entry_id)
+        exit_code, result = self._run_cmd(cmd_spec_run, run_args)
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["total"], 1)
+        self.assertEqual(result["passed"], 1)
+
     def test_validate_role_brief_missing_model(self) -> None:
         """Test _validate_role_brief detects missing model."""
         role = {"name": "test", "goal": "test", "scope": {"directories": ["src/"]}}
@@ -6890,6 +7071,24 @@ def main() -> None:
         help="Hard cap on total entries kept (default: 50)",
     )
     p.set_defaults(func=cmd_spec_compact)
+
+    p = subparsers.add_parser(
+        "spec-run", help="Run all spec.json check commands and report pass/fail"
+    )
+    p.add_argument("spec_path", nargs="?", default=".design/spec.json")
+    p.add_argument(
+        "--timeout",
+        type=int,
+        default=30,
+        help="Timeout per check command in seconds (default: 30)",
+    )
+    p.add_argument(
+        "--ids",
+        type=str,
+        default=None,
+        help="Comma-separated entry IDs to run (default: all)",
+    )
+    p.set_defaults(func=cmd_spec_run)
 
     # Build commands
     p = subparsers.add_parser(

@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.2.0] - 2026-02-22
+
+### Added
+
+- **Design: spec curation with TDD validation (Step 7)**: Design now authors and grows `spec.json` — the durable regression contract that survives archiving. Promotes qualifying ACs through 5 promotion gates, validates existing specs pass (baseline) and new specs fail (TDD — proves they test unimplemented behavior for execute to build).
+- **Execute: spec regression gate**: Execute validates all `spec.json` entries via `spec-run` post-execution. All specs must pass — failures are regressions that trigger targeted fix workers. Replaces the old spec-curator which wrote specs post-hoc.
+- **Reflect: AC/spec relationship analysis**: Reflect reads `spec.json` and runs `spec-run` during context gathering. Adversarial thinking evaluates missing specs, tightening opportunities, and regressions. Resolution can propose `specTightenings` in reflection for the next design cycle.
+- **plan.py: `spec-run` command**: Iterates spec.json entries, runs each check command, returns structured pass/fail results with `--ids` filtering and `--timeout` control. Used by design (TDD validation) and execute (regression gate).
+
+### Changed
+
+- **Spec ownership model**: Design is now the sole author of `spec.json`. Execute validates but never writes. Reflect proposes tightenings via reflection. This replaces the execute-side spec-curator which promoted ACs post-hoc.
+
 ## [3.1.5] - 2026-02-22
 
 ### Added

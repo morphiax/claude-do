@@ -69,7 +69,7 @@ echo '{"acMutations":[{"role":"{role.name}","criterion":"{criterion text}","orig
   --goal-achieved false
 ```
 
-Record one entry per pre-validation pass (batch all mutations in one `acMutations` array via piped JSON). The JSON is read from stdin by reflection-add as the evaluation object. This feeds the "Learn from past AC mutations" block in the next design run and enables the post-execution spec curation step to exclude mutated criteria from promotion.
+Record one entry per pre-validation pass (batch all mutations in one `acMutations` array via piped JSON). The JSON is read from stdin by reflection-add as the evaluation object. This feeds the "Learn from past AC mutations" block in the next design run.
 
 ### 3. Report and Spawn Workers
 
@@ -176,44 +176,21 @@ On FAIL: spawn targeted fix workers for specific issues. Re-run verifier after f
 
 **Skip when**: only 1 role was executed, or all roles were independent (no shared directories, no cross-references), or all roles were fully sequential (maxDepth == roleCount) and all lead-side AC checks passed (lead already verified integration at each step).
 
-**Spec curator** (MANDATORY — runs after integration-verifier, regardless of outcome): Spawn a standalone Task() spec-curator agent to promote durable behavioral contracts from this run's acceptance criteria into `.design/spec.json`. This step is MANDATORY — do not skip even if you believe no entries qualify. Bootstrap runs are NOT an exception — spawn spec-curator even if zero promotions are expected. The code path validation is the value. If integration-verifier FAILED, the spec-curator still runs but must exclude criteria that failed verification.
-
-```
-Task(subagent_type: "general-purpose", model: "sonnet", prompt: <spec-curator prompt below>)
-```
-
-Spec-curator prompt MUST include:
-- "You are a spec-curator. Your job: identify acceptance criteria from this execution run that represent durable behavioral contracts — properties the system must preserve across all future implementations — and promote them to `.design/spec.json`."
-- "Read `.design/plan.json` (all completed roles and their `acceptanceCriteria[]`). Read `.design/integration-verifier-report.json` if it exists. Read `.design/reflection.jsonl` (last entry — look for `acMutations` array to identify criteria that were mutated before spawning and must NOT be promoted)."
-- "Read `.design/spec.json` if it exists to get existing entries. If spec.json does not exist, start with an empty entries array."
-- "Apply ALL 5 promotion gates — a criterion must pass every gate to be promoted:"
-  - "(1) Behavioral check: the criterion's `check` command verifies a WHEN→SHALL system response (trigger → observable behavior), not just file presence, pattern matching, or form. Run the check command against the current codebase — if it exits 0 before any new work would be needed, it is always-passing and must be excluded."
-  - "(2) Durable invariant: the behavior is expected to hold for ALL future implementations of this system, not just the current one. Ask: if the system is completely reimplemented from scratch, should this property still hold?"
-  - "(3) Not role-setup-specific: the check verifies persistent system behavior, not that the worker's environment was correctly configured for this specific role's work."
-  - "(4) Not semantically duplicated: the behavioral boundary is not already covered by an existing spec.json entry (check for semantic overlap, not exact text match)."
-  - "(5) Importance >= 5: core system functions and boundary enforcement score 8-10; secondary behavioral contracts score 5-7; entries below 5 are not worth persisting."
-- "Exclusion patterns — automatically exclude criteria that match any of these: always-passing checks (exit 0 before work), implementation-naming checks (grep for function/class/variable names), documentation consistency checks (grep CLAUDE.md/README.md), test infrastructure checks (verifying the test suite itself), line-count or file-size checks, role-setup verification checks (file exists, server running, dependencies installed). Also exclude any criterion listed in `acMutations` from reflection.jsonl — mutated criteria were broken checks and must not enter the spec."
-- "For each criterion that passes all 5 gates: call `python3 $PLAN_CLI spec-add .design/spec.json --entry '{\"ears\":\"WHEN [trigger], THE system SHALL [observable response]\",\"check\":\"{criterion.check}\",\"category\":\"behavioral-invariant|boundary-contract\",\"source\":\"{role.name}\",\"importance\":{score},\"reasoning\":\"{why this is a durable invariant}\"}'`. Do NOT write spec.json directly — use spec-add to ensure schema validation and sha256 computation."
-- "After processing all criteria: return a summary: 'Spec curation complete. Promoted {count} entries, rejected {count} (with reasons), existing entries preserved {count}.'"
-
-Wait for spec-curator completion. **Show user**: "Spec curator: {promoted} criteria promoted to spec.json."
-
-**If 0 entries promoted**: This must be explicitly recorded. Record skip-justification in reflection immediately:
+**Spec Regression Gate** (runs after integration-verifier): If `.design/spec.json` exists, validate that all specs still pass — specs are the durable regression contract authored by design.
 
 ```bash
-python3 $PLAN_CLI reflection-add .design/reflection.jsonl \
-  --session-id $SESSION_ID \
-  --skill execute \
-  --goal "$GOAL" \
-  --outcome partial \
-  --goal-achieved false \
-  --steps-skipped '["spec-curator-promotion"]' \
-  --what-failed "Spec curator ran but promoted 0 entries. Justification: {curator summary of why all criteria were rejected — e.g., all surface-only, all role-setup-specific, all semantically duplicated}"
+python3 $PLAN_CLI spec-run .design/spec.json
 ```
 
-**Post-step verification**: After spec-curator completes, confirm that EITHER `.design/spec.json` was touched (entry count increased) OR reflection.jsonl contains a skip-justification entry for this session. If neither is true, the step did not complete — re-run the spec-curator or record the gap manually.
+**All specs MUST pass.** Specs that were failing before execution (newly promoted by design as TDD targets) should now pass after workers implemented the behavior. Specs that were passing before execution must still pass (no regressions).
 
-On spec-curator failure: proceed (spec curation does not block archive), but record the failure reason in reflection.
+**On failure**: For each failing spec, identify which role's work likely caused the regression (match spec `source_role` or EARS description to role scope). Spawn targeted fix workers for specific regressions. Re-run `spec-run` after fixes (max 2 fix rounds). **Show user**: "Spec regression gate: {passed}/{total} passing, {failed} regressions detected."
+
+**On all passing**: **Show user**: "Spec regression gate: {total}/{total} passing."
+
+**Spec tightening observations**: If during execution a worker discovers that a spec's check could be stricter (e.g., a boundary was looser than actual behavior), record the observation in reflection as a tightening proposal for the next design cycle. Execute does NOT write to spec.json — design is the sole author.
+
+**Skip when**: `.design/spec.json` does not exist.
 
 ### 6. Goal Review
 
@@ -250,6 +227,7 @@ Acceptance Results:
 | {criterion text} | pass/fail |
 
 Integration: {PASS|FAIL|SKIPPED — with details}
+Spec Regression: {passed}/{total} passing {or "no spec.json" if absent}
 
 {if any worker returned an INSIGHT: display "INSIGHT: {finding}" — these are the surprising discoveries worth highlighting}
 
