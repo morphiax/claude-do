@@ -36,18 +36,19 @@ This skill's thinking sequence is built on five established frameworks:
 
 ### 1. Context Gathering
 
-Identify what to reflect on. Do this silently — no user output needed.
+Identify what to reflect on. Do this silently — no user output needed. **Anti-stalling: proceed directly from context gathering into Step 2 (sequential-thinking) without intermediate status text. Do NOT output "Now let me..." or "Let me read..." announcements between reading artifacts and starting adversarial thinking — this pattern causes the turn to end before thinking begins.**
 
 1. Check `.design/` for recent artifacts. Determine which skill last ran and what was produced. **Store this skill name** — you will need it in Step 6 for the `--skill` argument:
    - `research.json` → research skill → `--skill research`
    - `plan.json` → design or simplify skill → `--skill design` or `--skill simplify`
    - Worker artifacts, role results → execute skill → `--skill execute`
 2. Read the key output artifact(s) to ground the reflection in what was actually produced.
-3. **Spec awareness**: If `.design/spec.json` exists, read it. Run `python3 $PLAN_CLI spec-run .design/spec.json` to get current pass/fail status of all specs. This informs the adversarial thinking — spec failures are regressions, and ACs that should be specs represent missing durable contracts.
+3. **Spec awareness**: If `.design/spec.jsonl` exists, read it. Run `python3 $PLAN_CLI spec-run .design/spec.jsonl` to get current pass/fail status of all specs. This informs the adversarial thinking — spec failures are regressions, and behavioral invariants that exist in the system but are NOT covered by any spec entry represent missing durable contracts.
 4. **Parse arguments**: Check if `$ARGUMENTS` contains `fix-skill`. If present, enable the Skill Improvement phase (Step 5). Everything else in `$ARGUMENTS` is the focus scope.
 5. If the user provided a focus argument (excluding `fix-skill`), scope the reflection to that aspect.
 6. If no recent skill artifacts exist, tell the user: "No recent skill output found in `.design/`. Run a skill first, then reflect."
 7. **User input during reflection**: If the user provides observations or feedback during the reflection run (mid-conversation messages), incorporate them as high-priority signal. User observations are the highest-quality input available — they see things the model rationalizes away. Integrate user feedback into the thinking steps and, if relevant, into fix-skill proposals.
+8. **Meta-review awareness**: When reflecting on reflect itself (meta-review), the user's experience of the reflect run IS the primary data. If the user had to intervene, prompt, or express frustration during the reflect run, this is the highest-severity finding regardless of the reflection's content quality.
 
 ### 2. Adversarial Thinking
 
@@ -79,12 +80,12 @@ This step is the highest-leverage single intervention. Research shows it accesse
 
 **After structural analysis, evaluate instructional quality**: Is the written output (SKILL.md changes, plan.json instructions, expert guidance) clear enough that a new lead would follow it correctly on first read? Ambiguous instructions are gaps, not style issues. Reflect gravitates toward testable/structural issues (CLI flags, file existence) — actively resist this bias by also evaluating clarity, specificity, and potential for misinterpretation.
 
-**Spec/AC relationship analysis** (if spec.json exists or plan.json has ACs): After the structural thinking steps, evaluate the spec↔AC relationship:
-- **Missing specs**: Are there ACs in plan.json that represent durable behavioral contracts but were NOT promoted to spec.json? These are gaps — the behavior will be lost on archive.
+**Spec coverage analysis** (if spec.jsonl exists): After the structural thinking steps, evaluate spec coverage:
+- **Missing specs**: For each completed role, does the system now have behavioral properties (from role.goal and worker results) that are NOT covered by any spec entry? The behavioral gap is: what would a future developer not know the system guarantees, that they should know? Propose new spec entries via specTightenings.
 - **Spec tightening**: Could any existing spec checks be stricter? If spec-run results show a spec passing with wide margins (e.g., checking `len > 0` when the actual count is always exactly 5), propose a tighter check.
 - **Spec regressions**: Did any specs fail in the spec-run from Step 1? These represent regressions that need immediate attention.
 - **Redundant specs**: Are any specs semantically duplicated or testing the same boundary from different angles?
-Record tightening proposals and missing-spec observations in the synthesis. These feed into the next design cycle's spec curation step.
+Record tightening proposals and missing-spec observations in the synthesis. These feed into the next design cycle's spec authorship step.
 
 **Output format quality**: Evaluate the reviewed skill's user-facing output (conversation markdown shown to the user, not just artifact files). Did the summary directly answer each part of the user's original question? Could the user take action from the summary alone without reading `.design/` artifacts? Was output organized to mirror the user's question structure (e.g., if they asked 3 things, are all 3 clearly addressed)? Was the most important finding (the "headline") immediately visible, not buried in a table? Poor communication of correct findings is a gap — note it in the prose.
 
@@ -141,7 +142,9 @@ Process results: blocking issues feed into Step 4 (Resolution) as mandatory patc
 
 **Trigger**: gapSeverity is "significant" or "fundamental" AND the reviewed skill produced modifiable artifacts (plan.json, interfaces.json, research.json).
 
-**Skip if**: gapSeverity is "minor" — record observations in the reflection prose only. Minor issues don't warrant artifact modification. **For "moderate" severity**: skip resolution by default, BUT if any finding is a concrete, trivially fixable gap (e.g., a missing AC check, a wrong field name, a constraint with no verification), apply that targeted fix. The threshold protects against over-engineering, not against leaving known 30-second fixes on the table.
+**Skip if**: gapSeverity is "minor" — record observations in the reflection prose only. Minor issues don't warrant artifact modification.
+
+**For "moderate" severity**: Before skipping resolution, scan all findings for 30-second fixes (field corrections, designGoal rewording, missing entries, wrong values). Apply these targeted fixes regardless of the overall severity skip. Then skip the remaining non-trivial gaps. The threshold protects against over-engineering, not against leaving known quick fixes on the table.
 
 **Process**:
 
@@ -162,7 +165,7 @@ Process results: blocking issues feed into Step 4 (Resolution) as mandatory patc
 3. If approved, apply patches:
    - For plan.json: use Bash with `python3 -c "import json; ..."` to read, modify, and write back
    - For other artifacts: same pattern
-   - After modifying plan.json: re-run `python3 $PLAN_CLI validate-checks .design/plan.json` and `python3 $PLAN_CLI finalize .design/plan.json` to ensure integrity
+   - After modifying plan.json: re-run `python3 $PLAN_CLI finalize .design/plan.json` to ensure integrity
 
 4. **Verify fixes**: After applying any artifact fix that changes a CLI command pattern or interface, run the corrected pattern against a test file to verify it works. Do not deploy untested fixes — structural plausibility is not proof of correctness.
 
@@ -170,11 +173,10 @@ Process results: blocking issues feed into Step 4 (Resolution) as mandatory patc
 
 **What resolution can do:**
 - Add or modify constraints on roles
-- Fix broken or weak acceptance criteria checks
 - Correct interface contracts in interfaces.json
 - Add missing fields to schema definitions
 - Fix incorrect format assumptions
-- **Propose spec tightenings**: Record tightening proposals in reflection.jsonl for the next design cycle. Reflect does NOT write to spec.json directly — design is the sole author. Format proposals in the reflection entry's `specTightenings` array: `[{"specId": "...", "currentCheck": "...", "proposedCheck": "...", "reasoning": "..."}]`
+- **Propose spec tightenings or new spec entries**: Record proposals in reflection.jsonl for the next design cycle. Reflect does NOT write to spec.jsonl directly — design is the sole author. Format proposals in the reflection entry's `specTightenings` array: `[{"specId": "...", "currentCheck": "...", "proposedCheck": "...", "reasoning": "..."}]`. For new spec proposals (behavioral gaps), include an EARS description and proposed check command so design can spec-add them in the next cycle.
 
 **What resolution cannot do:**
 - Add or remove entire roles (that's a redesign — suggest re-running `/do:design`)

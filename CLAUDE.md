@@ -19,7 +19,7 @@ claude --plugin-dir ~/.claude/plugins/marketplaces/do
 /do:execute
 ```
 
-All four skills must be tested end-to-end. Changes to design, execute, research, or simplify may affect the others since they share the `.design/plan.json` contract (or `.design/research.json` for research) and persistent files (`memory.jsonl`, `reflection.jsonl`, `spec.json`).
+All four skills must be tested end-to-end. Changes to design, execute, research, or simplify may affect the others since they share the `.design/plan.json` contract (or `.design/research.json` for research) and persistent files (`memory.jsonl`, `reflection.jsonl`, `spec.jsonl`, `spec-meta.json`).
 
 ## Architecture
 
@@ -61,12 +61,12 @@ A single `shared/plan.py` at the repo root provides all deterministic operations
 - **Query** (runtime-invoked): team-name, status, summary, overlap-matrix, tasklist-data, worker-pool, retry-candidates, circuit-breaker, memory-search, plan-health-summary
 - **Mutation** (runtime-invoked): update-status, memory-add, memory-feedback, reflection-add, resume-reset, archive, trace-add
 - **Validation** (runtime-invoked): expert-validate, validate-checks, validate-auxiliary-report, worker-completion-validate, research-validate, research-summary
-- **Spec** (runtime-invoked): spec-search, spec-add, spec-validate, spec-compact, spec-run — persistent behavioral spec store with EARS notation, SHA256 tamper detection, importance-based compaction, and check execution
+- **Spec** (runtime-invoked): spec-search, spec-add, spec-validate, spec-compact, spec-run, spec-extract — persistent behavioral spec store with EARS notation, SHA256 tamper detection, importance-based compaction, check execution, and characterization testing (spec-extract)
 - **Build** (1 command): finalize — validates role briefs, computes directory overlaps, validates state transitions, and computes SHA256 checksums for verification specs in one atomic operation
 - **Test** (2 commands): self-test — exercises every command against synthetic fixtures in a temp directory, reports pass/fail per command as JSON; test-internal — in-process test runner for CI/embedding use
 - **Developer inspection tools** (not invoked by skills at runtime): reflection-search, memory-review, health-check, plan-diff, sync-check, trace-search, trace-summary, reflection-validate, memory-summary, trace-validate
 
-Design uses query + finalize + spec commands (spec-add, spec-run, spec-search). Execute uses all commands except spec-add (execute validates specs via spec-run but does not author them). Research uses query + research-validate + research-summary. `worker-pool` reads roles directly — one worker per role, named by role (e.g., `api-developer`, `test-writer`). Workers read `plan.json` directly — no per-worker task files needed.
+Design uses query + finalize + spec commands (spec-add, spec-run, spec-search). Execute uses all commands except spec-add and spec-extract (execute validates specs via spec-run but does not author them). Research uses query + research-validate + research-summary. `worker-pool` reads roles directly — one worker per role, named by role (e.g., `api-developer`, `test-writer`). Workers read `plan.json` directly — no per-worker task files needed.
 
 Scripts use python3 stdlib only (no dependencies), support Python 3.8+, and follow a consistent CLI pattern: `python3 plan.py <command> [plan_path] [options]`. All output is JSON to stdout with exit code 0 for success, 1 for errors.
 
@@ -74,16 +74,16 @@ Scripts use python3 stdlib only (no dependencies), support Python 3.8+, and foll
 
 Skills communicate through structured JSON files in `.design/` (gitignored). Two primary contracts:
 
-**`.design/plan.json` (schemaVersion 4)** — used by design, execute, and simplify for role-based execution:
+**`.design/plan.json` (schemaVersion 5)** — used by design, execute, and simplify for role-based execution:
 
-- Authoritative state; TaskList is a derived view. Schema version 4 required.
+- Authoritative state; TaskList is a derived view. Schema versions 4 and 5 both accepted (v4 backward compatible).
 - Roles use name-based dependencies resolved to indices by `finalize`.
-- **Persistent `.design/` files** (survive archiving): `memory.jsonl`, `reflection.jsonl`, `research.json`, `trace.jsonl`, `spec.json`. Everything else archived to `.design/history/{timestamp}/`
-- **Reflection fields**: `promptFixes` (primary — captures failure-driven AND lead-side workarounds), `acMutations` (execute only — lead-side plan.json fixes before workers spawn, feeds back to design), `highValueInstructions` (proven instructions to protect from simplification), `acGradients` (execute only — runtime AC failures), `specTightenings` (reflect only — proposals to tighten existing spec.json checks, consumed by next design cycle), `stepsSkipped`, `instructionsIgnored`, `whatWorked`/`whatFailed`
-- **Spec ownership**: Design is the sole author of `spec.json` (creates new specs, applies tightenings). Execute validates against spec.json as a regression gate via `spec-run` (all specs must pass post-execution) but never writes to it. Reflect proposes tightenings via `specTightenings` in reflection.jsonl, consumed by the next design cycle. Design uses TDD: existing specs must pass (baseline), newly promoted specs must fail (proving they test unimplemented behavior that execute will build).
+- **Persistent `.design/` files** (survive archiving): `memory.jsonl`, `reflection.jsonl`, `research.json`, `trace.jsonl`, `spec.jsonl`, `spec-meta.json`. Everything else archived to `.design/history/{timestamp}/`
+- **Reflection fields**: `promptFixes` (primary — captures failure-driven AND lead-side workarounds), `specObservations` (execute only — observations about spec health during pre-flight, replaces acMutations), `highValueInstructions` (proven instructions to protect from simplification), `specTightenings` (reflect only — proposals to tighten existing spec.jsonl checks, consumed by next design cycle), `stepsSkipped`, `instructionsIgnored`, `whatWorked`/`whatFailed`
+- **Spec ownership**: Design is the sole author of `spec.jsonl` (creates new specs, applies tightenings). Execute validates against spec.jsonl as a regression gate via `spec-run` (all specs must pass post-execution) but never writes to it. Reflect proposes tightenings via `specTightenings` in reflection.jsonl, consumed by the next design cycle. Design uses TDD: existing specs must pass (baseline), newly authored specs must fail (proving they test unimplemented behavior that execute will build).
 - Verification specs: optional `verificationSpecs[]` in plan.json. `finalize` computes SHA256 checksums for tamper detection.
 
-**Top-level fields**: schemaVersion (4), goal, context {stack, conventions, testCommand, buildCommand, lsp}, expertArtifacts [{name, path, summary}], designDecisions [{conflict, experts, decision, reasoning}], verificationSpecs [] (optional), roles[], auxiliaryRoles[], progress {completedRoles: []}
+**Top-level fields**: schemaVersion (5), goal, context {stack, conventions, testCommand, buildCommand, lsp}, expertArtifacts [{name, path, summary}], designDecisions [{conflict, experts, decision, reasoning}], verificationSpecs [] (optional), roles[], auxiliaryRoles[], progress {completedRoles: []}
 
 **Role fields** — each role is a goal-directed scope for one specialist worker:
 - `name` — worker identity and naming (e.g., `api-developer`, `prompt-writer`)
@@ -91,8 +91,8 @@ Skills communicate through structured JSON files in `.design/` (gitignored). Two
 - `model` — preferred Claude model (`sonnet`, `opus`, `haiku`)
 - `scope` — `{directories, patterns, dependencies}` where dependencies are role names resolved to indices
 - `expertContext` — array of `{expert, artifact, relevance}` referencing full expert artifacts
-- `constraints` — array of hard rules the worker must follow
-- `acceptanceCriteria` — array of `{criterion, check}` where `check` is a concrete, independently runnable shell command (e.g., `"bun run build"`, `"python3 -m pytest tests/"`). Checks must verify functional correctness, not just pattern existence (a grep confirming a rule exists is insufficient — verify it takes effect). Check commands must exit non-zero on failure. Anti-patterns to avoid: grep-only checks, `|| echo` or `|| true` fallbacks, `test -f` as sole verification, `wc -l` counts, pipe chains without explicit exit-code handling. Workers execute these literally during CoVe verification
+- `constraints` — array of hard rules the worker must follow (spec invariants are injected here with full check commands — format: `"Spec invariant — run this check before reporting done: check='{cmd}', description='{ears}', spec ID='{id}'"`)
+- `verificationChecks` — array of `{label, check}` for ephemeral role-scoped build/test/integration checks. These are NOT behavioral specs — they verify build environment and completion gates. Workers run these as part of Pre-Completion Verification. Checks must exit non-zero on failure. Anti-patterns to avoid: grep-only checks, `|| echo` or `|| true` fallbacks, `test -f` as sole verification, `wc -l` counts, pipe chains without explicit exit-code handling.
 - `assumptions` — array of `{text, severity}` documenting assumptions (`blocking` or `non-blocking`)
 - `rollbackTriggers` — array of conditions that should cause the worker to stop and report
 - `fallback` — alternative approach if primary fails (included in initial brief)

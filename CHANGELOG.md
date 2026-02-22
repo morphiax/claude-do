@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.3.0] - 2026-02-22
+
+### Added
+
+- **plan.py: `spec-extract` command**: New command implementing characterization testing — reverse-engineers behavioral spec candidates from existing CLI outputs. Writes candidates to `.design/spec-candidates.jsonl` for human curation; never writes directly to spec.jsonl.
+- **plan.py: JSONL spec store (`spec.jsonl`)**: Migrated spec store from single JSON file (`spec.json`) to JSON Lines format (`spec.jsonl`). spec-add is now append-only (no read-modify-write race). Compaction history moved to `spec-meta.json` sidecar. Auto-migration from spec.json on first use.
+- **plan.py: schemaVersion 5**: New schema version for plan.json replaces `acceptanceCriteria[]` on roles with `verificationChecks[]` — ephemeral role-scoped build/test/integration checks. Schema v4 (with acceptanceCriteria) remains accepted for backward compatibility.
+- **plan.py: `spec-add` extended fields**: New optional fields on spec entries: `input_fixture`, `expected_output`, `technology_context`, `test_type` (mft/inv/dir) for richer behavioral testing characterization.
+- **Design: direct spec authorship in spec.jsonl (Step 7)**: Design now authors behavioral specs directly (not promoted from acceptanceCriteria). The 5 promotion gates become authorship quality gates applied at write time. EARS notation guidance, check command templates, and anti-patterns now live in Step 7.
+- **Design: verificationChecks[] field**: Roles now use `verificationChecks [{label, check}]` instead of `acceptanceCriteria [{criterion, check}]`. These are ephemeral role-scoped build/test/integration checks — NOT promoted to spec.jsonl.
+- **Design: expanded spec injection**: Step 5.5 now injects up to 5 spec entries per role (up from 3) and includes the full check command in the injected constraint so workers have executable verification targets.
+- **Execute: spec-run pre-flight**: Replaces AC pre-validation loop. Runs spec-run before workers spawn to establish two buckets: pre-existing passing (regression baseline) and TDD targets (newly authored, expected to fail before workers run).
+- **Execute: verificationChecks in worker protocol**: Workers run spec invariant checks (from injected constraints) + verificationChecks (from role brief) + verificationSpecs (if present). Completion report uses `verificationResults` format.
+- **Execute: specObservations feedback pipeline**: Replaces acMutations. When spec pre-flight finds broken spec checks, records specObservations to reflection.jsonl. Design reads these via plan-health-summary for the next cycle.
+
+### Changed
+
+- **Spec store format**: `spec.json` → `spec.jsonl` (JSON Lines). All spec commands updated. spec-meta.json holds compaction history separately.
+- **Persistent files set**: `spec.json` replaced by `spec.jsonl` and `spec-meta.json` in the archive persistent set.
+- **Reflection field**: `acMutations` → `specObservations` for execute-side spec health observations.
+- **Worker completion report**: `acceptanceCriteria` field → `verificationResults [{type, id_or_label, passed, evidence}]`. Legacy `acceptanceCriteria` format still accepted.
+- **Trace payload**: `acPassed`/`acTotal` → `specsPassed`/`specsTotal` in execute completion trace.
+- **Integration-verifier goal text**: Updated from "Validate all acceptanceCriteria" to "Run spec-run gate" across design, execute, and simplify SKILL.md files.
+- **Simplify: verificationChecks[0]**: Mandatory test-suite-pass check moves from `acceptanceCriteria[0]` to `verificationChecks[0]`. PRESERVATION FIRST contract preserved.
+- **CLAUDE.md**: Updated Architecture section for schemaVersion 5, spec.jsonl, spec-meta.json, verificationChecks role field, spec-extract command, and specObservations reflection field.
+
 ## [3.2.0] - 2026-02-22
 
 ### Added

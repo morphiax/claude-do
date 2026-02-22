@@ -233,18 +233,18 @@ If ALL findings are `organizationalContextNeeded: yes` with no actionable simpli
    **Single-file rule**: When all cascade chains target the same file, prefer 1 role with an ordered task list over N sequential roles. Multiple roles for one file adds serial spawn overhead without safety benefit — one worker with full file context handles change interactions naturally.
 6. **Write plan.json** with role briefs. For every role:
    - `constraints[0]` MUST be: "PRESERVATION FIRST: Never change behavior, only how it's achieved. All original features, outputs, and behaviors must remain intact."
-   - `acceptanceCriteria[0]` MUST be: `{"criterion": "All existing tests pass", "check": "{context.testCommand}"}` — test-suite-pass is always first and mandatory. For text-only targets without a test command, use a structural check instead (e.g., YAML frontmatter parses, referenced commands exist).
+   - `verificationChecks[0]` MUST be: `{"label": "All existing tests pass", "check": "{context.testCommand}"}` — test-suite-pass is always first and mandatory for simplify's PRESERVATION FIRST contract. For text-only targets without a test command, use a structural check instead (e.g., `{"label": "YAML frontmatter parses", "check": "python3 -c \"import sys; ...\""}` or verify referenced commands exist).
    - Include `expertContext[]` referencing analyst artifacts with relevance notes.
    - Include rollbackTriggers: test failure, security path detection, organizational context gap.
    - Add constraint: "SKIP recursive algorithms — flag and report instead."
 
-   **Acceptance criteria anti-patterns**: Apply the anti-patterns and check command authoring rules from design/SKILL.md Step 5 (canonical list, includes AC gate pre-check rule).
+   **verificationChecks anti-patterns**: Apply the check command authoring rules from design/SKILL.md Step 7 (canonical list for spec authorship and verificationCheck commands).
 
 7. **Anti-pattern guards** (CRITICAL — do NOT proceed to finalize if any guard triggers without user approval):
    - **Token budget** (text targets): Calculate net token delta for proposed changes. If total would increase target beyond its current size, ask user to approve flagged changes explicitly.
    - **Circular simplification**: If `.design/history/` contains a previous simplify run, check whether any proposed change reverses a previous simplification. If found, ask user to review before proceeding.
    - **Regression safety**: No capability may be lost. For text targets: no behavioral instruction may be removed without replacement. If a change tightens one area but risks losing nuance in another, note the trade-off and ask user to approve.
-8. **Validate checks**: `python3 $PLAN_CLI validate-checks .design/plan.json`. If errors found, fix obvious syntax errors. Non-blocking — proceed even if some checks remain unfixable, but flag to user.
+8. **Validate checks**: Review all `verificationChecks` in plan.json for anti-patterns (no f-strings, no `|| true`, no `/tmp/` paths). For text in verificationChecks, apply the same authoring rules as for spec check commands (from design/SKILL.md Step 7). Non-blocking — proceed even if some checks need review, but flag to user. Then run `python3 $PLAN_CLI spec-validate .design/spec.jsonl` if spec.jsonl exists, to verify spec entry integrity.
 9. If simplification requires updating CLAUDE.md or README.md to stay in sync (per pre-commit checklist), add a `docs-updater` role.
 10. Add `auxiliaryRoles[]`: **Tier check**: If `roleCount <= 2`, skip challenger and scout — proceed with memory-curator only (plus integration-verifier post-execution). Otherwise include all auxiliaries:
 
@@ -267,7 +267,7 @@ If ALL findings are `organizationalContextNeeded: yes` with no actionable simpli
   {
     "name": "integration-verifier",
     "type": "post-execution",
-    "goal": "Run full test suite. Check cross-role contracts. Validate all acceptanceCriteria. Verify behavioral preservation end-to-end. For text targets: verify YAML frontmatter, internal references, and that referenced commands still exist.",
+    "goal": "Run full test suite. Check cross-role contracts. Run spec-run gate. Verify behavioral preservation end-to-end. For text targets: verify YAML frontmatter, internal references, and that referenced commands still exist.",
     "model": "sonnet",
     "trigger": "after-all-roles-complete"
   },
@@ -316,10 +316,10 @@ Cascade Impact:
 | Cascade chains | {count of distinct cascade chains} |
 | Design decisions | {count} |
 
-Acceptance Criteria: {total AC count across all roles}
-| Role | Criteria | Key check |
-|------|----------|-----------|
-| {name} | {count} | {most important check command, abbreviated} |
+Verification Checks:
+| Role | Checks | Key check |
+|------|--------|-----------|
+| {name} | {count} | {most important verificationCheck label} |
 
 Organizational context: {approved}/{total} items approved by user
 Memories applied: {count or "none"}
@@ -346,17 +346,17 @@ Memories applied: {count or "none"}
 
 ## Contracts
 
-### plan.json (schemaVersion 4)
+### plan.json (schemaVersion 5)
 
-Output follows the standard plan.json contract — same schema as `/do:design` output. `/do:execute` reads this file directly.
+Output follows the standard plan.json contract — same schema as `/do:design` output. `/do:execute` reads this file directly. Note: schemaVersion 4 plans (with `acceptanceCriteria`) are still accepted by execute for backward compatibility.
 
-**Top-level fields**: schemaVersion (4), goal, context {stack, conventions, testCommand, buildCommand, lsp}, expertArtifacts [{name, path, summary}], designDecisions [], verificationSpecs [] (optional), roles[], auxiliaryRoles[], progress {completedRoles: []}
+**Top-level fields**: schemaVersion (5), goal, context {stack, conventions, testCommand, buildCommand, lsp}, expertArtifacts [{name, path, summary}], designDecisions [], verificationSpecs [] (optional), roles[], auxiliaryRoles[], progress {completedRoles: []}
 
-**Role fields**: name, goal, model, scope {directories, patterns, dependencies}, expertContext [{expert, artifact, relevance}], constraints [], acceptanceCriteria [{criterion, check}], assumptions [{text, severity}], rollbackTriggers [], fallback. Status fields (status, result, attempts, directoryOverlaps) initialized by finalize.
+**Role fields**: name, goal, model, scope {directories, patterns, dependencies}, expertContext [{expert, artifact, relevance}], constraints [], verificationChecks [{label, check}], assumptions [{text, severity}], rollbackTriggers [], fallback. Status fields (status, result, attempts, directoryOverlaps) initialized by finalize.
 
 **Simplification-specific role constraints**:
 - `constraints[0]` is always PRESERVATION FIRST
-- `acceptanceCriteria[0]` is always test-suite-pass (or structural check for text-only targets)
+- `verificationChecks[0]` is always test-suite-pass (or structural check for text-only targets)
 - Recursive algorithms are always flagged, never simplified
 - Dependencies follow abstraction-first ordering (new abstraction before old eliminations)
 

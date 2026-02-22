@@ -28,7 +28,7 @@ Before starting the Flow, Read `lead-protocol-core.md`. It defines the canonical
 ### 1. Pre-flight
 
 1. **Lifecycle context**: Run Lifecycle Context protocol (see lead-protocol-core.md). This runs `python3 $PLAN_CLI plan-health-summary .design` and emits the skill-start trace.
-2. **Spec check**: If `.design/spec.json` exists, run `python3 $PLAN_CLI spec-search .design/spec.json` and report the entry count and category breakdown to the user. Do NOT load all entries here — spec entries are injected per-role during Step 5 role brief authorship.
+2. **Spec check**: If `.design/spec.jsonl` exists, run `python3 $PLAN_CLI spec-search .design/spec.jsonl` and report the entry count and category breakdown to the user. Do NOT load all entries here — spec entries are injected per-role during Step 5 role brief authorship.
 3. **Check for ambiguity**: Use `sequential-thinking` to assess: "Is this goal genuinely unambiguous? What assumptions am I making about scope? Does the goal's wording imply something different from what I'm planning to build? Would a reasonable person read this goal and expect a different output?" If any ambiguity surfaces, use `AskUserQuestion` before proceeding. **Scope change gate**: If during design you discover existing solutions that would change what gets built (e.g., "build X" becomes "import from existing X"), use `AskUserQuestion` before proceeding. The user asked for X — building Y instead requires explicit consent, even if Y is more efficient.
 4. If >5 roles likely needed, suggest phases. Design only phase 1.
 5. Check existing plan: `python3 $PLAN_CLI status .design/plan.json`. If `ok` and `isResume`: ask user "Existing plan has {counts} roles. Overwrite?" If declined, stop.
@@ -154,35 +154,20 @@ All phases follow: **maximum 2 rounds** of negotiation per conflict. If no conve
    - **Shared file check**: If a role modifies a file that exists identically in multiple directories (e.g., shared protocol files, copied configs), the plan MUST scope ALL copies for update — either in the same role or in a dependent role. Run `find` or `ls` to detect duplicates before finalizing scope.
    - **Type/interface ownership**: When multiple roles produce or consume the same data contract (interface, type, schema), designate ONE role as the canonical owner of the definition. Other roles must import from the canonical source, not redefine it. Flag if the same interface already exists in multiple files — add a constraint for one role to consolidate.
    - Workers decide HOW to implement — briefs define WHAT and WHY
-5. **Spec injection per role**: If `.design/spec.json` exists, for each role run: `python3 $PLAN_CLI spec-search .design/spec.json --goal "{role goal}" --keywords "{role name} {scope directories joined by space}"`. Take the top 3 returned entries and inject each as a role constraint with the prefix: `"Spec invariant — workers must preserve this behavior: {spec entry ears or description} (spec.json entry '{id}')"`. Spec-derived constraints are invariants — workers must not change system behavior that a spec entry describes, even if their role brief does not explicitly prohibit the change. If spec.json does not exist or spec-search returns zero entries, proceed without injection.
+5. **Spec injection per role**: If `.design/spec.jsonl` exists, for each role run: `python3 $PLAN_CLI spec-search .design/spec.jsonl --goal "{role goal}" --keywords "{role name} {scope directories joined by space}"`. Take the top 5 returned entries and inject each as a role constraint with the prefix: `"Spec invariant — run this check before reporting done (you are responsible for implementing this behavior): check='{check}', description='{ears}', spec ID='{id}'"`. This gives the worker an executable verification target. Spec-derived constraints are invariants — workers must not change system behavior that a spec entry describes, even if their role brief does not explicitly prohibit the change. If spec.jsonl does not exist or spec-search returns zero entries, proceed without injection.
 6. Write `.design/plan.json` with role briefs (see schema below).
 7. For each role, include `expertContext[]` referencing specific expert artifacts and the sections relevant to that role. **Do not lossy-compress expert findings into terse fields** — reference the full artifacts.
-8. Write criteria-based `acceptanceCriteria` — define WHAT should work, not WHICH files should exist. Workers verify against criteria, not file lists. **Before writing any AC check that parses a specific file format** (YAML structure, JSON schema, multi-document layout), use the targeted fact-check exception to read 5-10 lines of the actual target file and confirm its structure matches your assumptions. Do not write checks based solely on expert descriptions of file formats — verify then write, not write then verify. **Every criterion MUST have a `check` that is a concrete, independently runnable shell command** (e.g., `"bun run build"`, `"bun test --run"`). Never leave checks as prose descriptions — workers execute these literally. If a role touches compiled code, include BOTH a build check AND a test check as separate criteria. **Checks must verify functional correctness, not just pattern existence.** A grep confirming a CSS rule exists is insufficient — the check must verify the rule actually takes effect (e.g., start a dev server and curl the page, or verify that referenced classes/imports resolve to definitions). At least one criterion per role should test end-to-end behavior, not just file contents. **Check commands must fail-fast with non-zero exit codes on failure.**
+8. Write `verificationChecks` per role — ephemeral, role-scoped build/test/integration checks that are NOT behavioral specs. These verify the role's build environment, integration, and basic completion. **Format**: `[{"label": "...", "check": "..."}]`. Every check MUST have a concrete, independently runnable shell command. Apply all check command authoring rules (no f-strings, fail-fast, template library) to verificationChecks.
 
-   **Data-dependent roles**: For roles that import, serve, or display data, at least one AC check MUST verify that data actually exists and is correct — not just that the response shape is valid. A check that asserts `'data' in response` passes on empty arrays. Instead: assert `len(response['data']) > 0` or verify specific field values. Include fixture/sample data in the plan so data-dependent checks have something to verify against.
+   **Data-dependent roles**: For roles that import, serve, or display data, at least one verificationCheck MUST verify that data actually exists and is correct — not just that the response shape is valid.
 
-   **External integration roles**: For roles that connect to external systems (scrapers, API clients, webhooks), at least one AC MUST test actual connectivity or output — not just compilation. If the live system can't be tested in CI, require a `--dry-run` or `--mock` mode AC that validates the integration logic against fixture data end-to-end (e.g., "scraper with mock HTML produces valid ScraperOutput JSON"). Static checks (tsc compiles, file exists) are necessary but insufficient for integration roles.
+   **External integration roles**: For roles that connect to external systems, at least one verificationCheck MUST test actual connectivity or output — not just compilation.
 
-   **Learn from past AC mutations**: If `plan-health-summary` returned `acMutations` from recent execute runs, review them before writing checks. Each mutation shows a check that design got wrong and execute had to fix. Common patterns to avoid: wrong test data (e.g., `--skill test` when only design/execute/research/simplify are valid), fragile position checks (e.g., checking first 30 lines when content may shift), version comparisons that pass trivially (e.g., `int(patch) > 0` passes for any non-zero patch). Use the `after` field as a template for better checks.
+   **Learn from past spec observations**: If `plan-health-summary` returned `specObservations` from recent execute runs, review them before writing checks. Each observation shows a spec check that was too loose or broken — use the proposed fix as a template for tighter checks.
 
-   **Acceptance criteria anti-patterns** (NEVER use these as the sole check for a criterion):
-   - `grep -q "pattern" file` — anti-pattern: verifies text exists, not that feature works
-   - `test -f output.json` — anti-pattern: file exists but may contain errors
-   - `wc -l file` — anti-pattern: verifies size, not correctness
-   - `cmd || echo "fallback"` or `cmd || true` — anti-pattern: always exits 0, masks failures completely
-   - `cmd 2>&1 | tail -N` — anti-pattern: pipe may mask exit code unless `set -o pipefail` is used
-   - `! grep -q "removed_thing" file` as sole check — anti-pattern: verifies removal but not that the replacement works. Always pair removal checks with positive checks verifying the new pattern exists in the correct context (e.g., `! grep -q 'old_pattern' f && grep -q 'Task(' f`)
-
-   **EARS notation for behavioral criteria**: When writing criteria that describe system responses to triggers, use EARS (Easy Approach to Requirements Syntax) structure: `"WHEN [trigger condition], THE system SHALL [observable response]"`. Apply EARS only to behavioral-invariant and boundary-contract style criteria — not to build/test runner checks (e.g., `"bun run build"`) and not to architectural-decision criteria. Each EARS criterion must be paired with a `check` that independently verifies the observable response described — not that code implementing it exists. Correct examples:
-   - Criterion: `"WHEN 10 requests arrive within 1 second, THE system SHALL return HTTP 429 on the 11th"` → Check: `for i in $(seq 1 11); do curl -s -o /dev/null -w '%{http_code}\n' http://localhost:3000/api/health; done | tail -1 | grep -q 429`
-   - Criterion: `"WHEN a required field is missing from POST /users, THE system SHALL return HTTP 400 with an 'errors' field"` → Check: `curl -s -X POST http://localhost:3000/users -H 'Content-Type: application/json' -d '{}' | python3 -c "import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get('errors') else 1)"`
-   - Criterion: `"WHEN finalize runs on a plan.json with schemaVersion != 4, THE system SHALL exit non-zero"` → Check: `python3 -c "import json,subprocess,sys; p=json.load(open('.design/plan.json')); p['schemaVersion']=99; open('/tmp/bad_plan.json','w').write(json.dumps(p)); r=subprocess.run(['python3','scripts/plan.py','finalize','/tmp/bad_plan.json'],capture_output=True); sys.exit(0 if r.returncode!=0 else 1)"`
-   When uncertain whether EARS applies, ask: does this criterion describe what the system does in response to an event? If yes, use EARS. If it is a boundary-contract (external API response codes, file format guarantees) or a behavioral-invariant (system must always preserve X), EARS is the right format.
-
-   **Check command authoring rules** (apply when writing `check` fields):
-   - **AC gate pre-check**: Every structural AC must FAIL against the current codebase before execution and PASS after. If a check passes without changes, it verifies nothing — rewrite it to detect the actual before-state.
+   **Check command authoring rules** (apply when writing `check` fields in verificationChecks):
    - **Ban f-strings in inline Python**: `python3 -c "..."` check commands must NOT use f-strings — nested quotes and backslash escapes inside `"..."` cause `SyntaxError`. Use `.format()` or `%` formatting instead, or move complex logic to a script file.
-   - **Prefer script files for complex checks**: When a check requires >1 logical step, write it to a temp file (`python3 /tmp/check_role.py`) instead of inlining with `-c`. Inline `-c` is limited to simple one-liners.
+   - **Prefer script files for complex checks**: When a check requires >1 logical step, write it to `.design/checks/check_{rolename}.py` (persistent, survives across sessions) instead of inlining with `-c`. **Never use `/tmp/` for check scripts** — `/tmp/` files are ephemeral and will not exist when execute workers run verification. Create `.design/checks/` directory if it doesn't exist.
    - **Fail-fast required**: Every check must exit non-zero on failure with no fallback (`|| true`, `|| echo`) that masks the result.
 
    **Check command template library** — use these patterns, not custom one-offs:
@@ -192,13 +177,22 @@ All phases follow: **maximum 2 rounds** of negotiation per conflict. If no conve
    | File contains pattern (structural only, not sole check) | `grep -q "pattern" path/to/file` |
    | Python script parses JSON without error | `python3 -c "import json; json.load(open('file.json'))"` |
    | Python script validates field (use .format, not f-string) | `python3 -c "import json; d=json.load(open('f.json')); assert d['k']=='v', d['k']"` |
-   | Complex Python check (multi-step) | Write to `/tmp/check_rolename.py`, then: `python3 /tmp/check_rolename.py` |
+   | Complex Python check (multi-step) | Write to `.design/checks/check_rolename.py`, then: `python3 .design/checks/check_rolename.py` |
    | Command exits 0 (build/test) | `bun run build` or `python3 -m pytest tests/` |
    | Schema field exists and is non-empty | `python3 -c "import json,sys; d=json.load(open('f.json')); sys.exit(0 if d.get('field') else 1)"` |
    | Count lines/entries in output | `python3 -c "import json; d=json.load(open('f.json')); assert len(d['items'])>=3"` |
    | Shell script file is executable and exits 0 | `bash path/to/script.sh` |
 
-9. **Constraint-to-AC coverage audit**: For each role, verify that every entry in `constraints[]` maps to at least one `acceptanceCriteria` check. If a constraint cannot be verified by a shell command (e.g., "use http:// not https://" or "preserve existing annotation"), mark it with the suffix `(manual-only)` in the constraint text so workers know it is not AC-checked. Constraints without AC checks become unverifiable obligations that workers may skip.
+   **verificationChecks anti-patterns** (NEVER use these as the sole check):
+   - `grep -q "pattern" file` — anti-pattern: verifies text exists, not that feature works
+   - `test -f output.json` — anti-pattern: file exists but may contain errors
+   - `wc -l file` — anti-pattern: verifies size, not correctness
+   - `cmd || echo "fallback"` or `cmd || true` — anti-pattern: always exits 0, masks failures completely
+   - `python3 -c "... or True"` or `assert expr or True` — anti-pattern: Python `or True` always evaluates to True, making the assertion a no-op
+   - `cmd 2>&1 | tail -N` — anti-pattern: pipe may mask exit code unless `set -o pipefail` is used
+   - `! grep -q "removed_thing" file` as sole check — anti-pattern: verifies removal but not that the replacement works
+
+9. **Constraint-to-spec coverage audit**: For each role, verify that every non-trivial constraint is either (a) covered by an injected spec entry from Step 5.5 (which includes an executable check command), or (b) marked `(manual-only)` in the constraint text. Constraints without executable coverage become unverifiable obligations that workers may skip.
 10. Add `auxiliaryRoles[]` (see Auxiliary Roles section).
 10. Write to `.design/plan.json` (do NOT run finalize yet — that happens in Step 6).
 11. **Draft plan review** (complex/high-stakes tier only): Display the draft plan to the user before finalization:
@@ -209,9 +203,9 @@ All phases follow: **maximum 2 rounds** of negotiation per conflict. If no conve
    ...
    Design decisions: {count}
    ```
-   This is non-blocking — continue to finalization. If the user objects, adjust before finalizing. For trivial/standard tiers, skip this review.
+   This is non-blocking — continue to finalization without waiting for user response. But you MUST display it before running finalize. If the user objects, adjust before finalizing. For trivial/standard tiers, skip this review.
 
-**Validate acceptance criteria checks (MANDATORY blocking gate)**: Before running finalize, you MUST run `python3 $PLAN_CLI validate-checks .design/plan.json`. If errors are found, display them to the user with role name and criterion, then fix every check command in plan.json before proceeding. Do NOT call finalize until validate-checks reports zero errors. Apply the check command authoring rules above (ban f-strings, prefer script files for complex checks) when rewriting broken checks.
+**Validate verificationChecks (MANDATORY blocking gate)**: Before running finalize, review all `verificationChecks` in plan.json to ensure no anti-patterns are present. Fix any check command that uses `|| true`, f-strings, or `/tmp/` script paths before proceeding. Then run `python3 $PLAN_CLI finalize .design/plan.json` — finalize validates role structure including verificationChecks[] format. If validation errors are found, fix them before proceeding.
 
 ### 6. Generate Verification Specs
 
@@ -248,8 +242,8 @@ Additional requirements for all cases: expert artifacts contain verificationProp
 **Role brief principles**:
 - `goal`: Clear statement of what this role must achieve
 - `scope.directories/patterns`: Where in the codebase this role operates (not specific files)
-- `constraints`: Hard rules the worker must follow
-- `acceptanceCriteria`: Goal-based success checks (not file existence checks)
+- `constraints`: Hard rules the worker must follow (spec invariants are injected here as executable constraints)
+- `verificationChecks`: Ephemeral role-scoped build/test/integration checks — NOT behavioral specs
 - `expertContext`: References to expert artifacts with relevance notes
 - `assumptions`: What must be true for the approach to work
 - `rollbackTriggers`: When the worker should stop and report
@@ -276,12 +270,12 @@ Additional requirements for all cases: expert artifacts contain verificationProp
   ],
   "constraints": [
     "Use stdlib only, no Redis dependency",
-    "Must not break existing route tests"
+    "Must not break existing route tests",
+    "Spec invariant — run this check before reporting done (you are responsible for implementing this behavior): check='for i in $(seq 1 11); do curl -s -o /dev/null -w \"%{http_code}\\n\" http://localhost:3000/api/health; done | tail -1 | grep -q 429', description='WHEN 10 requests arrive within 1 second, THE system SHALL return HTTP 429 on the 11th', spec ID='abc-123'"
   ],
-  "acceptanceCriteria": [
-    { "criterion": "Rate limiting active on all /api/* routes", "check": "10 rapid requests to /api/health — last returns 429" },
-    { "criterion": "Build succeeds", "check": "npm run build" },
-    { "criterion": "Existing tests pass", "check": "npm test" }
+  "verificationChecks": [
+    { "label": "Build succeeds", "check": "npm run build" },
+    { "label": "Existing tests pass", "check": "npm test" }
   ],
   "assumptions": [
     { "text": "Express middleware pattern used", "severity": "non-blocking" }
@@ -291,37 +285,44 @@ Additional requirements for all cases: expert artifacts contain verificationProp
 }
 ```
 
-### 7. Spec Curation (TDD for execute)
+### 7. Spec Authorship (TDD for execute)
 
-After writing plan.json and running finalize, promote durable acceptance criteria into `.design/spec.json`. Specs are the persistent regression contract — they survive archiving and grow across design cycles. Execute's job is to make failing specs pass without regressing passing ones.
+After writing plan.json and running finalize, author behavioral specs directly into `.design/spec.jsonl`. Specs are the persistent regression contract — they survive archiving and grow across design cycles. Execute's job is to make failing specs pass without regressing passing ones. **Specs are the PRIMARY behavioral artifact** — they are authored directly here, not promoted from verificationChecks.
 
-**Step 1 — Baseline existing specs**: If `.design/spec.json` exists, run `python3 $PLAN_CLI spec-run .design/spec.json`. All existing specs MUST pass — they represent previously-proven behavioral contracts. If any fail, this is a pre-existing regression. **Show user**: "Spec baseline: {passed}/{total} passing." If failures: "WARNING: {failed} existing specs failing — these represent regressions from a previous cycle." Fix or flag to user before proceeding.
+**Step 1 — Baseline existing specs**: If `.design/spec.jsonl` exists, run `python3 $PLAN_CLI spec-run .design/spec.jsonl`. All existing specs MUST pass — they represent previously-proven behavioral contracts. If any fail, this is a pre-existing regression. **Show user**: "Spec baseline: {passed}/{total} passing." If failures: "WARNING: {failed} existing specs failing — these represent regressions from a previous cycle." Fix or flag to user before proceeding.
 
-**Step 2 — Promote durable ACs to spec.json**: Review all `acceptanceCriteria` across all roles. For each AC, apply the 5 promotion gates:
+**Step 2 — Author new specs per role**: For each role, derive behavioral invariants from: role.goal, expert findings, interface contracts, and design decisions. Write spec entries directly via spec-add. Apply the 5 authorship quality gates at write time:
 
-1. **Behavioral**: The criterion describes a WHEN→SHALL system response (trigger → observable behavior), not file existence, pattern matching, or structural form
+1. **Behavioral**: The spec describes a WHEN→SHALL system response (trigger → observable behavior), not file existence, pattern matching, or structural form
 2. **Durable**: The behavior should hold for ALL future implementations — if the system were reimplemented from scratch, this property must still hold
 3. **Not role-setup-specific**: The check verifies persistent system behavior, not worker environment configuration
-4. **Not semantically duplicated**: The behavioral boundary is not already covered by an existing spec.json entry (check semantic overlap, not exact text match)
+4. **Not semantically duplicated**: The behavioral boundary is not already covered by an existing spec.jsonl entry (check semantic overlap, not exact text match)
 5. **Importance >= 5**: Core system functions and boundary enforcement score 8-10; secondary behavioral contracts score 5-7; below 5 is not worth persisting
 
 **Exclusion patterns** — automatically skip: build/test runner checks (e.g., `bun run build`, `npm test`), implementation-naming checks (grep for specific function/variable names), documentation consistency checks, line-count or file-size checks, checks that use `|| true` or `|| echo` fallbacks.
 
-**Tightening from prior runs**: Check `.design/reflection.jsonl` for spec tightening proposals from previous execute or reflect runs. Apply valid tightenings to existing spec entries.
+**Portability litmus test**: Reject specs that name specific functions, classes, or file paths — specs must describe observable behavior independent of implementation.
 
-For each AC that passes all 5 gates, promote via:
+**EARS notation for spec authorship**: Specs use EARS (Easy Approach to Requirements Syntax): `"WHEN [trigger condition], THE system SHALL [observable response]"`. Apply EARS to behavioral-invariant and boundary-contract style specs. Each spec's `check` must independently verify the observable response — not that code implementing it exists. Correct examples:
+- EARS: `"WHEN 10 requests arrive within 1 second, THE system SHALL return HTTP 429 on the 11th"` → Check: `for i in $(seq 1 11); do curl -s -o /dev/null -w '%{http_code}\n' http://localhost:3000/api/health; done | tail -1 | grep -q 429`
+- EARS: `"WHEN a required field is missing from POST /users, THE system SHALL return HTTP 400 with an 'errors' field"` → Check: `curl -s -X POST http://localhost:3000/users -H 'Content-Type: application/json' -d '{}' | python3 -c "import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get('errors') else 1)"`
+
+**Tightening from prior runs**: Check `.design/reflection.jsonl` for spec tightening proposals from previous execute or reflect runs. Apply valid tightenings to existing spec entries before authoring new ones.
+
+For each role's behavioral invariants that pass all 5 gates, author via:
 ```bash
-python3 $PLAN_CLI spec-add .design/spec.json \
+python3 $PLAN_CLI spec-add .design/spec.jsonl \
   --ears "WHEN [trigger], THE system SHALL [observable response]" \
-  --check "{criterion.check}" \
+  --description "{what this spec verifies}" \
+  --check "{independently runnable shell command}" \
   --category "behavioral-invariant|boundary-contract" \
   --source-role "{role.name}" \
   --importance {score}
 ```
 
-**Step 3 — TDD validation**: Run the newly promoted specs against the current codebase: `python3 $PLAN_CLI spec-run .design/spec.json --ids "{comma-separated new entry IDs}"`. New specs MUST fail — they describe behavior that execute will implement. If a new spec already passes, it is redundant (the behavior already exists) — remove it from spec.json or demote to a baseline-only check. **Show user**: "Spec curation: {promoted} new specs promoted ({all_failing} failing as expected). Existing: {existing_count} passing."
+**Step 3 — TDD validation**: Run the newly authored specs against the current codebase: `python3 $PLAN_CLI spec-run .design/spec.jsonl --ids "{comma-separated new entry IDs}"`. New specs MUST fail — they describe behavior that execute will implement. If a new spec already passes, it is redundant (the behavior already exists) — remove it from spec.jsonl or lower its importance below 5. **Show user**: "Spec authorship: {authored} new specs authored ({all_failing} failing as expected). Existing: {existing_count} passing."
 
-**Skip when**: No ACs pass the promotion gates (record in reflection: "0 specs promoted — {reason}").
+**Skip when**: No role goals yield specs that pass all 5 gates (record in reflection: "0 specs authored — {reason}").
 
 ### 8. Auxiliary Roles
 
@@ -332,7 +333,7 @@ Add auxiliary roles to `auxiliaryRoles[]` in plan.json. For all tiers: integrati
   {
     "name": "integration-verifier",
     "type": "post-execution",
-    "goal": "Run full test suite. Check cross-role contracts. Validate all acceptanceCriteria. Test goal end-to-end.",
+    "goal": "Run full test suite. Check cross-role contracts. Run spec-run gate. Test goal end-to-end.",
     "model": "sonnet",
     "trigger": "after-all-roles-complete"
   },
@@ -369,13 +370,13 @@ Design Decisions:
 Expert Highlights:
 - {expert-name}: {key finding one-liner}
 
-Acceptance Criteria: {total AC count across all roles}
-| Role | Criteria | Key check |
-|------|----------|-----------|
-| {name} | {count} | {most important check command, abbreviated} |
+Verification Checks:
+| Role | Checks | Key check |
+|------|--------|-----------|
+| {name} | {count} | {most important verificationCheck label} |
 
 Verification specs: {count or "none"}
-Spec curation: {new specs promoted}/{existing specs baseline} (all new specs failing as expected: {yes/no})
+Spec authorship: {new specs authored}/{existing specs baseline} (all new specs failing as expected: {yes/no})
 Context: {stack}, Test: {testCommand}
 Memories applied: {count or "none"}
 ```
@@ -401,15 +402,19 @@ Memories applied: {count or "none"}
 
 ## Contracts
 
-### plan.json (schemaVersion 4)
+### plan.json (schemaVersion 5)
 
-**Top-level fields**: schemaVersion (4), goal, context {stack, conventions, testCommand, buildCommand, lsp}, expertArtifacts [{name, path, summary}], designDecisions [], verificationSpecs [] (optional), roles[], auxiliaryRoles[], progress {completedRoles: []}
+**Top-level fields**: schemaVersion (5), goal, context {stack, conventions, testCommand, buildCommand, lsp}, expertArtifacts [{name, path, summary}], designDecisions [], verificationSpecs [] (optional), roles[], auxiliaryRoles[], progress {completedRoles: []}
+
+Note: schemaVersion 4 plans (with `acceptanceCriteria` on roles) are still accepted by execute for backward compatibility. New plans use schemaVersion 5 with `verificationChecks` instead.
 
 **designDecisions fields**: conflict, experts (array), decision, reasoning. Documents lead's resolution of expert disagreements.
 
 **verificationSpecs fields** (optional): Array of `{role, path, runCommand, properties, sha256}`. Maps roles to property-based test specs. SHA256 checksums computed by finalize for tamper detection. Workers fix code to pass specs, never modify specs.
 
-**Role fields**: name, goal, model, scope {directories, patterns, dependencies}, expertContext [{expert, artifact, relevance}], constraints [], acceptanceCriteria [{criterion, check}], assumptions [{text, severity}], rollbackTriggers [], fallback. Status fields (status, result, attempts, directoryOverlaps) are initialized by finalize.
+**Role fields**: name, goal, model, scope {directories, patterns, dependencies}, expertContext [{expert, artifact, relevance}], constraints [], verificationChecks [{label, check}], assumptions [{text, severity}], rollbackTriggers [], fallback. Status fields (status, result, attempts, directoryOverlaps) are initialized by finalize.
+
+`verificationChecks` are ephemeral role-scoped build/test/integration checks — NOT behavioral specs. They verify the role's build environment and basic completion gates. Behavioral validation is managed via spec.jsonl (see Step 7). Workers receive spec invariants as injected constraints (Step 5.5).
 
 **Auxiliary role fields**: name, type (pre-execution|post-execution), goal, model, trigger. See Step 7 for examples.
 

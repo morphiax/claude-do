@@ -29,47 +29,37 @@ Before starting the Flow, Read `lead-protocol-core.md`. It defines the canonical
 
 ### 2. Pre-Execution Checks
 
-Check `auxiliaryRoles[]` in plan.json for `type: "pre-execution"` roles. If none exist (the default — `/do:reflect` handles plan verification between design and execute), skip directly to AC Pre-Validation below.
+Check `auxiliaryRoles[]` in plan.json for `type: "pre-execution"` roles. If none exist (the default — `/do:reflect` handles plan verification between design and execute), skip directly to Spec Pre-flight below.
 
 If pre-execution auxiliaries ARE present (legacy plans or `/do:simplify` output), run them as standalone Task() calls. The Task() call returns their result directly.
 
-**AC Pre-Validation**: Before spawning workers, run each acceptance criterion check command from plan.json against the current codebase to catch always-pass and broken criteria early. For each role in `roles[]`, for each criterion in `acceptanceCriteria[]`, run the `check` command via Bash. Flag:
-- **Always-pass**: check exits 0 before any worker has run (criterion may not verify actual work — consider tightening)
-- **Broken check**: check exits non-zero AND the failure is due to a malformed command (not a missing feature) — fix the check or ask user whether to proceed
+**Spec Pre-flight**: Before spawning workers, run spec-run to establish a baseline and identify TDD targets:
 
 ```bash
-# AC pre-validation example for role N, criterion C:
-python3 -c "
-import json, subprocess, sys
-p = json.load(open('.design/plan.json'))
-issues = []
-for role in p['roles']:
-    for ac in role.get('acceptanceCriteria', []):
-        check = ac.get('check', '')
-        if not check:
-            continue
-        r = subprocess.run(check, shell=True, capture_output=True, text=True)
-        if r.returncode == 0:
-            issues.append('ALWAYS-PASS [{}]: {!r} — exits 0 before any work'.format(role['name'], ac['criterion']))
-print('\n'.join(issues) if issues else 'No always-pass criteria detected')
-"
+python3 $PLAN_CLI spec-run .design/spec.jsonl
 ```
 
-**Show user**: "AC pre-validation: {count} always-pass criteria flagged, {broken} broken checks detected." For each flagged criterion, display role name and criterion text. Always-pass criteria are warnings (proceed); broken checks are blocking (fix before proceeding).
+Interpret results as two buckets:
+- **Pre-existing passing specs** (exits 0 before any work) — these are the regression baseline. Workers must not break these.
+- **TDD targets** (failing before any work) — these are newly authored specs that execute must make pass. This is expected.
 
-**CLI signature verification**: Before spawning workers, scan role constraints for `python3 $PLAN_CLI` command references. For each referenced subcommand (e.g., `spec-add`, `reflection-add`), run `python3 $PLAN_CLI {subcommand} --help 2>&1` to verify the command exists and accepts the flags mentioned in constraints. If a constraint references a flag that doesn't exist (e.g., `--type` on a command that has no `--type` flag), fix the constraint in plan.json before spawning the worker. Record any fixes as acMutations.
+**Show user**: "Spec pre-flight: {passing} pre-existing passing (regression baseline), {failing} TDD targets (expected to fail before workers run, must pass after)."
 
-**AC mutation recording** (MANDATORY): When an always-pass or broken check is found during AC pre-validation (or CLI signature verification), and the lead fixes the check command before spawning workers, record each mutation to reflection immediately. This is MANDATORY — skipping this recording is a protocol violation. For each mutated criterion:
+If a spec has a broken check command (fails due to malformed command, not missing feature), record as a spec observation in reflection and fix or skip the spec before proceeding.
+
+**CLI signature verification**: Before spawning workers, scan role constraints for `python3 $PLAN_CLI` command references. For each referenced subcommand (e.g., `spec-add`, `reflection-add`), run `python3 $PLAN_CLI {subcommand} --help 2>&1` to verify the command exists and accepts the flags mentioned in constraints. If a constraint references a flag that doesn't exist, fix the constraint in plan.json before spawning the worker. Record any fixes as specObservations.
+
+**Spec observation recording** (MANDATORY): When spec pre-flight finds a broken spec check command, or when CLI signature verification finds a broken constraint reference, record each observation to reflection immediately. This is MANDATORY — skipping this recording is a protocol violation.
 
 ```bash
-echo '{"acMutations":[{"role":"{role.name}","criterion":"{criterion text}","originalCheck":"{original check}","issue":"always-pass|surface-only|syntax-error|wrong-boundary","fixedCheck":"{fixed check}","reasoning":"{why it was wrong and what the fix verifies}"}],"whatWorked":[],"whatFailed":["AC mutations detected during pre-validation"],"promptFixes":[{"section":"plan.json acceptanceCriteria","problem":"{issue description}","idealOutcome":"check command verifies actual behavior","fix":"{fixedCheck}","failureClass":"spec-disobey"}]}' | python3 $PLAN_CLI reflection-add .design/reflection.jsonl \
+echo '{"specObservations":[{"specId":"{spec ID}","observation":"{what was found}","type":"fail|flaky"}],"whatWorked":[],"whatFailed":["Broken spec check detected during pre-flight"],"promptFixes":[{"section":"spec.jsonl","problem":"{issue description}","idealOutcome":"check command verifies actual behavior","fix":"{proposed fix}","failureClass":"spec-disobey"}]}' | python3 $PLAN_CLI reflection-add .design/reflection.jsonl \
   --skill execute \
   --goal "$GOAL" \
   --outcome partial \
   --goal-achieved false
 ```
 
-Record one entry per pre-validation pass (batch all mutations in one `acMutations` array via piped JSON). The JSON is read from stdin by reflection-add as the evaluation object. This feeds the "Learn from past AC mutations" block in the next design run.
+Record one entry per pre-flight pass (batch all observations in one `specObservations` array via piped JSON). This feeds the spec health pipeline for the next design cycle.
 
 ### 3. Report and Spawn Workers
 
@@ -88,7 +78,7 @@ python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "{role.goal}" --stac
 ```
 If `ok: false` or no memories → proceed without injection. Otherwise take top 3-5. **Show user**: "Memory: {role.name} ← {count} learnings ({keyword summaries})."
 
-**Execution order**: For sequential roles (depth > 1), spawn Task() calls in order — wait for each to return before spawning the next. For parallel roles (same depth level with no dependencies), spawn multiple Task() calls in the same response.
+**Execution order**: For sequential roles (depth > 1), spawn Task() calls in order — wait for each to return before spawning the next. For parallel roles (same depth level with no dependencies), check `directoryOverlaps` in plan.json — if two parallel roles share overlapping directories, serialize them (spawn sequentially) to prevent merge conflicts on the same file. Only spawn multiple Task() calls in the same response when parallel roles have no directory overlaps.
 
 **Dependency cascade**: The lead tracks which roles completed or failed. For parallel roles with dependencies, if a dependency failed, skip the dependent role entirely (do not spawn it). Output progress update "⊘ Skipped: {role.name} (dependency failed)".
 
@@ -100,16 +90,16 @@ Spawn workers as standalone Task() calls. Each worker prompt MUST include:
 2. **Brief location**: "Read your full role brief from `.design/plan.json` at `roles[{roleIndex}]`."
 3. **Expert context**: "Read these expert artifacts for context: {expertContext entries with artifact paths and relevance notes}." If a scout report exists: "Also read `.design/scout-report.json` for codebase reality check."
 4. **Past learnings** (if memories found): "Relevant past learnings: {bullet list of memories with format: '- {category}: {summary} (from {created})'}"
-5. **Process**: "Explore your scope directories ({scope.directories}). Plan your own approach based on what you find in the actual codebase. Implement, test, verify against your acceptance criteria."
+5. **Process**: "Explore your scope directories ({scope.directories}). Plan your own approach based on what you find in the actual codebase. Implement, test, verify against the spec invariants injected in your constraints."
 6. **Constraints**: "Constraints from role brief — read them from plan.json roles[{roleIndex}].constraints."
-7. **Done when**: "Done when — read acceptance criteria from plan.json roles[{roleIndex}].acceptanceCriteria."
+7. **Done when**: "Done when — (1) run each spec check injected in your role constraints (these are your behavioral invariants — look for constraints prefixed 'Spec invariant' and run the check= command from each), (2) run each verificationCheck from your role brief (build, test runner checks — found at plan.json roles[{roleIndex}].verificationChecks), (3) if plan.json verificationSpecs[] has an entry for your role, run it last. Report results for all three."
 8. **Fallback**: If role has a fallback: "If your primary approach fails: {fallback}"
 9. **Dependency context** (if this role depends on others): Inject `keyDecisions` and `contextForDependents` from completed dependency roles. Include: "Dependency completed: {role.name}. Key decisions: {keyDecisions}. Context: {contextForDependents}. Files changed: {filesChanged}."
 10. **Working protocol** (inline):
 
-**Pre-Completion Verification (MANDATORY)**: Before reporting done, run EVERY acceptance criterion's `check` command as separate shell invocation. For each: (a) run exact shell command from `check` field, (b) capture exit code and output, (c) record pass/fail with evidence. If ANY fails, fix and re-run ALL checks. Don't report completion until every check exits 0. If plan.json verificationSpecs[] has entry for your role, run spec via its runCommand AFTER all acceptance criteria pass. Spec files in `.design/specs/` are IMMUTABLE — fix code, never modify specs. Spec failures are blocking.
+**Pre-Completion Verification (MANDATORY)**: Before reporting done, run all checks in order: (a) For each constraint prefixed "Spec invariant" in your role brief — extract and run the check= command as a separate shell invocation. (b) For each entry in your verificationChecks[] from plan.json roles[N].verificationChecks — run the check command as a separate shell invocation. (c) If plan.json verificationSpecs[] has an entry for your role, run it via its runCommand LAST. Capture exit code and output for each. Fix and re-run ALL checks if ANY fails. Don't report completion until every check exits 0. Spec files in `.design/specs/` are IMMUTABLE — fix code, never modify specs. Spec failures are blocking.
 
-**Universal Worker Rules**: Tool boundaries: You may use Read, Grep, Glob, Edit, Write, Bash (for tests/build/git), LSP. Do NOT use WebFetch, WebSearch, MCP tools, or Task (no sub-spawning). | Failure handling: If cannot complete, return a structured failure summary with: role name, what failed, why, what you tried, suggested alternative. If rollback triggers fire, stop immediately and report. | Scope boundaries: Stay within your scope directories. Don't modify files outside scope unless absolutely necessary for integration. | **Minimal edits**: Only change what is necessary. Do not reformat, re-indent, or reorder surrounding code/YAML. Formatting churn inflates diffs and obscures real changes. | **INSIGHT**: If you discover a surprising finding during your work (unexpected constraint, contradicts assumption, high-impact decision), include it prominently in your completion summary. Maximum one insight — choose the most surprising.
+**Universal Worker Rules**: Tool boundaries: You may use Read, Grep, Glob, Edit, Write, Bash (for tests/build/git), LSP. Do NOT use WebFetch, WebSearch, MCP tools, or Task (no sub-spawning). | Failure handling: If cannot complete, return a structured failure summary with: role name, what failed, why, what you tried, suggested alternative. If rollback triggers fire, stop immediately and report. | Scope boundaries: Stay within your scope directories. Don't modify files outside scope unless absolutely necessary for integration. | **Minimal edits**: Only change what is necessary. Do not reformat, re-indent, or reorder surrounding code/YAML. Formatting churn inflates diffs and obscures real changes. | **No-delete rule**: Do not delete or rename existing functions, classes, or constants unless your role goal explicitly requires removal. Additive goals mean additive changes. | **INSIGHT**: If you discover a surprising finding during your work (unexpected constraint, contradicts assumption, high-impact decision), include it prominently in your completion summary. Maximum one insight — choose the most surprising.
 
 **Completion format**: Return a structured text summary with these fields:
 ```
@@ -117,8 +107,8 @@ COMPLETION REPORT:
 role: {name}
 achieved: true|false
 filesChanged: [list of files]
-acceptanceCriteria:
-- criterion: "..." | passed: true|false | evidence: "..."
+verificationResults:
+- type: "spec"|"check"|"verificationSpec" | id_or_label: "..." | passed: true|false | evidence: "..."
 keyDecisions: [list]
 contextForDependents: "summary for dependent roles"
 ```
@@ -134,10 +124,10 @@ Task(subagent_type: "general-purpose", model: "{model}", prompt: <role-specific 
 
 Process worker results as each Task() call returns.
 
-**On role completion**: Worker returns structured text summary with achieved, filesChanged, acceptanceCriteria, keyDecisions, contextForDependents.
-1. **Completion report validation**: Parse worker return value and validate structure. Required fields: role, achieved, filesChanged (list), acceptanceCriteria (list of criterion/passed/evidence), keyDecisions (list), contextForDependents (string). If any required field is missing, spawn a replacement Task() with instructions to re-run and return complete structured output. On second failure, escalate to user for manual review.
-2. **Lead-side verification** (trust but verify): For each criterion in `plan.json roles[N].acceptanceCriteria`, run the `check` command via Bash independently. **Before rejecting, verify the actual file state** — run `git diff --name-only HEAD` and `ls -la {relevant files}` to confirm the worker's changes are actually present on disk. Stale diagnostics from cached state or previous runs can produce false rejections. Only reject if the check fails AND the file state confirms the work is genuinely absent. If any check exits non-zero after confirming actual file state, spawn a retry Task() with explicit fix instructions (see retry handling below).
-3. Update plan.json — use `python3 -c` with subprocess to avoid pipe-to-script fragility (piping stdin directly to `python3 $PLAN_CLI` fails when the working directory is a Python package): `python3 -c "import subprocess,json; subprocess.run(['python3','$PLAN_CLI','update-status','.design/plan.json'], input=json.dumps([{'roleIndex':N,'status':'completed','result':'...'}]), text=True)"`. Then: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event completion --skill execute --agent "{worker-name}" --payload '{"acPassed":N,"acTotal":N,"filesChanged":N,"firstAttempt":true|false}' || true`
+**On role completion**: Worker returns structured text summary with achieved, filesChanged, verificationResults, keyDecisions, contextForDependents.
+1. **Completion report validation**: Parse worker return value and validate structure. Required fields: role, achieved, filesChanged (list), verificationResults (list of type/id_or_label/passed/evidence), keyDecisions (list), contextForDependents (string). If any required field is missing, spawn a replacement Task() with instructions to re-run and return complete structured output. On second failure, escalate to user for manual review. Note: legacy v4 plan workers may return `acceptanceCriteria` instead of `verificationResults` — accept both formats.
+2. **Lead-side verification** (trust but verify): First, run `git diff --stat` to verify scope — flag any deleted files or modifications outside the role's scope.directories (unexpected deletions by additive-goal workers are a known failure mode). Then, for each verificationCheck in `plan.json roles[N].verificationChecks`, run the `check` command via Bash independently. Also run spec-run filtered to specs whose `source_role` matches the completed role: `python3 $PLAN_CLI spec-run .design/spec.jsonl`. **Before rejecting, verify the actual file state** — run `git diff --name-only HEAD` and `ls -la {relevant files}` to confirm the worker's changes are actually present on disk. Stale diagnostics from cached state or previous runs can produce false rejections. Only reject if the check fails AND the file state confirms the work is genuinely absent. If any check exits non-zero after confirming actual file state, spawn a retry Task() with explicit fix instructions (see retry handling below).
+3. Update plan.json — use `python3 -c` with subprocess to avoid pipe-to-script fragility (piping stdin directly to `python3 $PLAN_CLI` fails when the working directory is a Python package): `python3 -c "import subprocess,json; subprocess.run(['python3','$PLAN_CLI','update-status','.design/plan.json'], input=json.dumps([{'roleIndex':N,'status':'completed','result':'...'}]), text=True)"`. Then: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event completion --skill execute --agent "{worker-name}" --payload '{"specsPassed":N,"specsTotal":N,"filesChanged":N,"firstAttempt":true|false}' || true`
 4. Store `keyDecisions` and `contextForDependents` from the completion report. Inject this context into dependent role prompts when spawning them.
 5. **Progress update**: Output "Completed: {role.name} — {one-line summary}"
 6. **Post-worker CLI validation** (for SKILL.md-modifying roles only): If the completed role's filesChanged includes any SKILL.md file, scan the modified SKILL.md for `python3 $PLAN_CLI` references. For each referenced subcommand, run `python3 $PLAN_CLI {subcommand} --help 2>&1` to verify it exists. If a reference points to a non-existent command, fix the SKILL.md instruction before proceeding.
@@ -164,11 +154,11 @@ Post-execution auxiliaries are standalone Task() calls.
 - "Verify all completed roles' work integrates correctly."
 - Completed roles: subjects, files changed (from worker reports)
 - Test command from `plan.json context.testCommand`
-- All `acceptanceCriteria` from all completed roles
-- "Run the full test suite. Check for import/dependency conflicts. Verify cross-role connections. Test the goal end-to-end."
+- All `verificationChecks` from all completed roles
+- "Run the full test suite. Check for import/dependency conflicts. Verify cross-role connections. Run spec-run to verify all behavioral invariants pass. Test the goal end-to-end."
 - "**Verification spec integrity** (if plan.json has verificationSpecs[]): For each spec entry with a sha256 field, compute the current SHA256 of the file at path and compare to the stored value. Use command: `python3 -c \"import hashlib; print(hashlib.sha256(open('{path}', 'rb').read()).hexdigest())\"` or `shasum -a 256 {path} | awk '{print $1}'`. If ANY checksum mismatch is found, report as BLOCKING tamper detection failure — spec files are immutable and must not be modified during execution. Then run each spec via its runCommand and record results."
 - "**Only report results for checks you actually performed.** If a check requires capabilities you don't have (e.g., visual rendering, browser access), report it as `\"result\": \"skipped\"` with `\"details\": \"requires browser rendering\"`. Never infer visual or behavioral results from grep/file-reading alone — a CSS rule existing in a file does not mean it takes effect on the page."
-- "Save findings to `.design/integration-verifier-report.json` with this structure: `{\"status\": \"PASS|FAIL\", \"verificationSpecs\": [{\"role\": \"...\", \"path\": \"...\", \"checksumValid\": true|false, \"specResult\": \"pass|fail|skipped\", \"details\": \"...\"}] (if applicable), \"acceptanceCriteria\": [{\"role\": \"...\", \"criterion\": \"...\", \"result\": \"pass|fail|skipped\", \"details\": \"...\"}], \"crossRoleIssues\": [{\"issue\": \"...\", \"affectedRoles\": [...], \"severity\": \"blocking|high|medium|low\", \"suggestedFix\": \"...\"}], \"testResults\": {\"command\": \"...\", \"exitCode\": 0, \"output\": \"...\"}, \"endToEndVerification\": {\"tested\": true|false, \"result\": \"pass|fail|skipped\", \"details\": \"...\"}, \"summary\": \"...\"}`. Return PASS or FAIL with summary."
+- "Save findings to `.design/integration-verifier-report.json` with this structure: `{\"status\": \"PASS|FAIL\", \"verificationSpecs\": [{\"role\": \"...\", \"path\": \"...\", \"checksumValid\": true|false, \"specResult\": \"pass|fail|skipped\", \"details\": \"...\"}] (if applicable), \"verificationResults\": [{\"role\": \"...\", \"label\": \"...\", \"result\": \"pass|fail|skipped\", \"details\": \"...\"}], \"crossRoleIssues\": [{\"issue\": \"...\", \"affectedRoles\": [...], \"severity\": \"blocking|high|medium|low\", \"suggestedFix\": \"...\"}], \"testResults\": {\"command\": \"...\", \"exitCode\": 0, \"output\": \"...\"}, \"endToEndVerification\": {\"tested\": true|false, \"result\": \"pass|fail|skipped\", \"details\": \"...\"}, \"summary\": \"...\"}`. Return PASS or FAIL with summary."
 
 **After integration-verifier completes**: Validate artifact via `python3 $PLAN_CLI validate-auxiliary-report --type integration-verifier .design/integration-verifier-report.json`. On validation failure: bypass Task() and perform integration verification directly via Bash: run `{testCommand}` from plan.json context if available, manually check that all worker-reported filesChanged exist via `ls -l {files}`, grep acceptance criteria for common issues. Save minimal report: `echo '{"status":"PASS","acceptanceCriteria":[],"crossRoleIssues":[],"testResults":{"command":"manual","exitCode":0,"output":"Bash bypass"},"endToEndVerification":{"tested":false,"result":"skipped","details":"Bash bypass fallback"},"summary":"Bash bypass — manual checks passed"}' > .design/integration-verifier-report.json`.
 
@@ -176,21 +166,21 @@ On FAIL: spawn targeted fix workers for specific issues. Re-run verifier after f
 
 **Skip when**: only 1 role was executed, or all roles were independent (no shared directories, no cross-references), or all roles were fully sequential (maxDepth == roleCount) and all lead-side AC checks passed (lead already verified integration at each step).
 
-**Spec Regression Gate** (runs after integration-verifier): If `.design/spec.json` exists, validate that all specs still pass — specs are the durable regression contract authored by design.
+**Spec Regression Gate** (runs after integration-verifier): If `.design/spec.jsonl` exists, validate that all specs still pass — specs are the durable regression contract authored by design.
 
 ```bash
-python3 $PLAN_CLI spec-run .design/spec.json
+python3 $PLAN_CLI spec-run .design/spec.jsonl
 ```
 
-**All specs MUST pass.** Specs that were failing before execution (newly promoted by design as TDD targets) should now pass after workers implemented the behavior. Specs that were passing before execution must still pass (no regressions).
+**All specs MUST pass.** Specs that were failing before execution (newly authored by design as TDD targets) should now pass after workers implemented the behavior. Specs that were passing before execution must still pass (no regressions).
 
 **On failure**: For each failing spec, identify which role's work likely caused the regression (match spec `source_role` or EARS description to role scope). Spawn targeted fix workers for specific regressions. Re-run `spec-run` after fixes (max 2 fix rounds). **Show user**: "Spec regression gate: {passed}/{total} passing, {failed} regressions detected."
 
 **On all passing**: **Show user**: "Spec regression gate: {total}/{total} passing."
 
-**Spec tightening observations**: If during execution a worker discovers that a spec's check could be stricter (e.g., a boundary was looser than actual behavior), record the observation in reflection as a tightening proposal for the next design cycle. Execute does NOT write to spec.json — design is the sole author.
+**Spec tightening observations**: If during execution a worker discovers that a spec's check could be stricter (e.g., a boundary was looser than actual behavior), record the observation in reflection as a tightening proposal for the next design cycle. Execute does NOT write to spec.jsonl — design is the sole author.
 
-**Skip when**: `.design/spec.json` does not exist.
+**Skip when**: `.design/spec.jsonl` does not exist.
 
 ### 6. Goal Review
 
@@ -220,14 +210,14 @@ Roles: {completed}/{total} completed, {failed} failed, {skipped} skipped
 Files Changed:
 {deduplicated list from worker reports, grouped by role — use bullet list}
 
-Acceptance Results:
+Verification Results:
 {use markdown table format for clarity:}
-| Criterion | Result |
-|-----------|--------|
-| {criterion text} | pass/fail |
+| Label / Spec | Type | Result |
+|--------------|------|--------|
+| {label or spec EARS summary} | spec|check|verificationSpec | pass/fail |
 
 Integration: {PASS|FAIL|SKIPPED — with details}
-Spec Regression: {passed}/{total} passing {or "no spec.json" if absent}
+Spec Regression: {passed}/{total} passing {or "no spec.jsonl" if absent}
 
 {if any worker returned an INSIGHT: display "INSIGHT: {finding}" — these are the surprising discoveries worth highlighting}
 
