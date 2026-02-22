@@ -33,6 +33,17 @@ Before starting the Flow, Read `lead-protocol-core.md`. It defines the canonical
 4. If >5 roles likely needed, suggest phases. Design only phase 1.
 5. Check existing plan: `python3 $PLAN_CLI status .design/plan.json`. If `ok` and `isResume`: ask user "Existing plan has {counts} roles. Overwrite?" If declined, stop.
 6. Archive stale artifacts: `python3 $PLAN_CLI archive .design`
+7. **Brownfield characterization**: If `.design/spec.jsonl` does NOT exist AND the project has existing code (detected by: `context.testCommand` or `context.buildCommand` exists from Step 1.1, OR common project markers found via `ls package.json pyproject.toml Cargo.toml go.mod Makefile CMakeLists.txt pom.xml build.gradle 2>/dev/null`), bootstrap a behavioral baseline:
+   1. **Announce**: "Brownfield detected: no spec.jsonl found. Bootstrapping behavioral baseline from existing codebase." Use `AskUserQuestion` with options "Continue" (default) and "Skip — this is a new project" to let the user opt out. If skipped, proceed to Step 2.
+   2. **Spawn characterization Task**: `Task(subagent_type: "general-purpose", model: "sonnet")` with prompt:
+      - "You are a characterization testing agent. Your job is to discover existing behavioral contracts in this codebase and generate spec candidates."
+      - "Read project metadata (package.json, pyproject.toml, CLAUDE.md, README, Makefile, etc.) to discover test commands, build commands, and entry points."
+      - "Identify key behavioral boundaries: API endpoints, CLI commands, critical functions with existing tests, build targets."
+      - "Run: `python3 {PLAN_CLI_PATH} spec-extract {discovered_test_commands}` to generate candidates in `.design/spec-candidates.json`."
+      - "Curate candidates: for each candidate, apply the 5 spec quality gates (behavioral, durable, not role-setup-specific, not duplicated, importance >= 5). Promote worthy candidates via `python3 {PLAN_CLI_PATH} spec-add .design/spec.jsonl --ears '...' --description '...' --check '...' --category '...' --importance N`."
+      - "Return summary: `{extracted: N, promoted: N, categories: [...]}`."
+   3. **Validation**: Run `python3 $PLAN_CLI spec-run .design/spec.jsonl`. All specs must pass (they describe existing behavior). If any fail, remove the failing entries — they were incorrectly characterized.
+   4. **Report**: "Brownfield baseline: {N} behavioral specs bootstrapped from existing codebase ({categories}). All passing."
 
 ### 2. Lead Research
 

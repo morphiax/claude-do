@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.3.1] - 2026-02-22
+
+### Added
+
+- **Design: brownfield auto-detection (Step 1.7)**: When `spec.jsonl` does not exist and the project has existing code (test/build commands or common project markers like package.json, pyproject.toml, Cargo.toml), design automatically spawns a characterization subagent to bootstrap behavioral specs before planning. Uses `spec-extract` to discover candidates and `spec-add` to promote qualifying entries through the 5 quality gates. User can opt out via AskUserQuestion if the project is greenfield.
+
 ## [3.3.0] - 2026-02-22
 
 ### Added

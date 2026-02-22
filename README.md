@@ -3,7 +3,7 @@
 > Multi-agent planning with structured debate, self-verifying execution, and cross-session memory
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Version](https://img.shields.io/badge/version-3.3.0-green.svg)
+![Version](https://img.shields.io/badge/version-3.3.1-green.svg)
 ![Claude Code](https://img.shields.io/badge/Claude%20Code-2.1.32%2B-orange.svg)
 
 ## What's Novel
@@ -56,7 +56,7 @@
 
 **`/do:research`** spawns 3 parallel standalone Task() subagents (codebase analyst, external researcher, domain specialist) — research is inherently exploratory, so external sources are always included. Researchers gather findings across codebase, literature, and comparative/theoretical domains with minimum quality thresholds (>=3 post-mortems, >=5 beginner mistakes, quantitative performance claims), then save findings to `.design/expert-*.json` artifacts. Lead synthesizes findings into 5 knowledge sections with concept dependency graphs, evolution paths, and team adoption factors. Recommendations include decision framework (bestFit/wrongFit scenarios) alongside confidence and effort. Outputs to `.design/research.json`. Memory injection with transparency. End-of-run summary shows recommendation count and research gaps identified.
 
-**`/do:design`** spawns experts (architects, researchers, domain specialists) based on goal type. For complex goals, experts debate via structured challenges/defenses. The lead synthesizes findings into role briefs with verificationChecks (build/test gates) and injects spec invariants directly into role constraints. Step 7 authors behavioral specs in spec.jsonl using EARS notation with TDD validation. Scout auxiliaries verify expert assumptions against the real codebase. Phase announcements show progress. Draft plan review checkpoint for complex goals. Memory injection with transparency. End-of-run summary with metrics.
+**`/do:design`** spawns experts (architects, researchers, domain specialists) based on goal type. For complex goals, experts debate via structured challenges/defenses. The lead synthesizes findings into role briefs with verificationChecks (build/test gates) and injects spec invariants directly into role constraints. **Brownfield auto-detection**: when no `spec.jsonl` exists and the project has existing code, design automatically bootstraps a behavioral baseline via `spec-extract` before planning — ensuring existing behavior is captured as regression specs. Step 7 authors behavioral specs in spec.jsonl using EARS notation with TDD validation. Scout auxiliaries verify expert assumptions against the real codebase. Phase announcements show progress. Draft plan review checkpoint for complex goals. Memory injection with transparency. End-of-run summary with metrics.
 
 **`/do:execute`** spawns standalone worker agents per role. Spec pre-flight runs before worker spawning to classify pre-existing passing specs (regression baseline) vs TDD targets (newly authored, expected to fail). Workers run spec invariant checks (injected in constraints) + verificationChecks (build/test) + verificationSpecs (if present) during Pre-Completion Verification. Lead-side verification re-runs all checks. Adaptive model escalation on retry (haiku→sonnet→opus). Worker-to-worker handoff injects completed role context into dependent workers. Post-execution spec regression gate: all spec.jsonl entries must pass — failures trigger targeted fix workers. Memory curator distills outcomes into importance-rated learnings. End-of-run summary with detailed metrics.
 
