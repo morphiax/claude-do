@@ -109,7 +109,7 @@ Spawn workers as standalone Task() calls. Each worker prompt MUST include:
 
 **Pre-Completion Verification (MANDATORY)**: Before reporting done, run EVERY acceptance criterion's `check` command as separate shell invocation. For each: (a) run exact shell command from `check` field, (b) capture exit code and output, (c) record pass/fail with evidence. If ANY fails, fix and re-run ALL checks. Don't report completion until every check exits 0. If plan.json verificationSpecs[] has entry for your role, run spec via its runCommand AFTER all acceptance criteria pass. Spec files in `.design/specs/` are IMMUTABLE — fix code, never modify specs. Spec failures are blocking.
 
-**Universal Worker Rules**: Tool boundaries: You may use Read, Grep, Glob, Edit, Write, Bash (for tests/build/git), LSP. Do NOT use WebFetch, WebSearch, MCP tools, or Task (no sub-spawning). | Failure handling: If cannot complete, return a structured failure summary with: role name, what failed, why, what you tried, suggested alternative. If rollback triggers fire, stop immediately and report. | Scope boundaries: Stay within your scope directories. Don't modify files outside scope unless absolutely necessary for integration. | **INSIGHT**: If you discover a surprising finding during your work (unexpected constraint, contradicts assumption, high-impact decision), include it prominently in your completion summary. Maximum one insight — choose the most surprising.
+**Universal Worker Rules**: Tool boundaries: You may use Read, Grep, Glob, Edit, Write, Bash (for tests/build/git), LSP. Do NOT use WebFetch, WebSearch, MCP tools, or Task (no sub-spawning). | Failure handling: If cannot complete, return a structured failure summary with: role name, what failed, why, what you tried, suggested alternative. If rollback triggers fire, stop immediately and report. | Scope boundaries: Stay within your scope directories. Don't modify files outside scope unless absolutely necessary for integration. | **Minimal edits**: Only change what is necessary. Do not reformat, re-indent, or reorder surrounding code/YAML. Formatting churn inflates diffs and obscures real changes. | **INSIGHT**: If you discover a surprising finding during your work (unexpected constraint, contradicts assumption, high-impact decision), include it prominently in your completion summary. Maximum one insight — choose the most surprising.
 
 **Completion format**: Return a structured text summary with these fields:
 ```
@@ -225,6 +225,8 @@ Review against the goal from `plan.json`:
 3. **User intent** — Would a user looking at the result say "this is what I asked for"?
 
 If gaps are found: spawn a targeted worker to address them.
+
+4. **Deployment state** — Run `git status --porcelain`. If changes exist and the project uses GitOps or CI/CD (check CLAUDE.md, context.stack, or project conventions), the goal is NOT achieved until changes are committed and in the deployment pipeline. Report as "partial" and prompt the user to commit/push, or offer to do so.
 
 ### 7. Complete
 

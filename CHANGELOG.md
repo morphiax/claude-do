@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.5] - 2026-02-22
+
+### Added
+
+- **Design: AC fact-check before writing format-dependent checks**: Before writing any AC check that parses a specific file format, design must read the actual target file to confirm structure matches assumptions. Prevents checks based solely on expert descriptions.
+- **Design: constraint-to-AC coverage audit (Step 9)**: New step verifies every constraint maps to at least one AC check. Unverifiable constraints get `(manual-only)` suffix so workers know they are not AC-checked.
+- **Execute: deployment state check**: Goal verification now checks `git status` and reports "partial" if uncommitted changes exist in GitOps/CI projects, prompting user to commit/push.
+- **Reflect: output format quality evaluation**: Adversarial thinking now evaluates user-facing conversation output — whether summaries directly answer the user's question, whether the headline finding is immediately visible, and whether output mirrors the question structure.
+- **Reflect: doNextTime→SKILL.md proposal pipeline**: Skill improvement step now evaluates all `doNextTime` items from reflection prose as SKILL.md proposal candidates, not just adversarial-thinking findings.
+
+### Changed
+
+- **Execute: minimal edits worker rule**: Workers must only change what is necessary — no reformatting, re-indenting, or reordering surrounding code. Reduces diff noise.
+- **Reflect: moderate severity targeted fixes**: Moderate-severity gaps now allow targeted fixes for concrete, trivially fixable issues (missing AC check, wrong field name) instead of blanket skip. Protects against over-engineering while not leaving 30-second fixes on the table.
+- **Research: factual cross-check before assembly**: Lead now verifies version numbers, project names, and quantitative claims against codebase-analyst evidence before assembling sections. Codebase-analyst is ground truth for discrepancies.
+
 ## [3.1.4] - 2026-02-22
 
 ### Changed

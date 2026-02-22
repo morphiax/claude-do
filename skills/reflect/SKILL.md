@@ -78,6 +78,8 @@ This step is the highest-leverage single intervention. Research shows it accesse
 
 **After structural analysis, evaluate instructional quality**: Is the written output (SKILL.md changes, plan.json instructions, expert guidance) clear enough that a new lead would follow it correctly on first read? Ambiguous instructions are gaps, not style issues. Reflect gravitates toward testable/structural issues (CLI flags, file existence) — actively resist this bias by also evaluating clarity, specificity, and potential for misinterpretation.
 
+**Output format quality**: Evaluate the reviewed skill's user-facing output (conversation markdown shown to the user, not just artifact files). Did the summary directly answer each part of the user's original question? Could the user take action from the summary alone without reading `.design/` artifacts? Was output organized to mirror the user's question structure (e.g., if they asked 3 things, are all 3 clearly addressed)? Was the most important finding (the "headline") immediately visible, not buried in a table? Poor communication of correct findings is a gap — note it in the prose.
+
 ### 2.5. Memory Cross-Reference
 
 After adversarial thinking produces findings, cross-reference against `.design/memory.jsonl` to detect recurrence patterns. This step enriches the synthesis without biasing the thinking — memories are consulted AFTER independent analysis, not before.
@@ -131,7 +133,7 @@ Process results: blocking issues feed into Step 4 (Resolution) as mandatory patc
 
 **Trigger**: gapSeverity is "significant" or "fundamental" AND the reviewed skill produced modifiable artifacts (plan.json, interfaces.json, research.json).
 
-**Skip if**: gapSeverity is "minor" or "moderate" — record observations in the reflection prose only. Minor issues don't warrant artifact modification.
+**Skip if**: gapSeverity is "minor" — record observations in the reflection prose only. Minor issues don't warrant artifact modification. **For "moderate" severity**: skip resolution by default, BUT if any finding is a concrete, trivially fixable gap (e.g., a missing AC check, a wrong field name, a constraint with no verification), apply that targeted fix. The threshold protects against over-engineering, not against leaving known 30-second fixes on the table.
 
 **Process**:
 
@@ -180,7 +182,7 @@ This phase proposes permanent improvements to SKILL.md files so the same class o
 
 **Process**:
 
-1. From the adversarial thinking (Step 2) and resolution (Step 4), identify findings that are **general** — they would prevent the same error class regardless of project, goal, or technology stack. Filter out project-specific findings.
+1. From the adversarial thinking (Step 2) and resolution (Step 4), identify findings that are **general** — they would prevent the same error class regardless of project, goal, or technology stack. Filter out project-specific findings. Also evaluate each `doNextTime` item from the reflection prose — if an item describes a general process improvement (not project-specific), draft it as a SKILL.md proposal. Do not stop after the first fix; evaluate all candidates up to the 3-fix cap.
 
    **General examples**: "Design should verify that data files contain actual data, not just check file existence", "Experts should be instructed to verify their claims against actual output, not just code structure"
 
