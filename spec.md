@@ -79,6 +79,7 @@ Between cycles, the system preserves:
 - **Traces** — Event log for cross-run analysis
 - **Research** — Knowledge artifacts from research runs
 - **Conventions** — Project-level implementation conventions (technology choices, coding standards, platform-specific patterns)
+- **Environment** — Descriptive context about the world the project operates in (infrastructure, external systems, data sources, consumers, team, tooling). Not prescriptive — describes what exists, not how to build.
 - **Aesthetics** — Visual identity and interaction design foundations for user-facing products (aesthetic direction, visual language, mental models, information architecture, state design, interaction patterns)
 
 Ephemeral artifacts (plans, expert findings, worker outputs) are archived to history after each cycle.
@@ -368,7 +369,7 @@ Findings are not permanent — they get addressed. Without a resolution mechanis
 
 Between cycles, the system archives ephemeral artifacts while preserving persistent state.
 
-- `[XC-21]` Persistent files (memory, reflections, traces, specs, research, conventions, aesthetics) SHALL survive archiving in place.
+- `[XC-21]` Persistent files (memory, reflections, traces, specs, research, conventions, environment, aesthetics) SHALL survive archiving in place.
 - `[XC-22]` Ephemeral files (plans, expert artifacts, worker outputs) SHALL be moved to timestamped history during archiving.
 - `[XC-23]` After archiving, no stale plan state SHALL remain — a fresh design cycle starts with accumulated learnings but clean execution state.
 - `[XC-41]` WHEN archive completes, the system SHALL verify its own post-conditions: (a) no ephemeral directories remain under root, (b) all persistent files still exist, (c) the history directory contains the archived artifacts. WHEN any post-condition fails, archive SHALL report the failure rather than silently returning success.
@@ -393,7 +394,47 @@ The spec defines WHAT. Conventions define HOW a specific project builds it — t
 
 - `[XC-37]` Conventions MUST NOT be written directly by skills. They are proposed to the user, who decides.
 
-### 3.7 Foundational Knowledge Contract
+### 3.7 Environment Contract
+
+The spec defines WHAT. Conventions define HOW to build. Environment describes WHERE — the world the project operates in. Infrastructure, external systems, data sources, consumers, team, and tooling that exist independently of implementation choices.
+
+Environment is descriptive, not prescriptive. It answers "what exists around us?" not "how should we build?" Conventions change when the team changes its mind. Environment changes when the world changes (new system onboarded, team member joins, infrastructure migrates). Different lifecycles, different triggers.
+
+#### Persistence and Availability
+
+- `[EV-1]` The system SHALL maintain a persistent, project-level environment document that describes the external context the project operates in. This document is always available to skills and design — not searched by keyword, but present as foundational context.
+- `[EV-2]` Environment SHALL persist across cycles (survive archiving) alongside conventions, memory, and other persistent state.
+
+#### Population
+
+- `[EV-3]` WHEN a project is initialized and no environment document exists, the system SHALL prompt the user to provide environment context before the first design cycle. Environment cannot be researched or inferred — it describes the user's specific infrastructure, systems, and team. Design without environment context produces generic plans that miss integration points, naming conventions, and operational constraints.
+- `[EV-4]` An environment document SHALL cover at minimum the sections applicable to the project: (a) infrastructure — cloud accounts, regions, networks, authentication methods, (b) external systems — systems the project integrates with, their APIs, locations, and constraints, (c) data sources — upstream systems, their characteristics, schemas, delivery mechanisms, (d) consumers — downstream systems or users that consume the project's output, their requirements and contracts, (e) team — people involved, their roles, communication channels, (f) tooling — external tools, SDKs, and services available in the development and production environment. Sections not applicable to the project may be omitted.
+
+#### Flow into Plans
+
+- `[EV-5]` WHEN design builds a plan, it SHALL read the environment document and inject relevant environment context into role context fields. Workers receive environment facts through the plan — they do not read the environment document directly. This preserves plan self-containment (`[XC-2]`) and parallels how conventions flow via `[XC-26]`.
+- `[EV-6]` Environment facts SHALL NOT appear in behavioral specs. Environment describes the current deployment — specs describe behavior that holds regardless of deployment. A spec that references a specific AWS account, bucket name, or team member is not portable.
+
+#### Evolution
+
+- `[EV-7]` WHEN the external world changes (new system onboarded, infrastructure migrated, team member added), the environment document SHALL be updated. Any skill or the user may propose environment updates.
+
+#### Separation from Conventions
+
+- `[EV-8]` Environment and conventions are complementary but distinct. Environment describes what exists (facts about the world). Conventions prescribe how to build (decisions the team has made). A cloud account ID is environment. The choice to use that cloud provider's SDK is a convention. WHEN a fact could be classified as either, the test is: "Would this change if we reimplemented the project from scratch?" If no (it's about the world), it's environment. If yes (it's a team decision), it's a convention.
+
+#### Content Stability
+
+- `[EV-11]` Environment documents SHALL contain only stable facts — things that are true until the world changes, not until the next command runs. Counts, percentages, coverage metrics, and analysis outputs are volatile — they belong in project status, discovery results, or analysis artifacts, not in environment. The test: "Would I need to update this after running a discovery or profiling command?" If yes, it does not belong in environment.
+- `[EV-12]` Environment documents SHALL be structured as terse navigational reference, not narrative prose. Bullets and tables over paragraphs. Every line should answer a lookup question ("What's the S3 bucket?", "What prefix does source X use?") rather than explain context. Context paragraphs are limited to section headers where orientation is needed for first-time readers.
+
+**Prohibitions**:
+
+- `[EV-9]` Environment documents MUST NOT contain secrets, credentials, or tokens. Authentication methods may be described (e.g., "uses SSO via identity provider") but credentials are never stored in project artifacts.
+- `[EV-10]` Environment MUST NOT prescribe implementation choices. It describes what exists, not what to use. "S3 bucket X exists at path Y" is environment. "Use boto3 to access S3" is a convention.
+- `[EV-13]` Environment MUST NOT contain volatile metrics (table counts, column counts, coverage percentages, stub/progress status). These are point-in-time observations that rot. The environment document records what systems exist and how to find them — not how much data they currently contain.
+
+### 3.8 Foundational Knowledge Contract
 
 Skills and workers leverage established knowledge — frameworks, algorithms, design patterns, methodologies — rather than reasoning ad-hoc.
 
@@ -403,7 +444,7 @@ Skills and workers leverage established knowledge — frameworks, algorithms, de
 
 - `[XC-34]` The system MUST NOT hardcode specific frameworks — it SHALL use the best available knowledge at the time of execution, which evolves as new research emerges.
 
-### 3.8 Aesthetics Contract
+### 3.9 Aesthetics Contract
 
 The spec defines WHAT. Conventions define HOW it's built. Aesthetics defines HOW it looks, feels, and works — visual identity and interaction design foundations for user-facing products. Visual identity and interaction design are two lenses on the same concern; they live in one document because workers need both together.
 
@@ -444,7 +485,7 @@ Aesthetics is not only how the product looks — it is how the product works. Th
 - `[DS-15]` An aesthetics document SHALL be considered complete only when it covers both visual identity (aesthetic direction, tone, output formatting, information architecture, state presentation) and interaction design foundations (mental models per `[DS-6]`, cognitive load analysis per `[DS-9]`, flow integrity per `[DS-10]`), each with documented rationale per `[DS-5]`. An aesthetics document that defines how the product looks without analyzing how users think about and navigate it is incomplete — visual identity without interaction design produces interfaces that are styled but not usable.
 - `[XC-30]` WHEN design builds a plan, it SHALL identify foundational knowledge relevant to each role's specific task — algorithms, design patterns, established methodologies, domain-specific best practices — and inject it into the role's context field. Workers receive foundational knowledge through the plan so they can apply proven approaches rather than re-derive solutions. This complements `[RC-4]` (prior art obligation) at the execution level: research finds existing solutions for the goal, design distributes relevant knowledge to each role for its specific task.
 
-### 3.9 Project Command Surface
+### 3.10 Project Command Surface
 
 Common operations (test, build, lint, format, check) are invoked across skills, workers, and human sessions. Without a single discoverable surface, commands scatter — leading to inconsistency, fragile references, and wasted discovery effort.
 
@@ -453,7 +494,7 @@ Common operations (test, build, lint, format, check) are invoked across skills, 
 - `[XC-33]` Workers and skills SHALL invoke operations through the command surface when an entry exists, rather than constructing raw commands. This ensures consistency — the same operation runs the same way regardless of who invokes it.
 - The command surface tool (justfile, Makefile, npm scripts, etc.) is an implementation choice recorded in conventions per `[XC-24]`. Behavioral contract: one discoverable artifact maps names to operations; all participants use it.
 
-### 3.10 Version Control Contract
+### 3.11 Version Control Contract
 
 The project SHALL be under version control. Each skill run produces a discrete unit of change — version control captures that unit as a reviewable, revertable snapshot.
 
@@ -649,14 +690,14 @@ Lifecycle contracts in §6.1–6.5 apply equally to specs created for products t
 
 #### Product Infrastructure Propagation
 
-The system creates some artifacts operationally — conventions (§3.6) and aesthetics (§3.8) are produced by the design skill's workflow and exist for every project the system works on. These do not need to be authored into the product spec because the system creates and maintains them.
+The system creates some artifacts operationally — conventions (§3.6), environment (§3.7), and aesthetics (§3.9) are produced by the design skill's workflow and exist for every project the system works on. These do not need to be authored into the product spec because the system creates and maintains them.
 
 Other infrastructure concerns only exist in a product if design explicitly authors them as behavioral contracts. These are design-time decisions — the system's skills do not create them automatically.
 
-- `[SL-47]` WHEN design authors a product spec, it SHALL evaluate every cross-cutting and information exchange contract in this spec (§3, §7) for product applicability. A contract is product-applicable when it describes a quality the product itself needs to exhibit — independent of whether the multi-agent system is involved. Design SHALL author product-appropriate contracts for each applicable concern, adapted to the product's domain. Contracts governing the system's internal orchestration (lead boundaries, agent spawning, worker dispatch, plan structure, dependency ordering, failure cascading, memory accumulation, reflection production, archive lifecycle, spec ownership, foundational knowledge selection, context economy, model selection) are system-internal and do not propagate. Contracts that the system already creates operationally (conventions, aesthetics) do not need product spec entries — they exist as operational artifacts. Everything else is a design-time decision that must be explicitly authored or it will not exist in the product.
+- `[SL-47]` WHEN design authors a product spec, it SHALL evaluate every cross-cutting and information exchange contract in this spec (§3, §7) for product applicability. A contract is product-applicable when it describes a quality the product itself needs to exhibit — independent of whether the multi-agent system is involved. Design SHALL author product-appropriate contracts for each applicable concern, adapted to the product's domain. Contracts governing the system's internal orchestration (lead boundaries, agent spawning, worker dispatch, plan structure, dependency ordering, failure cascading, memory accumulation, reflection production, archive lifecycle, spec ownership, foundational knowledge selection, context economy, model selection) are system-internal and do not propagate. Contracts that the system already creates operationally (conventions, environment, aesthetics) do not need product spec entries — they exist as operational artifacts. Everything else is a design-time decision that must be explicitly authored or it will not exist in the product.
 - `[SL-48]` At minimum, design SHALL author product contracts for these infrastructure concerns unless the product's nature makes them inapplicable:
-  - **Version control** (§3.10): tracked changes, clean working tree discipline, committed state at boundaries.
-  - **Command surface** (§3.9): discoverable, declarative surface for repeatable operations.
+  - **Version control** (§3.11): tracked changes, clean working tree discipline, committed state at boundaries.
+  - **Command surface** (§3.10): discoverable, declarative surface for repeatable operations.
   - **Operation results** (§7.1): uniform success/failure envelopes with machine-readable error codes.
   - **Artifact durability** (§7.2): data integrity patterns appropriate to the product's storage needs.
   - **Creativity/trustworthiness separation** (§7.4): creative outputs pass through validation gates before persistence.
@@ -667,9 +708,10 @@ Other infrastructure concerns only exist in a product if design explicitly autho
 
 ### 6.7 Authorship Quality
 
-- `[SL-25]` Contract descriptions SHALL be technology-agnostic: no tool names, file paths, command names, or internal API fields. They describe WHAT the system does, not HOW it's currently implemented.
-- `[SL-26]` Contract descriptions SHALL be knowledge-agnostic: they describe required capabilities and outcomes, not specific frameworks, algorithms, or methodologies by name. Naming a framework freezes knowledge that may be superseded. Contracts SHALL specify what the approach must achieve (for example, "surface counter-evidence and latent assumptions") not which framework to use (for example, "apply Pre-mortem analysis"). This ensures each rebuild draws on the best available knowledge at execution time rather than knowledge frozen at authorship time.
+- `[SL-25]` Contract descriptions SHALL be technology-agnostic: no tool names, file paths, command names, internal API fields, tuning constants, scoring parameters, statistical formulas, or numeric thresholds. They describe WHAT the system does, not HOW it's currently implemented. A scoring weight (e.g., "35%"), a threshold (e.g., "1σ"), or a formula (e.g., "log2(x)/log2(n)") is an implementation choice — the contract describes the required outcome (e.g., "select the best candidate"), not the method.
+- `[SL-26]` Contract descriptions SHALL be knowledge-agnostic: they describe required capabilities and outcomes, not specific frameworks, algorithms, methodologies, architectural layer names, design pattern names, or methodology-specific vocabulary by name. Naming a framework freezes knowledge that may be superseded; naming an architectural layer (e.g., "L0", "3NF", "SCD2") presupposes a system structure that constrains reimplementation as effectively as naming a tool. Contracts SHALL specify what the approach must achieve (for example, "surface counter-evidence and latent assumptions", "normalized relational model", "change-tracking") not which framework, pattern, or layer taxonomy to use. This ensures each rebuild draws on the best available knowledge and architectural choices at execution time rather than those frozen at authorship time.
 - Verification commands MAY reference the current implementation — implementation-specific proof of abstract behavior.
+- `[SL-53]` Contract descriptions SHALL be delivery-agnostic: they describe capabilities the user can invoke and outcomes the system produces, not the interface mechanism through which they are delivered. Prescribing "CLI command", "REST endpoint", "library function", "subcommand", or any specific invocation pattern constrains how a capability is exposed without constraining what it does. Contracts SHALL use "WHEN the user requests X" or "WHEN the system is asked to X", not "WHEN the user runs the X command" or "WHEN the X endpoint is called". The delivery mechanism (CLI, API, library, TUI, etc.) belongs in the Implementation Choices section.
 - `[SL-27]` Every contract SHALL pass the portability test: "If the system were reimplemented in a different language/framework, would this description still make sense?"
 - `[SL-28]` Every contract SHALL pass the **freshness test**: "If better approaches, frameworks, or methodologies emerge after this spec was written, would this contract prevent their adoption?" If yes, the contract is over-specified.
 - `[SL-29]` Verification commands that mask failures (always-true fallbacks, exit-code swallowing) are prohibited.
@@ -695,9 +737,13 @@ The spec is a single readable document (not a database or flat list). The spec d
 
 - `[SL-37]` A spec document SHALL pass the **rebuild test**: given only the spec document and no access to any existing implementation, a competent builder (human or LLM) could construct a functionally equivalent system. The resulting system may differ in implementation details but would satisfy every testable contract. If the spec fails this test, it is underspecified.
 - `[SL-38]` A spec document SHALL pass the **recreation test**: the system built from the spec, when asked to produce a spec for a different product, generates a document of equivalent structural quality — same top-down organization, same trigger–obligation contracts, same separation of concerns. If the system cannot recreate spec quality, the spec did not adequately encode its own standards.
-- `[SL-39]` WHEN the system authors a product spec, it SHALL be a single document with contract IDs embedded inline within prose — not a separate tracking artifact. The companion verification registry tracks satisfaction status of those IDs but the document is the authoritative behavioral description.
+- `[SL-39]` WHEN the system authors a product spec, each spec SHALL be a single document with contract IDs embedded inline within prose — not a separate tracking artifact. The companion verification registry tracks satisfaction status of those IDs but the document is the authoritative behavioral description.
 - `[SL-40]` Implementation-specific choices SHALL be called out explicitly in the spec document (for example, "the storage mechanism is an implementation choice") to maintain the boundary between behavioral contracts and implementation decisions.
+- `[SL-51]` WHEN a project contains multiple bounded contexts with independent lifecycles (for example, a data pipeline, a conceptual model, a platform integration layer, and infrastructure tooling), the system SHALL maintain separate spec documents per context. Each spec document SHALL be self-contained with its own contract ID namespace, its own Purpose section, and its own Implementation Choices section. Design scopes each cycle to one or more spec documents — a plan's `contract_ids` reference contracts from the targeted specs. The verification registry tracks satisfaction across all spec documents. The test is: "Could this context be extracted into a separate project without breaking the other specs?" If yes, it deserves its own spec.
+- `[SL-52]` WHEN multiple spec documents exist, design's reconciliation (`[DC-3]`–`[DC-6]`) SHALL operate across all spec documents, not just the one targeted by the current goal. Drift in any spec is drift in the project.
 - `[SL-45]` Spec documents SHALL be optimized for instruction-following density. Context paragraphs frame the concern concisely. Rationale that restates a contract's own trigger–obligation form SHALL be eliminated. Every sentence carries either orienting context for a first-time reader or a testable obligation — not both restated.
+- `[SL-49]` WHEN authoring contracts about interactions with external systems, the system SHALL separate the behavioral requirement (what the system must ensure) from the external system's failure mode (how the external system behaves when the requirement is violated). The contract describes what the system guarantees; the failure mode is context for understanding WHY the contract matters, not part of the obligation itself. Platform-specific failure modes (e.g., "silently strips all lineage", "returns 500 on malformed input") SHALL NOT appear in WHEN/SHALL clauses — they belong in framing prose or the Implementation Choices section.
+- `[SL-50]` WHEN a behavioral outcome can be achieved through multiple algorithms, formulas, or parameter choices, the contract SHALL describe the required outcome without specifying the method. Specific algorithms, formulas, weights, thresholds, and statistical parameters SHALL be listed in an Implementation Choices section of the spec document. The spec document SHALL include an Implementation Choices section that enumerates all such decisions, making the behavioral/implementation boundary explicit and auditable.
 
 **Prohibitions**:
 

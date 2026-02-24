@@ -71,7 +71,7 @@ Goal scoping [DC-1]:
 
 ---
 
-# PHASE 3 — SPEC AUTHORING [DC-2, DC-13, DC-15, SL-12 through SL-40]
+# PHASE 3 — SPEC AUTHORING [DC-2, DC-13, DC-15, SL-12 through SL-53]
 
 Author NEW contracts for behavior not yet implemented. TDD: specs MUST FAIL against current codebase [XC-9].
 
@@ -79,6 +79,7 @@ Per-contract requirements:
 
 - Technology-agnostic description — no tool names, file paths, API fields [SL-12]
 - Knowledge-agnostic — describe outcomes, not named frameworks [SL-32]
+- Delivery-agnostic — describe capabilities, not interface mechanisms (CLI, API, library) [SL-53]
 - Trigger-obligation form: `WHEN <observable trigger>, system SHALL <observable outcome>` [SL-18]
 - Stable ID assigned at authorship — never changes [SL-7]
 - Every SHALL/MUST obligation gets an ID [SL-40]
