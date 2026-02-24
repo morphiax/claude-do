@@ -1,339 +1,254 @@
 ---
 name: reflect
-description: "Honest self-review of the last skill run using structured adversarial thinking. Fixes artifacts in-flight and optionally improves skill instructions."
-argument-hint: "[optional: specific focus] [fix-skill: also propose SKILL.md improvements]"
+description: Adversarial review producing classified observations (product/process, immediate/deferred). Observer only — surfaces findings, does not prescribe action.
+argument-hint: "[--root PATH]"
+context: fork
+agent: general-purpose
+allowed-tools: Read,Glob,Grep,Bash,Task,mcp__sequential-thinking__sequentialthinking
+model: claude-opus-4-6
+satisfies:
+  [
+    FC-1,
+    FC-2,
+    FC-3,
+    FC-4,
+    FC-5,
+    FC-6,
+    FC-7,
+    FC-8,
+    FC-9,
+    FC-10,
+    FC-11,
+    XC-12,
+    XC-18,
+    XC-23,
+    XC-26,
+    XC-27,
+    XC-28,
+    XC-29,
+    VC-1,
+    VC-2,
+    VC-3,
+    VC-4,
+    VC-5,
+  ]
 ---
 
-# Reflect
+## CLI Setup
 
-Perform an honest, adversarial self-review of the most recent skill run. This skill runs **in the same conversation** as the skill it reviews — you have full context of what happened, what you thought, what you skipped, and what you rationalized.
+Resolve the helper script path at skill start. `scripts/do.py` is a symlink that resolves to `shared/do.py` in the plugin root.
 
-**This skill exists because automated self-assessment produces garbage.** When an LLM fills in reflection templates at the end of a long run, it defaults to self-congratulation ("researchQuality: thorough"). When a human asks "what went wrong?", the same LLM produces rich, specific, actionable critique. This skill replicates the human's adversarial prompt with a structured thinking sequence grounded in established frameworks.
-
-**Do NOT read `lead-protocol-core.md`.** This skill deliberately breaks from the lead protocol. No team setup, no trace emission, no phase announcements. Just thinking and writing.
-
-**Two output modes:**
-- Default: adversarial review + artifact fixes (plan.json, interfaces.json, etc.)
-- With `fix-skill`: also proposes permanent SKILL.md instruction improvements
-
----
-
-## Foundations
-
-This skill's thinking sequence is built on five established frameworks:
-
-| Framework | Source | What it contributes |
-|---|---|---|
-| After Action Review (AAR) | US Army, 1970s | Intended vs actual outcome comparison — forces the gap to be articulated |
-| Backward Chaining | Goal-directed reasoning | Work backwards from ideal to find what steps were needed but skipped |
-| "Could You Be Wrong?" | Hills, 2025 — metacognitive debiasing | Surfaces latent counter-evidence the model has but doesn't volunteer |
-| Pre-mortem | Klein, 2007 — prospective hindsight | Assume failure has already happened — increases risk identification by 30% |
-| Double-loop Learning | Argyris, 1977 | Question the approach itself, not just the execution |
-
----
-
-## Flow
-
-### 1. Context Gathering
-
-Identify what to reflect on. Do this silently — no user output needed. **Anti-stalling: proceed directly from context gathering into Step 2 (sequential-thinking) without intermediate status text. Do NOT output "Now let me..." or "Let me read..." announcements between reading artifacts and starting adversarial thinking — this pattern causes the turn to end before thinking begins.**
-
-1. Check `.design/` for recent artifacts. Determine which skill last ran and what was produced. **Store this skill name** — you will need it in Step 6 for the `--skill` argument:
-   - `research.json` → research skill → `--skill research`
-   - `plan.json` → design or simplify skill → `--skill design` or `--skill simplify`
-   - Worker artifacts, role results → execute skill → `--skill execute`
-2. Read the key output artifact(s) to ground the reflection in what was actually produced.
-3. **Spec awareness**: If `.design/spec.jsonl` exists, read it. Run `python3 $PLAN_CLI spec-run .design/spec.jsonl` to get current pass/fail status of all specs. This informs the adversarial thinking — spec failures are regressions, and behavioral invariants that exist in the system but are NOT covered by any spec entry represent missing durable contracts.
-4. **Parse arguments**: Check if `$ARGUMENTS` contains `fix-skill`. If present, enable the Skill Improvement phase (Step 5). Everything else in `$ARGUMENTS` is the focus scope.
-5. If the user provided a focus argument (excluding `fix-skill`), scope the reflection to that aspect.
-6. If no recent skill artifacts exist, tell the user: "No recent skill output found in `.design/`. Run a skill first, then reflect."
-7. **User input during reflection**: If the user provides observations or feedback during the reflection run (mid-conversation messages), incorporate them as high-priority signal. User observations are the highest-quality input available — they see things the model rationalizes away. Integrate user feedback into the thinking steps and, if relevant, into fix-skill proposals.
-8. **Meta-review awareness**: When reflecting on reflect itself (meta-review), the user's experience of the reflect run IS the primary data. If the user had to intervene, prompt, or express frustration during the reflect run, this is the highest-severity finding regardless of the reflection's content quality.
-
-### 2. Adversarial Thinking
-
-Use `sequential-thinking` (the MCP tool) to work through adversarial steps. **Do not rush. Do not be kind to yourself. The value of this skill is proportional to its honesty.**
-
-**Adaptive depth**: For simple reviews (1-2 roles, no cross-review, clear outcome), use 3 steps: AAR (Step 1) + Could You Be Wrong (Step 3) + Pre-mortem (Step 4). For complex reviews (3+ roles, cross-review occurred, expert artifacts present, or ambiguous outcome), use all 5 steps. Steps 2 (Backward Chaining) and 5 (Double-loop) have diminishing returns on simple reviews but are essential when the approach itself might be wrong.
-
-**Step 1 — After Action Review: Intended vs Actual**
-
-> "What was the ideal outcome for this goal? Describe specifically what a perfect output would look like — what it would contain, what quality level it would hit, what questions it would answer. Now describe what was actually produced. Name the gaps concretely — not 'could be better' but 'missing X, shallow on Y, wrong about Z'."
-
-**Step 2 — Backward Chaining: What steps were needed?**
-
-> "Working backwards from that ideal outcome — what specific actions, investigations, or decisions would have produced it? List them. Now check: which of those did we actually do? Which did we skip, shortcut, or do superficially? For each skipped step, why was it skipped — was it a conscious tradeoff or did we just not think of it?"
-
-**Step 3 — Could You Be Wrong?**
-
-> "Look at what we produced. Where could we be wrong? What assumptions did we make that we didn't verify with evidence? What information did we have access to but didn't use? What counter-evidence or alternative interpretations exist that we didn't consider? What do we claim with high confidence that is actually uncertain?"
-
-This step is the highest-leverage single intervention. Research shows it accesses latent knowledge the model already has but doesn't surface without adversarial prompting (Hills, 2025).
-
-**Step 4 — Pre-mortem: Assume failure**
-
-> "Imagine someone takes this output and acts on it — builds the system, follows the recommendation, uses the design. It fails. What went wrong? What was missing from our output that they needed? What was misleading? What edge case or real-world condition did we not account for? Also consider the user's experience during this run: what was unclear, what required them to intervene or ask for clarification, what output did they have to interpret without enough context? User friction during the run is a pre-mortem signal — if the user had to ask a clarifying question, the skill's output failed to communicate something."
-
-**Step 5 — Double-loop: Was the approach right?**
-
-> "Step back from execution quality. Was the approach itself correct? Should we have used a different skill, scoped differently, asked different questions, or framed the problem differently? If we started completely over with what we know now, what would we do instead? This isn't about doing the same thing better — it's about whether we did the right thing."
-
-**After structural analysis, evaluate instructional quality**: Is the written output (SKILL.md changes, plan.json instructions, expert guidance) clear enough that a new lead would follow it correctly on first read? Ambiguous instructions are gaps, not style issues. Reflect gravitates toward testable/structural issues (CLI flags, file existence) — actively resist this bias by also evaluating clarity, specificity, and potential for misinterpretation.
-
-**Spec coverage analysis** (if spec.jsonl exists): After the structural thinking steps, evaluate spec coverage:
-- **Missing specs**: For each completed role, does the system now have behavioral properties (from role.goal and worker results) that are NOT covered by any spec entry? The behavioral gap is: what would a future developer not know the system guarantees, that they should know? Propose new spec entries via specTightenings.
-- **Spec tightening**: Could any existing spec checks be stricter? If spec-run results show a spec passing with wide margins (e.g., checking `len > 0` when the actual count is always exactly 5), propose a tighter check.
-- **Spec regressions**: Did any specs fail in the spec-run from Step 1? These represent regressions that need immediate attention.
-- **Redundant specs**: Are any specs semantically duplicated or testing the same boundary from different angles?
-Record tightening proposals and missing-spec observations in the synthesis. These feed into the next design cycle's spec authorship step.
-
-**Output format quality**: Evaluate the reviewed skill's user-facing output (conversation markdown shown to the user, not just artifact files). Did the summary directly answer each part of the user's original question? Could the user take action from the summary alone without reading `.design/` artifacts? Was output organized to mirror the user's question structure (e.g., if they asked 3 things, are all 3 clearly addressed)? Was the most important finding (the "headline") immediately visible, not buried in a table? Poor communication of correct findings is a gap — note it in the prose.
-
-### 2.5. Memory Cross-Reference
-
-After adversarial thinking produces findings, cross-reference against `.design/memory.jsonl` to detect recurrence patterns. This step enriches the synthesis without biasing the thinking — memories are consulted AFTER independent analysis, not before.
+Use the Glob tool to find `scripts/do.py` relative to this SKILL.md, then resolve its absolute path:
 
 ```bash
-PLAN_CLI=<resolved path>
-# For each significant finding from Step 2, search memory by keywords:
-python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "{finding summary}" --keywords "{finding keywords}"
+DO=$(python3 -c "import os; print(os.path.realpath('<absolute-path-to-scripts/do.py>'))" )
 ```
 
-For each match:
-- **Recurring pattern**: The same issue was stored as a memory from a prior run → note this in the synthesis. If a SKILL.md fix was applied for it previously (check the memory's content), flag that the fix didn't prevent recurrence — this is high-severity signal.
-- **Already known**: The finding duplicates an existing memory → lower its novelty in the synthesis. Still worth mentioning if it recurred despite being "known."
-- **Genuinely new**: No memory matches → stronger candidate for memory curation after this run.
+All commands: `python3 $DO <domain> <command> --root .do`
 
-**Show user** (if any matches found): "Memory cross-reference: {N} findings match prior learnings. {recurring_count} are recurring patterns."
 
-Skip this step if `.design/memory.jsonl` doesn't exist or if adversarial thinking produced no significant findings.
+# do-reflect
 
-### 3. Synthesis
+Adversarial reviewer. Surface findings; lead and user decide action [FC-9].
 
-After completing sequential-thinking, write the reflection as **free-form prose**. Not bullet points. Not JSON fields. Prose — because the nuance, uncertainty, and connections between observations are the value.
+## CONTEXT ISOLATION [FC-6, FC-7]
 
-The prose should be structured in sections mirroring the thinking steps, but written naturally — as if explaining to a colleague what you'd do differently. Include:
+This skill uses `context: fork` — when invoked, it automatically runs in an isolated subagent [FC-6]. The reviewing agent reads from disk only, not the conversation that produced the artifacts. No manual Task spawning needed.
 
-- **Specific observations** — file names, data sources, concrete gaps. Not "research was shallow" but "we never inspected the live RCI.co.za DOM to verify that the CSS selectors from the existing scraper still work."
-- **Severity signals** — distinguish between minor polish issues and fundamental gaps that would cause downstream failure.
-- **What actually worked** — this isn't only about criticism. Identify what was genuinely good, so future runs preserve it. But be specific — "the codebase analysis was thorough" is useless; "the codebase analyst correctly identified that availability data is scraped but silently dropped at the service worker boundary (CS-001)" is useful.
+**Manual** (user-invoked directly): MAY run in current context via `context: fork` override. Reduced objectivity accepted [FC-7].
 
-### 3.5. Plan Verification (design/simplify output only)
+## PHASE 1 — LOAD [IE-8, IE-9]
 
-**Trigger**: The reviewed skill produced `.design/plan.json` (i.e., skill is design or simplify). **Skip for** execute/research reviews.
-
-Reflect's prose analysis identifies gaps through reasoning. This step verifies them against the codebase — replacing the challenger and scout auxiliaries that execute previously ran.
-
-Spawn a single Task agent:
-```
-Task(subagent_type: "general-purpose", model: "sonnet")
-```
-
-Prompt — **scope the verification to risks identified by thinking steps**, not generic "check everything":
-- "Read `.design/plan.json` and all `.design/expert-*.json` artifacts."
-- "Read actual project files in each role's scope.directories."
-- "**Priority verifications** (from adversarial thinking): {list the specific risks, unverified claims, and CLI signature questions identified in Steps 1-5}. These are the highest-value checks — verify them first."
-- "**Standard cross-reference**: Do field names in the plan schema match actual data source field names? Do referenced files contain expected data (not empty)? Do AC check commands reference valid paths and tools? Do interface contracts match actual code signatures?"
-- "Save findings to `.design/plan-verification.json`: `{\"verified\": [{\"claim\": \"...\", \"source\": \"...\", \"actual\": \"...\", \"match\": true|false}], \"issues\": [{\"severity\": \"blocking|high-risk|low-risk\", \"description\": \"...\", \"affectedRoles\": [...], \"recommendation\": \"...\"}]}`"
-
-Process results: blocking issues feed into Step 4 (Resolution) as mandatory patches. High-risk issues become warnings in the prose. This replaces challenger+scout — one focused agent instead of two, with reflect's full conversation context informing what to verify.
-
-### 4. Resolution — Fix Artifacts
-
-**Trigger**: gapSeverity is "significant" or "fundamental" AND the reviewed skill produced modifiable artifacts (plan.json, interfaces.json, research.json).
-
-**Skip if**: gapSeverity is "minor" — record observations in the reflection prose only. Minor issues don't warrant artifact modification.
-
-**For "moderate" severity**: Before skipping resolution, scan all findings for 30-second fixes (field corrections, designGoal rewording, missing entries, wrong values). Apply these targeted fixes regardless of the overall severity skip. Then skip the remaining non-trivial gaps. The threshold protects against over-engineering, not against leaving known quick fixes on the table.
-
-**Process**:
-
-1. Use `sequential-thinking` to translate each significant gap from the prose into a concrete artifact patch. For each gap, determine:
-   - Which artifact file? (`.design/plan.json`, `.design/interfaces.json`, `.design/research.json`)
-   - What type of change? (add constraint, fix AC check, modify role scope, add field, correct assumption)
-   - What is the exact edit?
-
-2. Present patches to user via `AskUserQuestion`:
-   ```
-   "Reflection found {N} artifact issues to fix. Apply?"
-   Options:
-   - "Apply all" — apply all patches
-   - "Review each" — present each patch individually for approval
-   - "Skip" — record in reflection only, don't modify artifacts
-   ```
-
-3. If approved, apply patches:
-   - For plan.json: use Bash with `python3 -c "import json; ..."` to read, modify, and write back
-   - For other artifacts: same pattern
-   - After modifying plan.json: re-run `python3 $PLAN_CLI finalize .design/plan.json` to ensure integrity
-
-4. **Verify fixes**: After applying any artifact fix that changes a CLI command pattern or interface, run the corrected pattern against a test file to verify it works. Do not deploy untested fixes — structural plausibility is not proof of correctness.
-
-5. Record what was applied in the reflection output under `resolutionsApplied[]`.
-
-**What resolution can do:**
-- Add or modify constraints on roles
-- Correct interface contracts in interfaces.json
-- Add missing fields to schema definitions
-- Fix incorrect format assumptions
-- **Propose spec tightenings or new spec entries**: Record proposals in reflection.jsonl for the next design cycle. Reflect does NOT write to spec.jsonl directly — design is the sole author. Format proposals in the reflection entry's `specTightenings` array: `[{"specId": "...", "currentCheck": "...", "proposedCheck": "...", "reasoning": "..."}]`. For new spec proposals (behavioral gaps), include an EARS description and proposed check command so design can spec-add them in the next cycle.
-
-**What resolution cannot do:**
-- Add or remove entire roles (that's a redesign — suggest re-running `/do:design`)
-- Change the goal
-- Modify files outside `.design/`
-
-### 5. Skill Improvement — Fix Instructions
-
-**Trigger**: `fix-skill` flag present in arguments. **Skip entirely if not present.**
-
-This phase proposes permanent improvements to SKILL.md files so the same class of error is prevented in ALL future runs, not just patched for this project.
-
-**IMPORTANT: Always edit the MARKETPLACE copy of SKILL.md files** at `~/.claude/plugins/marketplaces/do/skills/{skill}/SKILL.md` — NOT the cache copy at `~/.claude/plugins/cache/do/do/*/skills/{skill}/SKILL.md`. The cache is regenerated from the marketplace; edits to cache files will be lost.
-
-**Process**:
-
-1. From the adversarial thinking (Step 2) and resolution (Step 4), identify findings that are **general** — they would prevent the same error class regardless of project, goal, or technology stack. Filter out project-specific findings. Also evaluate each `doNextTime` item from the reflection prose — if an item describes a general process improvement (not project-specific), draft it as a SKILL.md proposal. Do not stop after the first fix; evaluate all candidates up to the 3-fix cap.
-
-   **General examples**: "Design should verify that data files contain actual data, not just check file existence", "Experts should be instructed to verify their claims against actual output, not just code structure"
-
-   **Project-specific examples**: "The RCI scraper uses UpdatePanel postbacks", "The availability.json uses a dict wrapper not an array"
-
-2. For each general finding, use `sequential-thinking` to draft a specific SKILL.md change:
-   - Target file: which SKILL.md? (design, research, execute, reflect, simplify)
-   - Target section: which step or section?
-   - Change type: add instruction, add constraint, add check, strengthen existing instruction
-   - Exact text: the specific addition or modification (keep small — one sentence or one bullet)
-   - Rationale: what class of error this prevents
-
-3. Present proposals to user via `AskUserQuestion`. **Always list the proposal titles in the question text** so the user knows what they're approving before choosing a review strategy:
-   ```
-   "{N} SKILL.md improvements proposed: (1) {title}, (2) {title}, (3) {title}. Apply all?"
-   Options:
-   - "Apply all" — apply all proposals
-   - "Review each" — present each individually with before/after context
-   - "Skip" — record in reflection only
-   ```
-   If "Review each" is selected, present each proposal individually with before/after context and "Apply" / "Skip" options.
-
-4. If approved, apply using Edit tool on the target SKILL.md file.
-
-5. Record all proposals and outcomes in the reflection output under `skillImprovements[]`: `[{"targetSkill": "...", "section": "...", "change": "...", "applied": true|false}]`
-
-**Guardrails for skill improvements:**
-- Only propose **additive** changes (add a check, add a bullet, strengthen a requirement). Never restructure or rewrite sections.
-- Each change must be **small and specific** — one sentence or one bullet point, not paragraphs.
-- The change must prevent a **class** of errors, not a specific instance.
-- Maximum 3 proposals from adversarial thinking per reflect run — focus on the highest-impact ones. User-requested improvements during the run (mid-conversation feedback) are separate and not counted against this cap.
-- Never modify the frontmatter (name, description, argument-hint) — those are interface contracts.
-
-### 6. Save
-
-Write the reflection to `.design/reflection.jsonl` as a single JSONL entry:
-
-```json
-{
-  "reflection": "the free-form prose from Step 3 — this is the PRIMARY field",
-  "gapSeverity": "minor|moderate|significant|fundamental",
-  "approachCorrect": true,
-  "whatWorked": ["1-3 specific things that genuinely worked — extracted from the prose"],
-  "whatFailed": ["1-3 specific gaps or failures — extracted from the prose"],
-  "doNextTime": ["1-3 concrete actions for the next run — extracted from the prose"],
-  "resolutionsApplied": ["description of each artifact fix applied in Step 4, or empty if skipped"],
-  "skillImprovements": [{"targetSkill": "...", "section": "...", "change": "...", "applied": true}]
-}
-```
-
-The `reflection` field is primary — it's the free-form prose. The other arrays are extracted FROM the prose as a lightweight summary.
-
-**Important**: `reflection-add` will reject the entry if `whatFailed` is non-empty but `promptFixes` is empty. For the reflect skill, either include a `promptFixes` array (even if simple — just `{"section":"n/a","problem":"...","idealOutcome":"...","fix":"...","failureClass":"spec-disobey"}`) or leave `whatFailed` empty and put the failure detail in the prose `reflection` field only.
-
-**IMPORTANT**: The `--skill` argument must be the skill being reviewed (identified in Step 1 — e.g., `design`, `execute`, `research`). This reflection is an evaluation OF that skill's run, so the entry must be attributed to it. **Exception**: For meta-reviews (reflect reviewing reflect itself), `--skill reflect` IS correct — the reviewed skill is reflect.
-
-Save via `reflection-add`:
+Deterministic reads. Complete all before analysis.
 
 ```bash
-echo '<reflection JSON>' | python3 $PLAN_CLI reflection-add .design/reflection.jsonl \
-  --skill <reviewed-skill> --goal "<the goal>" --outcome "<completed|partial|failed|aborted>" --goal-achieved <true|false>
+python3 $DO spec list --root .do
+python3 $DO memory search --root .do --keyword "reflect"
+python3 $DO reflection list --root .do --urgency immediate
+python3 $DO trace add --root .do --json '{"event":"reflect_start","skill":"do-reflect"}'
 ```
 
-If the prose is long, write the JSON to a temp file first and pipe it in:
+- Read `.do/plans/current.json` — extract roles, expected_outputs, contract_ids, verification commands
+- Read `.do/conventions.md` (if exists)
+- Read `.do/aesthetics.md` (if exists)
+- Read all `expected_outputs` files from plan roles — build intended-vs-actual map
+- Glob each role's `scope` directories — identify filesystem reality
+
+## PHASE 2 — ADVERSARIAL REVIEW [FC-1, XC-18]
+
+Use `mcp__sequential-thinking__sequentialthinking` for structured multi-step reasoning. Apply best available adversarial frameworks from foundational knowledge — select for effectiveness, not convention [SL-32].
+
+**Mandatory dimensions — all five required:**
+
+### A. Intended vs Actual
+
+- What did each role declare? (expected_outputs, goal, contract_ids)
+- What exists on disk? (glob within declared scope)
+- Per gap: product defect, spec gap, or acceptable deviation?
+
+### B. Skipped Steps
+
+- Enumerate verification commands per role — did they pass?
+- Scope compliance: files created outside declared scope?
+- Unexpected outputs: files not in expected_outputs?
+- Contract coverage: all contract_ids addressed?
+
+### C. Counter-Evidence and Latent Assumptions
+
+- Assumptions embedded in plan structure (role count, scope divisions, dependency ordering)
+- Evidence contradicting the plan's approach
+- What must be true for dependent role work to fail despite own verification passing?
+
+### D. Prospective Failure
+
+- Most likely failure modes in subsequent use
+- Edge cases implementations don't handle
+- Latent defects no verification command catches
+
+### E. Lifecycle Integrity [FC-11]
+
+Verify the execution lifecycle was sound:
+
+1. **Registry health**: Was the spec registry non-empty when the plan referenced contract_ids? Run:
+   ```
+   python3 $DO spec list --root .do
+   ```
+   Cross-reference against plan's contract_ids. WHEN plan references contract_ids but registry is empty or missing referenced IDs: process + immediate observation.
+
+2. **Satisfaction completeness**: Were all completed roles' contract_ids satisfied? Check trace for satisfaction events. WHEN a completed role's contracts were not satisfied: process + immediate observation.
+
+3. **Regression gate non-vacuity**: Did the regression gate test at least one spec? Check trace for preflight results. WHEN regression gate was vacuous (zero specs tested): process + immediate observation.
+
+4. **Coverage gate**: Did execute check which contracts were already satisfied and only work on pending ones? WHEN execute re-satisfied already-satisfied contracts or worked on roles with no pending contracts: process + immediate observation.
+
+**Aesthetics review** [FC-10]: If aesthetics doc exists and artifacts include user-facing interfaces — evaluate against aesthetic identity. Vague or gap-revealing aesthetics doc -> propose aesthetics updates as product+deferred observations.
+
+## PHASE 3 — OBSERVATIONS [FC-2, FC-3, FC-8, FC-10]
+
+Every observation requires both classifications [XC-26]:
+
+| Lens    | Scope                                           |
+| ------- | ----------------------------------------------- |
+| product | Is the artifact correct? Output matches intent? |
+| process | Was the method sound? Approach improvable?      |
+
+| Urgency   | Action                             | Consumer            |
+| --------- | ---------------------------------- | ------------------- |
+| immediate | Evaluate before proceeding         | Lead/user           |
+| deferred  | Accumulates for future improvement | Design (next cycle) |
+
+**Severity**: critical | high | medium | low
+
+### Product gaps [FC-2] — lens:product, urgency:immediate
+
+- File path + line range
+- Current content (verbatim)
+- Proposed change (exact replacement)
+- Rationale
+
+### Spec gaps [FC-3] — lens:product, urgency:deferred
+
+- Which contract ID is underspecified or missing
+- Unaddressed observable behavior
+- Proposed tightening in trigger-obligation form
+- Reflect does NOT write specs [FC-5]
+
+### Aesthetics gaps [FC-10] — lens:product, urgency:deferred
+
+- Aesthetic gap revealed by artifacts
+- Proposed addition/change to aesthetics doc
+
+### Process weaknesses [FC-8] — lens:process, urgency:immediate|deferred
+
+- Missing/weak step with evidence from this run
+- Pattern or recurrence indicator
+- Concrete improvement proposal
+
+## PHASE 4 — VALIDATE OBSERVATIONS [XC-26]
+
+Before persisting, every observation must have:
+
+- `lens` (product|process)
+- `urgency` (immediate|deferred)
+- `severity` (critical|high|medium|low)
+- `evidence` — specific file paths, line numbers, command outputs (not assertions)
+- `proposal` — actionable, not vague
+- If `failures` non-empty -> `fix_proposals` must be non-empty [XC-12]
+
+Discard vague entries without actionable fixes. Quality over volume.
+
+## PHASE 5 — PERSIST [FC-4, IE-8, IE-9]
 
 ```bash
-python3 $PLAN_CLI reflection-add .design/reflection.jsonl \
-  --skill <reviewed-skill> --goal "<goal>" --outcome "<outcome>" --goal-achieved <true|false> < /tmp/reflect-eval.json
+# Each observation -> structured reflection entry
+python3 $DO reflection add --root .do --json '{
+  "type": "product_gap|spec_gap|aesthetics_gap|process_weakness|lifecycle_integrity",
+  "outcome": "<one-sentence summary>",
+  "lens": "product|process",
+  "urgency": "immediate|deferred",
+  "severity": "critical|high|medium|low",
+  "failures": ["<specific finding with evidence>"],
+  "fix_proposals": ["<concrete actionable proposal>"]
+}'
+
+# Trace completion
+python3 $DO trace add --root .do --json '{
+  "event": "reflect_complete",
+  "skill": "do-reflect",
+  "observations": <count>,
+  "immediate": <count>,
+  "deferred": <count>
+}'
+
+# Memory: persist high-value learnings (importance >= 6)
+python3 $DO memory add --root .do --json '{
+  "category": "reflect_finding",
+  "keywords": ["<topic>"],
+  "content": "<learning worth carrying forward>",
+  "source": "do-reflect",
+  "importance": 7
+}'
 ```
 
-### 7. Display
+## PHASE 6 — SURFACE IMMEDIATE FINDINGS [XC-27]
 
-Show the user a concise summary:
+Report to lead after persisting:
 
 ```
-Reflection: {reviewed-skill} — {goal}
+REFLECT COMPLETE
 
-Gap severity: {minor|moderate|significant|fundamental}
-Approach correct: {yes|no — one sentence why}
+Immediate findings requiring evaluation:
+  [PRODUCT/severity] <finding> — <file:line> — Proposed: <patch summary>
+  [PROCESS/severity] <finding> — <evidence> — Proposed: <improvement>
+  [LIFECYCLE/severity] <finding> — <evidence> — Proposed: <fix>
 
-What worked:
-- {specific strength — name concrete files, patterns, or decisions}
+Deferred findings (stored, no action required now):
+  <N> spec gaps [XC-28]
+  <N> aesthetics gaps
+  <N> process observations [XC-29]
 
-Top omissions:
-- {specific gap — name what was missing and why it matters}
-
-{if resolutions applied:}
-Resolutions:
-| Artifact | Change | Impact |
-|----------|--------|--------|
-| {file} | {what changed} | {why it matters} |
-
-{if skill improvements applied:}
-Skill improvements:
-| Skill | Section | Change |
-|-------|---------|--------|
-| {skill} | {section} | {one-line description} |
-
-{else: "Resolutions: {N applied | skipped | n/a (minor severity)}"}
-{else: "Skill improvements: {N applied, M skipped | not requested (no fix-skill flag)}"}
-
-Full reflection saved to .design/reflection.jsonl
+Next: lead presents immediate findings to user per [LC-3].
+Unresolved immediate findings block transition to refine [LC-4].
 ```
 
-Do NOT display the full prose — the user can read the file if they want depth. The summary should be scannable in 10 seconds.
+## VERSION CONTROL [VC-2, VC-3, VC-5]
 
----
+Commit all changes produced by this reflect run. Working tree must be clean afterward.
 
-## Anti-patterns
+1. Check working tree status: `git status --porcelain`
+2. Resolve untracked files:
+   - Reflection entries, trace entries, `.do/` state files → `git add`
+   - Generated/environment-specific files → add to `.gitignore`, then `git add .gitignore`
+   - Scratch output that should not persist → delete
+3. Stage all changes: `git add` relevant files
+4. Commit: message summarizing reflect output (observation count, immediate/deferred split)
+5. Verify clean: `git status --porcelain` — must produce no output
 
-These are the failure modes this skill is designed to prevent. If you catch yourself doing any of these, stop and restart that thinking step.
+If no changes were produced [VC-4]: skip commit.
 
-| Anti-pattern | Example | Fix |
-|---|---|---|
-| Vague praise | "The research was thorough and well-structured" | Name what specifically was thorough and what was not |
-| Template-filling | "gapSeverity: minor" without justification | The severity must follow from the prose, not precede it |
-| Symmetric critique | Equal weight to real gaps and nitpicks | Distinguish fundamental gaps from polish issues |
-| Deflection | "RCI's site is slow so we couldn't..." | Focus on what YOU could have done differently, not external constraints |
-| Future-hedging | "We could investigate X in a future iteration" | Say whether X should have been done NOW and why it wasn't |
-| Process over substance | "We followed all 6 steps of the research flow" | Following the process is not an outcome — what did the process PRODUCE? |
-| Shotgun improvements | Proposing 10 SKILL.md changes from one run | Maximum 3 — pick the highest-impact class of error to prevent |
+## PROHIBITIONS
 
----
-
-## Why Free-form Prose
-
-The previous reflection system used structured JSON fields (`promptFixes` with 5 required sub-fields, `failureClass` from an enumerated list, `acGradients`, etc.). This produced:
-
-1. **Empty or generic fields** — `whatFailed: []` on "successful" runs, missing the gaps that manual review would catch
-2. **Template-optimized answers** — fields like `sectionCoverage: "complete"` that have obvious "right" answers
-3. **Lost nuance** — the connections between observations, the severity gradients, the "I knew this but didn't surface it" admissions — these don't fit in structured fields
-
-Free-form prose preserves the richness of honest self-assessment. The lightweight `evaluation` summary provides machine-readable hooks for downstream tools without constraining the thinking.
-
----
-
-## Script Setup
-
-```bash
-PLAN_CLI=$(find "$(dirname "$(dirname "$(cd "$(dirname "$0")" && pwd)")")" -name plan.py -path "*/shared/*" | head -1)
-```
-
-If `$PLAN_CLI` is not found, write directly to `.design/reflection.jsonl` — the reflection content matters more than the tooling.
+- MUST NOT modify behavioral specs [FC-5]
+- MUST NOT override lead judgment [FC-9] — observations, not directives
+- MUST NOT produce observations without lens + urgency [XC-26]
+- MUST NOT write reflections with non-empty failures and empty fix_proposals [XC-12]

@@ -1,442 +1,321 @@
 ---
 name: design
-description: "Decompose a goal into a structured plan."
-argument-hint: "<goal description>"
+description: Reconcile spec with product, decompose a goal into expert-analyzed role-based execution plan, author behavioral contracts.
+argument-hint: "[goal] — omit to run full reconciliation"
+allowed-tools: Read,Write,Edit,Glob,Grep,Bash,Task,AskUserQuestion,mcp__sequential-thinking__sequentialthinking
+model: claude-opus-4-6
+satisfies:
+  [
+    VC-1,
+    VC-2,
+    VC-3,
+    VC-4,
+    VC-5,
+  ]
 ---
 
-# Design
+## CLI Setup
 
-Decompose a goal into `.design/plan.json` with role briefs — goal-directed scopes for specialist workers. **This skill only designs — it does NOT execute.**
+Resolve the helper script path at skill start. `scripts/do.py` is a symlink that resolves to `shared/do.py` in the plugin root.
 
-Before starting the Flow, Read `lead-protocol-core.md`. It defines the canonical lead protocol (boundaries, trace emission, memory injection, phase announcements). Design uses standalone Task() subagents — no team setup required. Task() blocks until done, so no polling logic is needed. Substitute: {skill}=design, {agents}=experts.
+Use the Glob tool to find `scripts/do.py` relative to this SKILL.md, then resolve its absolute path:
 
----
-
-## Clarification Protocol
-
-| ASK (`AskUserQuestion`) when | SKIP when |
-|---|---|
-| Multiple valid interpretations exist | Codebase contains the answer |
-| Scope is underspecified | Standard practice is clear |
-| Technology choice is open and impacts approach | Any reasonable choice works |
-| Data source is ambiguous | User preference doesn't change approach |
-
----
-
-## Flow
-
-### 1. Pre-flight
-
-1. **Lifecycle context**: Run Lifecycle Context protocol (see lead-protocol-core.md). This runs `python3 $PLAN_CLI plan-health-summary .design` and emits the skill-start trace.
-2. **Spec check**: If `.design/spec.jsonl` exists, run `python3 $PLAN_CLI spec-search .design/spec.jsonl` and report the entry count and category breakdown to the user. Do NOT load all entries here — spec entries are injected per-role during Step 5 role brief authorship.
-3. **Check for ambiguity**: Use `sequential-thinking` to assess: "Is this goal genuinely unambiguous? What assumptions am I making about scope? Does the goal's wording imply something different from what I'm planning to build? Would a reasonable person read this goal and expect a different output?" If any ambiguity surfaces, use `AskUserQuestion` before proceeding. **Scope change gate**: If during design you discover existing solutions that would change what gets built (e.g., "build X" becomes "import from existing X"), use `AskUserQuestion` before proceeding. The user asked for X — building Y instead requires explicit consent, even if Y is more efficient.
-4. If >5 roles likely needed, suggest phases. Design only phase 1.
-5. Check existing plan: `python3 $PLAN_CLI status .design/plan.json`. If `ok` and `isResume`: ask user "Existing plan has {counts} roles. Overwrite?" If declined, stop.
-6. Archive stale artifacts: `python3 $PLAN_CLI archive .design`
-7. **Brownfield characterization**: If `.design/spec.jsonl` does NOT exist AND the project has existing code (detected by: `context.testCommand` or `context.buildCommand` exists from Step 1.1, OR common project markers found via `ls package.json pyproject.toml Cargo.toml go.mod Makefile CMakeLists.txt pom.xml build.gradle 2>/dev/null`), bootstrap a behavioral baseline:
-   1. **Announce**: "Brownfield detected: no spec.jsonl found. Bootstrapping behavioral baseline from existing codebase." Use `AskUserQuestion` with options "Continue" (default) and "Skip — this is a new project" to let the user opt out. If skipped, proceed to Step 2.
-   2. **Spawn characterization Task**: `Task(subagent_type: "general-purpose", model: "sonnet")` with prompt:
-      - "You are a characterization testing agent. Your job is to discover existing behavioral contracts in this codebase and generate spec candidates."
-      - "Read project metadata (package.json, pyproject.toml, CLAUDE.md, README, Makefile, etc.) to discover test commands, build commands, and entry points."
-      - "Identify key behavioral boundaries: API endpoints, CLI commands, critical functions with existing tests, build targets."
-      - "Run: `python3 {PLAN_CLI_PATH} spec-extract {discovered_test_commands}` to generate candidates in `.design/spec-candidates.json`."
-      - "Curate candidates: for each candidate, apply the 5 spec quality gates (behavioral, durable, not role-setup-specific, not duplicated, importance >= 5). Promote worthy candidates via `python3 {PLAN_CLI_PATH} spec-add .design/spec.jsonl --ears '...' --description '...' --check '...' --category '...' --importance N`."
-      - "Return summary: `{extracted: N, promoted: N, categories: [...]}`."
-   3. **Validation**: Run `python3 $PLAN_CLI spec-run .design/spec.jsonl`. All specs must pass (they describe existing behavior). If any fail, remove the failing entries — they were incorrectly characterized.
-   4. **Report**: "Brownfield baseline: {N} behavioral specs bootstrapped from existing codebase ({categories}). All passing."
-
-### 2. Lead Research
-
-The lead directly assesses the goal to determine needed perspectives.
-
-1. Read the goal. Scan project metadata (CLAUDE.md, package.json, README) via Bash to understand stack.
-2. Decide what expert perspectives would help.
-3. Assess complexity tier (drives role count and expert depth):
-
-| Tier | Roles |
-|---|---|
-| Trivial (1-2 roles, obvious approach) | 1-2 |
-| Standard (clear domain) | 2-4 |
-| Complex (cross-cutting concerns) | 4-6 |
-| High-stakes (production, security, data) | 3-8 |
-
-4. Select auxiliary roles. For all tiers: integration-verifier and memory-curator. No pre-execution auxiliaries — `/do:reflect` handles plan review and artifact fixes between design and execute.
-5. **Announce to user**: Display planned team composition, complexity tier, and auxiliaries: "Design: {complexity tier}, spawning {N} experts ({names}). Auxiliaries: {list}."
-
-**Expert Selection**
-
-Analyze the goal type and spawn appropriate experts:
-
-**Implementation goals** (build/add/create/implement):
-- **architect** — system design, patterns, trade-offs
-- **researcher** — prior art, libraries, best practices
-- **domain specialists** — security, performance, UX, data, etc.
-
-**Meta goals** (improve this plugin, modify SKILL.md, refactor plan.py):
-- **prompt-engineer** — for skill improvements (analyzes SKILL.md structure, protocol gaps)
-- **maintainer** — for codebase refactoring (analyzes current architecture, proposes improvements)
-- **domain specialist** — if goal targets specific domain (e.g., 'improve memory search' → information-retrieval specialist)
-
-**Research/analysis goals** (analyze/audit/document):
-- **researcher** — investigates the area being analyzed
-- **documenter** — if output is documentation
-- **domain specialist** — for domain-specific analysis (security audit → security specialist)
-
-**For complex/high-stakes goals with >=3 experts**: Choose at least 2 experts with contrasting priorities (e.g., performance vs maintainability, security vs usability) to enable productive debate.
-
-**For trivial goals** (1-2 roles, single obvious approach): skip experts. Write the plan directly. Skip to Step 5.
-
-**When uncertain about goal type**: Ask the user to clarify intent before spawning experts.
-
-### 3. Spawn Experts
-
-Spawn experts as parallel standalone Task() subagents.
-
-1. **Memory injection**: Run `python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "{goal}" --stack "{stack}"`. If `ok: false` or no memories → proceed without injection. Otherwise inject top 3-5 into expert prompts. **Show user**: "Memory: injecting {count} past learnings — {keyword summaries}."
-2. **Spawn all experts in the same response** (parallel). Use `Task(subagent_type: "general-purpose", model: "sonnet")` for each — standalone Task calls only, no team or name parameters. Task() returns their result directly when done — no liveness tracking needed.
-   - Before each Task call: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event spawn --skill design --agent "{expert-name}" --payload '{"model":"sonnet","memoriesInjected":N}' || true`
-   - Write prompts appropriate to the goal and each expert's focus area. Ask them to score relevant dimensions and trace scenarios.
-   - **Behavioral traits**: Include behavioral instructions — tell experts HOW to think, not WHO to be. Examples: "Question assumptions that feel obvious", "Reject solutions that add complexity without clear benefit", "Focus on failure modes before success paths", "Assume prior art exists — search before inventing." Tailor traits to the expert's focus (e.g., architect: "Prefer composable patterns over monolithic solutions"; security specialist: "Assume every input is hostile until validated").
-   - **Measurable estimates**: Instruct experts: "Base verification properties and estimates on actual code metrics (file counts, line counts, test coverage, dependency depth) where possible. Read codebase samples to ground estimates. Avoid theoretical predictions — anchor to observable reality."
-   - **Verify claims against reality**: Instruct experts: "When claiming existing code/data/infrastructure works, verify by checking actual outputs — not just code structure. Read data files, run scripts, inspect results. A scraper that exists in code but produces empty output is not 'fully functional'. Report what you verified vs what you inferred."
-   - **Verify external systems when accessible**: Instruct experts: "When the goal involves integrating with an external system (website, API, service) and the system is accessible, use WebFetch or WebSearch to verify assumptions about the live system — don't rely solely on existing code that may be stale. At minimum, fetch public pages (login pages, docs, status endpoints) to confirm URLs, form fields, and page structure. Report discrepancies between existing code assumptions and live observations."
-   - Every expert prompt MUST end with: "In your findings JSON, include a `verificationProperties` section: an array of properties that should hold regardless of implementation (behavioral invariants, boundary conditions, cross-role contracts). Format: `[{\"property\": \"...\", \"category\": \"invariant|boundary|integration\", \"testableVia\": \"how to test this with concrete commands/endpoints\"}]`. Provide concrete, externally observable properties that can be tested without reading source code. When suggesting testableVia commands, avoid anti-patterns: grep-only checks (verifies text exists, not that feature works), `test -f` as sole check (file exists but may contain errors), `wc -l` counts (size not correctness), `|| echo` or `|| true` fallbacks (always exits 0), pipe chains without exit-code handling (may mask failures)."
-   - **High-leverage content drafting**: When an expert's domain includes template text, example content, or canonical guidance that workers will copy verbatim into the codebase, instruct the expert to draft that content in their findings. Examples: EARS notation examples for an AC authorship expert, API schema examples for an architect, error message templates for a UX specialist. Workers focused on file editing should not have to invent canonical examples — experts with domain context produce better ones.
-   - Instruct: "Save your complete findings to `.design/expert-{name}.json` as structured JSON."
-   - Instruct: "Return a one-paragraph summary when done."
-3. After all Tasks return, verify artifacts exist: `ls .design/expert-{name}.json` for each expert. If any is missing but Task returned output, write the output to the missing artifact file. If Task errored, spawn a replacement Task() with the same prompt (max 1 retry per expert).
-
-### 4. Interface Negotiation & Cross-Review
-
-Expert coordination prevents **integration failures** (domains don't fit together) and **convergence failures** (experts reach incompatible conclusions). Assess which phases apply per the decision matrix, then execute them.
-
-**CRITICAL ENFORCEMENT**: The lead MUST NOT skip cross-review when the decision matrix mandates a phase. Cross-review uses follow-up Task() calls — lead reads expert artifacts after all initial Task() calls complete, then spawns targeted Task() calls to perform negotiation. Max 2 rounds = max 2 follow-up Task() calls per conflict. Skipping cross-review when the decision matrix says a phase is mandatory is a protocol violation.
-
-| Phase | Trigger | Purpose |
-|---|---|---|
-| **A: Interface negotiation** | >=2 experts whose roles will share data/APIs/file boundaries | Producer-consumer pairs agree on shared interface contracts |
-| **B: Perspective reconciliation** | >=2 experts analyzed same domain from different angles, OR >=3 experts in complex/high-stakes tier | Resolve conflicting recommendations about the same thing |
-| **C: Cross-domain challenge** | Complex/high-stakes tier with >=3 experts | Catch cross-domain assumptions neither A nor B would surface |
-
-**Decision matrix**: If condition matches → phase is **mandatory**. If <2 experts or trivial tier → skip all phases. **Announce to user** which phases will run: "Cross-review: running {phases} — {brief reason}."
-
-#### Phase Execution Pattern
-
-All phases follow: **maximum 2 rounds** of negotiation per conflict. If no convergence after 2 rounds, lead decides and documents reasoning. **When resolving conflicts**, use `sequential-thinking` to weigh each position: "What evidence supports each side? What would failure look like if I choose wrong? Is there a synthesis that preserves both positions' strengths?"
-
-**Phase A steps**:
-1. Lead reads all expert artifacts from `.design/expert-*.json` files
-2. Lead identifies domain boundaries (API shapes, schemas, file formats, shared state)
-3. Lead drafts consumer-driven contracts: `{boundary, producer, consumer, contract}` (use format: `Interface: {name}, Producer: {role}, Consumer: {role}, Contract: {concrete spec}`)
-4. For each contract requiring input, spawn a follow-up `Task(subagent_type: "general-purpose", model: "sonnet")` with the relevant expert artifact(s) as context: "Read these expert findings. Does this interface contract work for your domain? Flag constraints: {contract}. Return: (a) approved/rejected, (b) constraints, (c) proposed amendments."
-5. Collect Task() results, negotiate (max 2 rounds of follow-up Tasks)
-6. Save to `.design/interfaces.json` as binding constraints
-
-**Phase B steps**:
-1. Lead reads all expert artifacts and identifies overlapping analysis (>=2 experts made recommendations about same thing)
-2. For each conflict, spawn a follow-up `Task(subagent_type: "general-purpose", model: "sonnet")` with both expert artifacts as context: "Read these two expert analyses. They differ on {topic}: {positionA} vs {positionB}. Return: (a) agreements, (b) disagreements + which is better supported by evidence, (c) synthesis proposal."
-3. Collect Task() results, negotiate synthesis (max 2 rounds of follow-up Tasks)
-4. Lead decides if no convergence, documents trade-off
-
-**Phase C steps**:
-1. Lead reads all expert artifacts
-2. For each expert, spawn a follow-up `Task(subagent_type: "general-purpose", model: "sonnet")` with all OTHER experts' artifacts as context: "Read these expert analyses. Challenge any claims that affect your domain. Format: Challenge to {expert}, Claim: '{quote}', Severity: [blocking|important|minor], Evidence: {why problematic}, Alternative: {proposal}. If no challenges: return 'No challenges found'."
-3. Collect challenge Task() results
-4. For each blocking/important challenge, spawn a targeted follow-up Task() for the challenged expert to respond (max 2 rounds per challenge)
-5. Lead resolves conflicts, updates `.design/interfaces.json` if contracts changed
-
-**Checkpoint**: Save `.design/cross-review.json` with audit trail: `{phasesRun: ["A"|"B"|"C"], interfaces: {count, rounds}, reconciliations: {count, rounds}, challenges: {sent, resolved}, skippedPhases: [{phase, reason}]}`. If no phases applicable, save with `phasesRun: []` and skip reasons.
-
-### 5. Synthesize into Role Briefs
-
-**Announce to user**: "Synthesizing expert findings into role briefs."
-
-1. Collect all expert findings from `.design/expert-*.json` files via Bash (`python3 -c "import json; ..."`).
-2. **Evaluate expert claims**: Use `sequential-thinking` before writing role briefs. Run through these three adversarial checkpoints in a single thinking sequence:
-   - **Could you be wrong?** "What assumptions from expert findings did we NOT verify with direct evidence? What information did we have access to (live systems, data files, actual outputs) but didn't check? What do we claim with high confidence that is actually uncertain?"
-   - **Pre-mortem** "A worker takes this plan, builds it, and it fails. What was missing from our expert findings that they needed? What was misleading? What real-world condition (stale URLs, changed APIs, missing data) did we not account for?"
-   - **Backward chaining** "What would the ideal plan contain for a worker to succeed on the first attempt? Do we have verified URLs, confirmed selectors, tested endpoints? What specific investigations would have produced that ideal — and which did we skip?"
-   If any checkpoint surfaces a concrete gap (not a hypothetical), address it before writing role briefs: fetch the URL, check the file, verify the endpoint. A 5-second WebFetch now prevents a failed execute run later.
-3. **Resolve conflicts from cross-review** (if debate occurred): For each challenge, evaluate trade-offs and decide. Document resolution in plan.json under `designDecisions[]` (schema: {conflict, experts, decision, reasoning}). **Show user each decision**: "Decision: {conflict} → {chosen approach} ({one-line reasoning})."
-3. **Incorporate interface contracts**: If `.design/interfaces.json` was produced in Step 4, add each interface as a constraint on the relevant producer and consumer roles. Interface contracts are binding — workers must implement the agreed interface shape.
-4. Identify the specialist roles needed to execute this goal:
-   - Each role scopes a **coherent problem domain** for one worker
-   - If a role would cross two unrelated domains, split into two roles
-   - **Shared file check**: If a role modifies a file that exists identically in multiple directories (e.g., shared protocol files, copied configs), the plan MUST scope ALL copies for update — either in the same role or in a dependent role. Run `find` or `ls` to detect duplicates before finalizing scope.
-   - **Type/interface ownership**: When multiple roles produce or consume the same data contract (interface, type, schema), designate ONE role as the canonical owner of the definition. Other roles must import from the canonical source, not redefine it. Flag if the same interface already exists in multiple files — add a constraint for one role to consolidate.
-   - Workers decide HOW to implement — briefs define WHAT and WHY
-5. **Spec injection per role**: If `.design/spec.jsonl` exists, for each role run: `python3 $PLAN_CLI spec-search .design/spec.jsonl --goal "{role goal}" --keywords "{role name} {scope directories joined by space}"`. Take the top 5 returned entries and inject each as a role constraint with the prefix: `"Spec invariant — run this check before reporting done (you are responsible for implementing this behavior): check='{check}', description='{ears}', spec ID='{id}'"`. This gives the worker an executable verification target. Spec-derived constraints are invariants — workers must not change system behavior that a spec entry describes, even if their role brief does not explicitly prohibit the change. If spec.jsonl does not exist or spec-search returns zero entries, proceed without injection.
-6. Write `.design/plan.json` with role briefs (see schema below).
-7. For each role, include `expertContext[]` referencing specific expert artifacts and the sections relevant to that role. **Do not lossy-compress expert findings into terse fields** — reference the full artifacts.
-8. Write `verificationChecks` per role — ephemeral, role-scoped build/test/integration checks that are NOT behavioral specs. These verify the role's build environment, integration, and basic completion. **Format**: `[{"label": "...", "check": "..."}]`. Every check MUST have a concrete, independently runnable shell command. Apply all check command authoring rules (no f-strings, fail-fast, template library) to verificationChecks.
-
-   **Data-dependent roles**: For roles that import, serve, or display data, at least one verificationCheck MUST verify that data actually exists and is correct — not just that the response shape is valid.
-
-   **External integration roles**: For roles that connect to external systems, at least one verificationCheck MUST test actual connectivity or output — not just compilation.
-
-   **Learn from past spec observations**: If `plan-health-summary` returned `specObservations` from recent execute runs, review them before writing checks. Each observation shows a spec check that was too loose or broken — use the proposed fix as a template for tighter checks.
-
-   **Check command authoring rules** (apply when writing `check` fields in verificationChecks):
-   - **Ban f-strings in inline Python**: `python3 -c "..."` check commands must NOT use f-strings — nested quotes and backslash escapes inside `"..."` cause `SyntaxError`. Use `.format()` or `%` formatting instead, or move complex logic to a script file.
-   - **Prefer script files for complex checks**: When a check requires >1 logical step, write it to `.design/checks/check_{rolename}.py` (persistent, survives across sessions) instead of inlining with `-c`. **Never use `/tmp/` for check scripts** — `/tmp/` files are ephemeral and will not exist when execute workers run verification. Create `.design/checks/` directory if it doesn't exist.
-   - **Fail-fast required**: Every check must exit non-zero on failure with no fallback (`|| true`, `|| echo`) that masks the result.
-
-   **Check command template library** — use these patterns, not custom one-offs:
-
-   | Purpose | Template |
-   |---|---|
-   | File contains pattern (structural only, not sole check) | `grep -q "pattern" path/to/file` |
-   | Python script parses JSON without error | `python3 -c "import json; json.load(open('file.json'))"` |
-   | Python script validates field (use .format, not f-string) | `python3 -c "import json; d=json.load(open('f.json')); assert d['k']=='v', d['k']"` |
-   | Complex Python check (multi-step) | Write to `.design/checks/check_rolename.py`, then: `python3 .design/checks/check_rolename.py` |
-   | Command exits 0 (build/test) | `bun run build` or `python3 -m pytest tests/` |
-   | Schema field exists and is non-empty | `python3 -c "import json,sys; d=json.load(open('f.json')); sys.exit(0 if d.get('field') else 1)"` |
-   | Count lines/entries in output | `python3 -c "import json; d=json.load(open('f.json')); assert len(d['items'])>=3"` |
-   | Shell script file is executable and exits 0 | `bash path/to/script.sh` |
-
-   **verificationChecks anti-patterns** (NEVER use these as the sole check):
-   - `grep -q "pattern" file` — anti-pattern: verifies text exists, not that feature works
-   - `test -f output.json` — anti-pattern: file exists but may contain errors
-   - `wc -l file` — anti-pattern: verifies size, not correctness
-   - `cmd || echo "fallback"` or `cmd || true` — anti-pattern: always exits 0, masks failures completely
-   - `python3 -c "... or True"` or `assert expr or True` — anti-pattern: Python `or True` always evaluates to True, making the assertion a no-op
-   - `cmd 2>&1 | tail -N` — anti-pattern: pipe may mask exit code unless `set -o pipefail` is used
-   - `! grep -q "removed_thing" file` as sole check — anti-pattern: verifies removal but not that the replacement works
-
-9. **Constraint-to-spec coverage audit**: For each role, verify that every non-trivial constraint is either (a) covered by an injected spec entry from Step 5.5 (which includes an executable check command), or (b) marked `(manual-only)` in the constraint text. Constraints without executable coverage become unverifiable obligations that workers may skip.
-10. Add `auxiliaryRoles[]` (see Auxiliary Roles section).
-10. Write to `.design/plan.json` (do NOT run finalize yet — that happens in Step 6).
-11. **Draft plan review** (complex/high-stakes tier only): Display the draft plan to the user before finalization:
-   ```
-   Draft Plan ({roleCount} roles):
-   - Role 0: {name} — {goal one-line} [{model}]
-   - Role 1: {name} — {goal one-line} [{model}] [after: {dependencies}]
-   ...
-   Design decisions: {count}
-   ```
-   This is non-blocking — continue to finalization without waiting for user response. But you MUST display it before running finalize. If the user objects, adjust before finalizing. For trivial/standard tiers, skip this review.
-
-**Validate verificationChecks (MANDATORY blocking gate)**: Before running finalize, review all `verificationChecks` in plan.json to ensure no anti-patterns are present. Fix any check command that uses `|| true`, f-strings, or `/tmp/` script paths before proceeding. Then run `python3 $PLAN_CLI finalize .design/plan.json` — finalize validates role structure including verificationChecks[] format. If validation errors are found, fix them before proceeding.
-
-### 6. Generate Verification Specs
-
-Verification specs are property-based tests workers must satisfy. They codify expert verificationProperties as executable tests without constraining implementation.
-
-**When to generate**:
-
-| Condition | Required? | Rationale |
-|---|---|---|
-| **4+ roles** | **MANDATORY** | Integration complexity requires property-based validation |
-| **New skill creation** (new SKILL.md files) | **MANDATORY** | End-to-end workflow must be testable |
-| **API integration** (external services, auth, rate limits) | **MANDATORY** | External contracts need verification |
-| **1-3 roles** with simple scope | **OPTIONAL** | Acceptance criteria may suffice |
-| **Docs-only** or **config-only** changes | **OPTIONAL** | Low integration risk |
-| **Sparse verificationProperties** (experts provide <2 properties) | **OPTIONAL** | Insufficient property coverage |
-
-Additional requirements for all cases: expert artifacts contain verificationProperties AND stack supports tests (context.testCommand/buildCommand exists).
-
-**Authorship**: Simple goals (1-3 roles) → lead writes from expert verificationProperties. Complex goals (4+ roles) → spawn spec-writer Task agent with `Task(subagent_type: "general-purpose", model: "sonnet")` that reads expert artifacts + actual codebase, writes specs in `.design/specs/{role-name}.{ext}` using project's test framework or shell scripts, returns created paths.
-
-**Spec generation**:
-1. Read expert verificationProperties from all `.design/expert-*.json` files
-2. For each role, extract relevant properties (filter by scope/goal alignment)
-3. `mkdir -p .design/specs`
-4. Write spec files: native tests (`.design/specs/spec-{role-name}.test.{ext}` using bun test/pytest/jest/cargo test/etc with property-based frameworks like fast-check/hypothesis/proptest) OR shell scripts (`.design/specs/spec-{role-name}.sh` with exit 0 = pass)
-5. For each spec, add to plan.json's `verificationSpecs[]`: `{"role": "{role-name}", "path": ".design/specs/spec-{role}.{ext}", "runCommand": "{e.g., 'bun test .design/specs/spec-api.test.ts'}", "properties": ["brief descriptions"]}`
-
-**Spec content**: Test WHAT (external behavior), not HOW (implementation). Include positive AND negative cases. Use property-based testing where possible. Test cross-role contracts. Specs must be independently runnable.
-
-**Finalization**: `python3 $PLAN_CLI finalize .design/plan.json` validates structure, computes overlaps, computes SHA256 checksums for spec files (tamper detection).
-
-**Security: no secrets in plan artifacts**: Plan.json, expert artifacts, and interface contracts are project files that may be committed. NEVER include plaintext credentials, API keys, tokens, or passwords in any `.design/` artifact. Reference credentials by env var name (e.g., "use RCI_USER from .env") — never by value. If the user provides credentials in the conversation, instruct workers to read them from .env, not from plan.json constraints.
-
-**Role brief principles**:
-- `goal`: Clear statement of what this role must achieve
-- `scope.directories/patterns`: Where in the codebase this role operates (not specific files)
-- `constraints`: Hard rules the worker must follow (spec invariants are injected here as executable constraints)
-- `verificationChecks`: Ephemeral role-scoped build/test/integration checks — NOT behavioral specs
-- `expertContext`: References to expert artifacts with relevance notes
-- `assumptions`: What must be true for the approach to work
-- `rollbackTriggers`: When the worker should stop and report
-- `fallback`: Alternative approach if primary fails (included in initial brief, not hidden until retry)
-- **No `approach` field** — workers read the codebase and decide their own implementation strategy
-
-**Role brief example**:
-```json
-{
-  "name": "api-developer",
-  "goal": "Implement rate limiting for all API routes using token-bucket algorithm",
-  "model": "sonnet",
-  "scope": {
-    "directories": ["src/middleware/", "src/routes/"],
-    "patterns": ["**/*.middleware.*"],
-    "dependencies": []
-  },
-  "expertContext": [
-    {
-      "expert": "architect",
-      "artifact": ".design/expert-architect.json",
-      "relevance": "Middleware chain design, Express router structure"
-    }
-  ],
-  "constraints": [
-    "Use stdlib only, no Redis dependency",
-    "Must not break existing route tests",
-    "Spec invariant — run this check before reporting done (you are responsible for implementing this behavior): check='for i in $(seq 1 11); do curl -s -o /dev/null -w \"%{http_code}\\n\" http://localhost:3000/api/health; done | tail -1 | grep -q 429', description='WHEN 10 requests arrive within 1 second, THE system SHALL return HTTP 429 on the 11th', spec ID='abc-123'"
-  ],
-  "verificationChecks": [
-    { "label": "Build succeeds", "check": "npm run build" },
-    { "label": "Existing tests pass", "check": "npm test" }
-  ],
-  "assumptions": [
-    { "text": "Express middleware pattern used", "severity": "non-blocking" }
-  ],
-  "rollbackTriggers": ["Existing tests fail"],
-  "fallback": "If token-bucket too complex for stdlib, use simple sliding window counter"
-}
-```
-
-### 7. Spec Authorship (TDD for execute)
-
-After writing plan.json and running finalize, author behavioral specs directly into `.design/spec.jsonl`. Specs are the persistent regression contract — they survive archiving and grow across design cycles. Execute's job is to make failing specs pass without regressing passing ones. **Specs are the PRIMARY behavioral artifact** — they are authored directly here, not promoted from verificationChecks.
-
-**Step 1 — Baseline existing specs**: If `.design/spec.jsonl` exists, run `python3 $PLAN_CLI spec-run .design/spec.jsonl`. All existing specs MUST pass — they represent previously-proven behavioral contracts. If any fail, this is a pre-existing regression. **Show user**: "Spec baseline: {passed}/{total} passing." If failures: "WARNING: {failed} existing specs failing — these represent regressions from a previous cycle." Fix or flag to user before proceeding.
-
-**Step 2 — Author new specs per role**: For each role, derive behavioral invariants from: role.goal, expert findings, interface contracts, and design decisions. Write spec entries directly via spec-add. Apply the 5 authorship quality gates at write time:
-
-1. **Behavioral**: The spec describes a WHEN→SHALL system response (trigger → observable behavior), not file existence, pattern matching, or structural form
-2. **Durable**: The behavior should hold for ALL future implementations — if the system were reimplemented from scratch, this property must still hold
-3. **Not role-setup-specific**: The check verifies persistent system behavior, not worker environment configuration
-4. **Not semantically duplicated**: The behavioral boundary is not already covered by an existing spec.jsonl entry (check semantic overlap, not exact text match)
-5. **Importance >= 5**: Core system functions and boundary enforcement score 8-10; secondary behavioral contracts score 5-7; below 5 is not worth persisting
-
-**Exclusion patterns** — automatically skip: build/test runner checks (e.g., `bun run build`, `npm test`), implementation-naming checks (grep for specific function/variable names), documentation consistency checks, line-count or file-size checks, checks that use `|| true` or `|| echo` fallbacks.
-
-**Portability litmus test**: Reject specs that name specific functions, classes, or file paths — specs must describe observable behavior independent of implementation.
-
-**EARS notation for spec authorship**: Specs use EARS (Easy Approach to Requirements Syntax): `"WHEN [trigger condition], THE system SHALL [observable response]"`. Apply EARS to behavioral-invariant and boundary-contract style specs. Each spec's `check` must independently verify the observable response — not that code implementing it exists. Correct examples:
-- EARS: `"WHEN 10 requests arrive within 1 second, THE system SHALL return HTTP 429 on the 11th"` → Check: `for i in $(seq 1 11); do curl -s -o /dev/null -w '%{http_code}\n' http://localhost:3000/api/health; done | tail -1 | grep -q 429`
-- EARS: `"WHEN a required field is missing from POST /users, THE system SHALL return HTTP 400 with an 'errors' field"` → Check: `curl -s -X POST http://localhost:3000/users -H 'Content-Type: application/json' -d '{}' | python3 -c "import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get('errors') else 1)"`
-
-**Tightening from prior runs**: Check `.design/reflection.jsonl` for spec tightening proposals from previous execute or reflect runs. Apply valid tightenings to existing spec entries before authoring new ones.
-
-For each role's behavioral invariants that pass all 5 gates, author via:
 ```bash
-python3 $PLAN_CLI spec-add .design/spec.jsonl \
-  --ears "WHEN [trigger], THE system SHALL [observable response]" \
-  --description "{what this spec verifies}" \
-  --check "{independently runnable shell command}" \
-  --category "behavioral-invariant|boundary-contract" \
-  --source-role "{role.name}" \
-  --importance {score}
+DO=$(python3 -c "import os; print(os.path.realpath('<absolute-path-to-scripts/do.py>'))" )
 ```
 
-**Step 3 — TDD validation**: Run the newly authored specs against the current codebase: `python3 $PLAN_CLI spec-run .design/spec.jsonl --ids "{comma-separated new entry IDs}"`. New specs MUST fail — they describe behavior that execute will implement. If a new spec already passes, it is redundant (the behavior already exists) — remove it from spec.jsonl or lower its importance below 5. **Show user**: "Spec authorship: {authored} new specs authored ({all_failing} failing as expected). Existing: {existing_count} passing."
+All commands: `python3 $DO <domain> <command> --root .do`
 
-**Skip when**: No role goals yield specs that pass all 5 gates (record in reflection: "0 specs authored — {reason}").
 
-### 8. Auxiliary Roles
+# PHASE 1 — LOAD STATE [IE-8, IE-9]
 
-Add auxiliary roles to `auxiliaryRoles[]` in plan.json. For all tiers: integration-verifier and memory-curator. Challenger and scout are NOT included — their functions are absorbed by `/do:reflect`, which runs between design and execute to review artifacts and fix issues with full conversation context.
+Deterministic. Execute ALL before any synthesis.
 
-```json
-[
-  {
-    "name": "integration-verifier",
-    "type": "post-execution",
-    "goal": "Run full test suite. Check cross-role contracts. Run spec-run gate. Test goal end-to-end.",
-    "model": "sonnet",
-    "trigger": "after-all-roles-complete"
-  },
-  {
-    "name": "memory-curator",
-    "type": "post-execution",
-    "goal": "Distill design learnings: expert selection effectiveness, cross-review value, plan structure quality. Apply five quality gates before storing to .design/memory.jsonl.",
-    "model": "haiku",
-    "trigger": "after-all-roles-complete"
-  }
-]
-```
+1. Read `.do/conventions.md` if exists [XC-14]
+2. Read `.do/aesthetics.md` if exists [DS-1]
+3. `python3 $DO spec list --root .do` — current contract statuses
+4. `python3 $DO spec preflight --root .do` — re-verify satisfied contracts; revoke regressions [SL-30]
+5. `python3 $DO spec divergence --root .do --spec-doc spec.md` — detect unregistered/orphaned IDs [SL-29]
+6. `python3 $DO memory search --root .do --keyword <goal-keywords>` — prior learnings [XC-21]
+7. `python3 $DO reflection list --root .do --urgency immediate` — unresolved immediate findings
+8. `python3 $DO reflection list --root .do --lens product --urgency deferred` — pending spec tightenings [XC-28]
+9. `python3 $DO research search --root .do --keyword <goal-keywords>` — prior research [DC-16]
+10. `python3 $DO trace add --root .do --json '{"event":"design_start","goal":"<goal>"}'`
 
-### 9. Complete
-
-1. Validate: `python3 $PLAN_CLI status .design/plan.json`. Stop if `ok: false`.
-2. Summary: `python3 $PLAN_CLI summary .design/plan.json`. Display a rich end-of-run summary:
-
-```
-Design Complete: {goal}
-Result: {roleCount} roles, max depth {maxDepth}
-
-Roles:
-| # | Name | Model | Dependencies | Goal |
-|---|------|-------|-------------|------|
-| 0 | {name} | {model} | — | {goal one-line} |
-| 1 | {name} | {model} | after: {dep} | {goal one-line} |
-
-Design Decisions:
-| Conflict | Decision | Reasoning |
-|----------|----------|-----------|
-| {conflict} | {decision} | {one-line reasoning} |
-
-Expert Highlights:
-- {expert-name}: {key finding one-liner}
-
-Verification Checks:
-| Role | Checks | Key check |
-|------|--------|-----------|
-| {name} | {count} | {most important verificationCheck label} |
-
-Verification specs: {count or "none"}
-Spec authorship: {new specs authored}/{existing specs baseline} (all new specs failing as expected: {yes/no})
-Context: {stack}, Test: {testCommand}
-Memories applied: {count or "none"}
-```
-
-3. **Trace** — Emit completion trace:
-
-   ```bash
-   python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event skill-complete --skill design --payload '{"outcome":"<completed|partial|failed|aborted>","roleCount":N,"expertsSpawned":N,"crossReviewPhases":["A"|"B"|"C"],"specsGenerated":N}' || true
-   ```
-
-4. **Next action** — Suggest the next steps. Always include `/do:reflect` first:
-
-   ```
-   Next: /do:reflect (review this design for gaps and missed opportunities)
-   Then: /do:execute
-   ```
-
-**Fallback** (if finalize fails):
-1. Fix validation errors and re-run finalize.
-2. If structure is fundamentally broken: rebuild plan inline from expert findings, one role at a time.
+If preflight revokes any contracts: note them — they become pending work.
+If divergence finds unregistered IDs: flag for registration during spec authoring.
+If divergence finds orphaned IDs: flag for cleanup.
 
 ---
 
-## Contracts
+# PHASE 2 — RECONCILIATION [DC-9, DC-10, DC-11, DC-12, DC-13]
 
-### plan.json (schemaVersion 5)
+Compare spec contracts against product state. Classify every gap:
 
-**Top-level fields**: schemaVersion (5), goal, context {stack, conventions, testCommand, buildCommand, lsp}, expertArtifacts [{name, path, summary}], designDecisions [], verificationSpecs [] (optional), roles[], auxiliaryRoles[], progress {completedRoles: []}
+- **Spec-only** (pending contracts): behavior in spec, not yet in product. Pending work.
+- **Product-only** (undocumented): behavior in product, no spec contract.
+  - Ask user via AskUserQuestion: "Codify as pre-satisfied contract, or flag for removal?" [DC-10]
+- **Mismatches** (drift): both exist, disagree.
+  - Ask user per gap: "Update spec to match product, or product to match spec?" [DC-11]
 
-Note: schemaVersion 4 plans (with `acceptanceCriteria` on roles) are still accepted by execute for backward compatibility. New plans use schemaVersion 5 with `verificationChecks` instead.
+When user chooses to codify existing behavior [DC-12]:
 
-**designDecisions fields**: conflict, experts (array), decision, reasoning. Documents lead's resolution of expert disagreements.
+- Author contract in trigger-obligation form: `WHEN <trigger>, system SHALL <outcome>` [SL-18]
+- Mark pre-satisfied (exception to TDD rule — behavior already exists)
+- `python3 $DO spec register --root .do --id <ID> --type execute --json '{"command":"<cmd>"}'`
 
-**verificationSpecs fields** (optional): Array of `{role, path, runCommand, properties, sha256}`. Maps roles to property-based test specs. SHA256 checksums computed by finalize for tamper detection. Workers fix code to pass specs, never modify specs.
+Goal scoping [DC-1]:
 
-**Role fields**: name, goal, model, scope {directories, patterns, dependencies}, expertContext [{expert, artifact, relevance}], constraints [], verificationChecks [{label, check}], assumptions [{text, severity}], rollbackTriggers [], fallback. Status fields (status, result, attempts, directoryOverlaps) are initialized by finalize.
+- Goal provided: narrow to contracts the goal addresses
+- No goal: treat ALL gaps as work scope
 
-`verificationChecks` are ephemeral role-scoped build/test/integration checks — NOT behavioral specs. They verify the role's build environment and basic completion gates. Behavioral validation is managed via spec.jsonl (see Step 7). Workers receive spec invariants as injected constraints (Step 5.5).
+---
 
-**Auxiliary role fields**: name, type (pre-execution|post-execution), goal, model, trigger. See Step 7 for examples.
+# PHASE 3 — SPEC AUTHORING [DC-2, DC-13, DC-15, SL-12 through SL-40]
 
-### Interface Contracts (interfaces.json)
+Author NEW contracts for behavior not yet implemented. TDD: specs MUST FAIL against current codebase [XC-9].
 
-Produced during Step 4 Phase A when roles share domain boundaries. Array of `{boundary, producer, consumer, contract, negotiationNotes}`. Workers treat interface contracts as binding constraints.
+Per-contract requirements:
 
-### Analysis Artifacts
+- Technology-agnostic description — no tool names, file paths, API fields [SL-12]
+- Knowledge-agnostic — describe outcomes, not named frameworks [SL-32]
+- Trigger-obligation form: `WHEN <observable trigger>, system SHALL <observable outcome>` [SL-18]
+- Stable ID assigned at authorship — never changes [SL-7]
+- Every SHALL/MUST obligation gets an ID [SL-40]
+- Portability test: "Still valid if reimplemented in another language?" [SL-37]
+- Freshness test: "Does this prevent adopting better approaches?" [SL-38]
 
-Preserved in `.design/` for execute workers:
-- `expert-{name}.json` — per-expert findings (structured JSON)
-- `interfaces.json` — agreed interface contracts (if produced in Step 4)
+Document form checks [DC-15, SL-15, SL-16, SL-17, SL-19, SL-20, SL-21, SL-22, SL-23]:
 
-**Goal**: $ARGUMENTS
+- All IDs unique, all cross-references resolve
+- Top-down: purpose -> capabilities -> contracts -> cross-cutting -> operational [SL-16]
+- Each section opens with context paragraph before contracts [SL-17]
+- Positive contracts separated from prohibitions [SL-20]
+- Grouped by concern with shared ID prefix [SL-19]
+- Rebuild test: spec alone sufficient to reconstruct system [SL-21]
+- Recreation test: system can produce equivalent-quality specs [SL-22]
+- Single document with inline contract IDs [SL-23]
+- Implementation choices called out explicitly [SL-39]
+
+Register each new contract — THIS IS MANDATORY, not optional [DC-20]:
+
+```
+python3 $DO spec register --root .do --id <ID> --type execute --json '{"command":"<cmd>"}'
+python3 $DO spec register --root .do --id <ID> --type review --json '{"question":"<q>","artifact":"<path>","evidence_commands":[]}'
+```
+
+Every contract ID that will appear in a plan's `contract_ids` MUST be registered here. Execute validates that all plan contract_ids exist in the registry [EC-4a] and halts if any are missing. Unregistered contract IDs break the satisfaction chain and leave the regression gate inert.
+
+Bidirectional traceability [SL-31]: every contract ID must be findable via text search in both spec and implementation.
+
+---
+
+# PHASE 4 — AESTHETICS ESTABLISHMENT [DS-1 through DS-14]
+
+TRIGGER: goal produces user-facing interfaces AND `.do/aesthetics.md` does not exist.
+SKIP if trigger not met.
+
+Apply established design methodology from foundational knowledge [DS-4, XC-18]:
+
+1. **Direction** [DS-3, DS-5]: analyze purpose, audience, tone. Commit to a DISTINCTIVE direction — not generic/safe. Document alternatives considered and rationale.
+2. **Visual identity**: aesthetic direction, visual language, spatial principles, color, typography
+3. **Mental models** [DS-9]: what users believe the system does, likely misconceptions, what interface must reinforce or correct
+4. **Information architecture** [DS-10]: enumerate all user-facing concepts, classify as primary/secondary/progressive
+5. **State design** [DS-11]: for each interface element define empty/loading/success/error/partial states — what user sees, understands, can do next
+6. **Cognitive load** [DS-12]: identify decision/uncertainty/wait moments, document simplification strategies
+7. **Flow integrity** [DS-13]: where could first-time users get lost? what must be explicit vs implied?
+
+Write `.do/aesthetics.md`.
+
+---
+
+# PHASE 5 — EXPERT ANALYSIS [DC-3, DC-4, DC-8, DC-17]
+
+MANDATORY for goals with 3+ roles [DC-8]. For simpler goals, use judgment.
+
+Spawn >=2 experts via Task tool with contrasting priorities [DC-3]:
+
+- **Expert A**: correctness, safety, long-term maintainability
+- **Expert B**: delivery speed, simplicity, minimal surface area
+- **Expert C** (when UI present) [DS-7]: visual/interaction design evaluation
+
+Each expert receives: goal, relevant spec contracts, conventions, aesthetics, prior research, memory findings.
+Each expert returns: role structure proposal, scope boundaries, dependency graph, risks.
+
+When experts disagree [DC-4]:
+
+- Use `mcp__sequential-thinking__sequentialthinking` for structured conflict resolution [IE-10]
+- Document reasoning for each decision
+- State conditions under which chosen direction would be wrong [IE-21]
+
+When knowledge gaps exist [DC-17]:
+
+- `python3 $DO research search --root .do --keyword <gap-topic>`
+- If no prior research covers the gap: invoke do-research via Skill tool (uses `context: fork` — runs in isolated subagent for context economy)
+- Do NOT guess when you can know
+
+---
+
+# PHASE 5b — CONVENTIONS BOOTSTRAP [XC-14a, XC-14, XC-20]
+
+TRIGGER: `.do/conventions.md` does not exist (checked in Phase 1 step 1).
+SKIP if conventions already exist.
+
+**Step 1 — Research the stack** [DC-17]:
+
+For each technology in the project (language, frameworks, libraries, storage, tooling):
+
+- Check prior research: `python3 $DO research search --root .do --keyword <technology>`
+- WHEN no prior research covers the technology: invoke do-research via Skill tool with topic scoped to that technology's idiomatic patterns, community best practices, common failure modes, documented anti-patterns, and production-readiness concerns. do-research uses `context: fork` — runs in isolated subagent for context economy.
+- do-research performs comprehensive external investigation (WebSearch, WebFetch, source analysis) — not internal codebase search
+- Wait for research artifacts before proceeding to Step 2
+
+**Step 2 — Write `.do/conventions.md`** capturing:
+
+1. **Technology choices** [XC-20]: runtime, storage, module system, dependencies — with rationale, alternatives considered, constraints that drove decisions
+2. **Idiomatic patterns**: how the ecosystem expects this stack to be used — naming, structure, error handling, concurrency, testing idioms
+3. **Best practices**: community-established standards — linting, formatting, type checking, dependency management, CI patterns
+4. **Anti-patterns and failure modes**: documented pitfalls — what NOT to do and why, common mistakes, performance traps, security gotchas
+5. **Coding standards**: style rules, import ordering, documentation expectations
+6. **Platform patterns**: file organization, test structure, build commands
+7. **Project-specific idioms**: patterns established by this project that workers must follow
+
+Conventions must exist BEFORE plan assembly so `[XC-15]` can inject them into role constraints.
+
+---
+
+# PHASE 6 — PLAN ASSEMBLY [XC-1 through XC-5, XC-15, XC-17, XC-19, DC-6, DC-14, DC-18]
+
+Build plan JSON at `.do/plans/current.json`. Schema version 2.
+
+Every role MUST have ALL required fields [XC-4]:
+
+| Field               | Content                                                        |
+| ------------------- | -------------------------------------------------------------- |
+| `name`              | Unique imperative noun (for example, "auth-module") [PV-2]     |
+| `goal`              | What to achieve                                                |
+| `contract_ids`      | Spec IDs this role satisfies [XC-1]                            |
+| `scope`             | Directories the worker may touch                               |
+| `expected_outputs`  | Exact file paths to create/modify                              |
+| `context`           | Domain knowledge: conventions, patterns, algorithms, prior art |
+| `constraints`       | Hard rules: satisfied specs, scope rules, invariants           |
+| `verification`      | Shell commands that exit 0 when role complete [EC-5]           |
+| `assumptions`       | Preconditions that must be true                                |
+| `rollback_triggers` | When to abandon and signal failure                             |
+| `fallback`          | Alternative approach if primary fails                          |
+| `model_tier`        | `high` / `standard` / `efficient` per complexity [EM-15]       |
+| `dependencies`      | Names of prerequisite roles [XC-5]                             |
+
+Context vs constraints [XC-17]:
+
+- **context** = domain knowledge (guidance) — inject conventions [DC-14], expert findings, aesthetics [DS-6, DS-14], foundational knowledge [XC-19], research findings [DC-16]
+- **constraints** = enforceable rules — inject satisfied specs [DC-6], scope rules, invariants
+
+Plan integrity rules:
+
+- 1-8 roles [PV-1]
+- No circular dependencies [PV-3]
+- Self-contained: worker reading only the plan has everything needed [XC-2]
+- Scope tracing [DC-18]: trace transitive dependencies (imports, shared types) outside initial scope. Include in scope or add dependency role.
+- When plan includes UI roles: inject aesthetics into context [DS-6, DS-14]
+- Verification commands SHALL reference the project command surface [XC-31] rather than raw tool invocations
+
+Command surface [XC-30, XC-31]:
+
+- Read the project's command surface (tool recorded in conventions)
+- WHEN new operations are introduced by this plan: add entries to the command surface before finalization
+- WHEN no command surface exists: create one, recording the tool choice in conventions
+- Role verification fields reference command surface entries (`just test` not `cd /path && python -m pytest ...`)
+
+Write plan to `.do/plans/current.json`.
+
+---
+
+# PHASE 7 — VALIDATE AND PERSIST [IE-8, IE-9, PV-1 through PV-8]
+
+Deterministic. Execute in order.
+
+## 7a. Finalize plan
+
+```
+python3 $DO plan finalize-file .do/plans/current.json
+```
+
+Validates: role count [PV-1], unique names [PV-2], no cycles [PV-3], all required fields [PV-4], schema version [PV-6].
+On rejection [PV-5]: fix structural issues, retry. Do NOT proceed with an invalid plan.
+
+## 7b. Post-authoring divergence check [DC-20]
+
+```
+python3 $DO spec divergence --root .do --spec-doc spec.md
+```
+
+Resolve any unregistered or orphaned IDs before proceeding. This is a HARD GATE — do NOT proceed to trace/reflect if unregistered IDs exist. Register them first.
+
+Additionally, verify all plan contract_ids are registered:
+
+```
+python3 $DO spec list --root .do
+```
+
+Cross-check: every contract_id in `.do/plans/current.json` roles must appear in the spec list. If any are missing, register them before proceeding. Execute will halt on missing contract_ids [EC-4a].
+
+## 7c. Trace
+
+Record design_complete event. JSON fields: event, roles (count), contracts_authored (count).
+
+    python3 $DO trace add --root .do --json TRACE_JSON
+
+## 7d. Reflection
+
+Self-assessment is prohibited [XC-23]. Record a deferred process reflection.
+Required fields: type, outcome, lens=process, urgency=deferred, failures=[], fix_proposals=[].
+
+    python3 $DO reflection add --root .do --json REFLECTION_JSON
+
+## 7e. Memory
+
+Record significant learnings [XC-21].
+Required fields: category=design, keywords (list), content, source=do-design, importance (3-10).
+
+    python3 $DO memory add --root .do --json MEMORY_JSON
+
+## 7f. Propose updates [XC-16, DS-8]
+
+- **Conventions**: note patterns discovered that should be standardized
+- **Aesthetics**: note interaction patterns discovered during design
+
+Present proposals to user. Do NOT write directly — propose for review.
+
+## 7g. Invoke reflect [LC-8, XC-23]
+
+MANDATORY. Invoke do-reflect via Skill tool. Reflect uses `context: fork` [FC-6] — automatically runs in an isolated subagent that reads artifacts from disk, not from this conversation. No manual Task spawning needed.
+
+Present reflect's immediate findings to user [LC-3]. User resolves each finding before design is considered complete.
+
+---
+
+# PHASE 8 — VERSION CONTROL [VC-2, VC-3, VC-5]
+
+Commit all changes produced by this design run. Working tree must be clean afterward.
+
+1. Check working tree status: `git status --porcelain`
+2. Resolve untracked files:
+   - Legitimate project artifacts (specs, plans, conventions, aesthetics, `.do/` state files) → `git add`
+   - Generated/environment-specific files → add to `.gitignore`, then `git add .gitignore`
+   - Scratch output that should not persist → delete
+3. Stage all changes: `git add` relevant files
+4. Commit: message summarizing design output (goal, contracts authored/registered, plan roles)
+5. Verify clean: `git status --porcelain` — must produce no output
+
+If no changes were produced [VC-4]: skip commit.
+
+---
+
+# PROHIBITIONS
+
+- **[DC-7]** MUST NOT execute any part of the plan. Design only designs.
+- **[DC-8]** MUST NOT skip expert analysis for goals with 3+ roles.
+- **[XC-7]** MUST NOT delegate spec authorship. Design is the sole spec author.
+- **[EM-16]** MUST NOT read project source files directly. Delegate to subagents.
+- **[EM-17]** MUST NOT write implementation artifacts that workers should produce.

@@ -4,129 +4,118 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-`claude-do` is a Claude Code plugin providing four skills: `/do:design` (team-based goal decomposition into `.design/plan.json`), `/do:execute` (dependency-graph execution with worker teammates), `/do:research` (comprehensive knowledge research producing actionable research.json with recommendations), and `/do:simplify` (cascade simplification for code and text — one insight eliminates multiple components — producing plan.json with preservation-focused worker roles). All skills self-monitor their execution by recording structured observations to `.design/reflection.jsonl` via the Self-Monitoring protocol documented in the shared lead protocol. It leverages Claude Code's native Agent Teams and Tasks features for multi-agent collaboration. All skills use the main conversation as team lead with teammates for analytical/execution work. Skills are implemented as SKILL.md prompts augmented with python3 helper scripts for deterministic operations.
+`claude-do` is a Claude Code plugin providing five skills: `/do:design` (spec reconciliation, expert analysis, plan assembly), `/do:execute` (dependency-graph execution with test generation and regression gates), `/do:research` (comprehensive knowledge research), `/do:reflect` (adversarial post-execution review), and `/do:refine` (convention-aware code refinement with regression gates). `spec.md` is the single source of truth — everything else is disposable output rebuilt from the spec.
+
+Skills are implemented as SKILL.md prompts. Deterministic operations (spec management, plan finalization, memory/reflection/trace stores) are delegated to a modular Python CLI package (`shared/cli/`).
 
 ## Testing
 
-No automated test suite exists. Testing is manual and functional:
-
 ```bash
-# Load the plugin locally
-claude --plugin-dir ~/.claude/plugins/marketplaces/do
+# Run the full test suite (365 tests)
+PYTHONPATH=shared pytest tests/ -x
 
-# Test the full workflow
+# Or via justfile
+just test
+```
+
+Additional dev commands: `just lint`, `just format`, `just typecheck`, `just check` (all four).
+
+Functional testing (after code changes):
+```bash
+claude --plugin-dir ~/.claude/plugins/marketplaces/do
 /do:design <some goal>
 /do:execute
 ```
-
-All four skills must be tested end-to-end. Changes to design, execute, research, or simplify may affect the others since they share the `.design/plan.json` contract (or `.design/research.json` for research) and persistent files (`memory.jsonl`, `reflection.jsonl`, `spec.jsonl`, `spec-meta.json`).
 
 ## Architecture
 
 ### Plugin Structure
 
-- `.claude-plugin/plugin.json` — Plugin manifest (name, version, metadata)
-- `.claude-plugin/marketplace.json` — Marketplace distribution config
-- `shared/plan.py` — Shared helper script (41 commands: 17 query, 7 mutation, 9 validation, 5 spec, 1 build, 2 test)
-- `shared/lead-protocol-core.md` — Canonical lead protocol core (boundaries, no-polling, trace, memory, phase announcements, INSIGHT handling). Consumed by all team-based skills at startup.
-- `shared/lead-protocol-teams.md` — Lead protocol teams patterns (TeamCreate enforcement, liveness pipeline, team patterns). Consumed by design/execute/simplify at startup.
-- `skills/design/SKILL.md` — `/do:design` skill definition
-- `skills/design/scripts/plan.py` — Symlink → `shared/plan.py`
-- `skills/design/lead-protocol-core.md` — Symlink → `shared/lead-protocol-core.md`
-- `skills/design/lead-protocol-teams.md` — Symlink → `shared/lead-protocol-teams.md`
-- `skills/execute/SKILL.md` — `/do:execute` skill definition
-- `skills/execute/scripts/plan.py` — Symlink → `shared/plan.py`
-- `skills/execute/lead-protocol-core.md` — Symlink → `shared/lead-protocol-core.md`
-- `skills/execute/lead-protocol-teams.md` — Symlink → `shared/lead-protocol-teams.md`
-- `skills/research/SKILL.md` — `/do:research` skill definition
-- `skills/research/scripts/plan.py` — Symlink → `shared/plan.py`
-- `skills/research/lead-protocol-core.md` — Symlink → `shared/lead-protocol-core.md`
-- `skills/simplify/SKILL.md` — `/do:simplify` skill definition
-- `skills/simplify/scripts/plan.py` — Symlink → `shared/plan.py`
-- `skills/simplify/lead-protocol-core.md` — Symlink → `shared/lead-protocol-core.md`
-- `skills/simplify/lead-protocol-teams.md` — Symlink → `shared/lead-protocol-teams.md`
+```
+.claude-plugin/
+  plugin.json             — Plugin manifest (name, version, metadata)
+  marketplace.json        — Marketplace distribution config
+shared/
+  do.py                   — Entry point (resolves through symlinks)
+  cli/                    — Python CLI package
+    __init__.py           — Package root (__version__)
+    __main__.py           — Argparse dispatcher (7 domains)
+    envelope.py           — Result envelope formatting {ok, data/error}
+    cli/                  — CLI layer (argument parsing → ops)
+      archive.py, memory.py, plan.py, reflection.py,
+      research.py, spec.py, trace.py
+    ops/                  — Business logic layer
+      archive.py, memory.py, plan.py, reflection.py,
+      research.py, spec.py, trace.py
+    store/                — Persistence primitives
+      atomic.py           — Atomic JSON file writes (mkstemp → fsync → replace)
+      hash.py             — SHA-256 content hashing
+      jsonl.py            — JSONL read/append (O_APPEND for atomicity)
+skills/
+  {design,execute,research,reflect,refine}/
+    SKILL.md              — Skill definition (imperative prompt)
+    scripts/
+      do.py → ../../../shared/do.py  — Symlink to entry point
+spec.md                   — Behavioral specification (source of truth)
+tests/                    — pytest test suite (18 modules, 365 tests)
+pyproject.toml            — Project config (ruff, mypy, pytest)
+justfile                  — Dev commands
+```
+
+### Layered Architecture
+
+Three layers with strict dependency direction: `cli/` → `ops/` → `store/`.
+
+- **`store/`** — Low-level persistence primitives. Atomic file writes, content hashing, JSONL read/append.
+- **`ops/`** — Business logic. Plan finalization/DAG validation, spec registry (register/satisfy/preflight/divergence), memory/reflection/trace/research stores, archive management.
+- **`cli/`** — Argument parsing. Registers domain subparsers, delegates to ops, renders JSON envelopes.
+
+### CLI Invocation
+
+Skills resolve `scripts/do.py` (a symlink to `shared/do.py`). The entry point uses `os.path.realpath()` to find `shared/`, adds it to `sys.path`, and imports `cli.__main__`.
+
+```bash
+python3 $DO <domain> <command> --root .do
+```
+
+Seven domains: `spec`, `memory`, `reflection`, `trace`, `research`, `plan`, `archive`. All output is JSON to stdout (`{ok: true/false, ...}`). Exit 0 for success, 1 for errors.
+
+For dev tooling (tests, linting), use `PYTHONPATH=shared` so Python can find the `cli` package:
+
+```bash
+PYTHONPATH=shared pytest tests/ -x
+```
 
 ### Skill Files Are the Implementation
 
-The SKILL.md files are imperative prompts that Claude interprets at runtime. Deterministic operations (validation, dependency computation, plan manipulation) are delegated to per-skill python3 helper scripts. Each skill resolves its local `scripts/plan.py` path at runtime and invokes subcommands via `python3 $PLAN_CLI <command> [args]`. All script output follows JSON convention (`{ok: true/false, ...}`).
+The SKILL.md files are imperative prompts that Claude interprets at runtime. Each has YAML frontmatter (`name`, `description`, `argument-hint`, `allowed-tools`, `model`, `satisfies`) that must be preserved.
 
-Each SKILL.md has YAML frontmatter (`name`, `description`, `argument-hint`) that must be preserved.
+- **design**: Reconcile spec with product, author behavioral contracts (TDD), expert analysis, plan assembly
+- **execute**: Test generation, topological execution, worker verification, spec satisfaction, regression gates
+- **research**: Hypothesis-driven investigation with three source types, structured synthesis
+- **reflect**: Adversarial review (5 dimensions), observation persistence. Runs in `context: fork`
+- **refine**: Convention-aware code refinement with regression gates. Runs in `context: fork`
 
-**Shared Lead Protocol**: Design, execute, research, and simplify share common orchestration patterns through two symlinked files. `shared/lead-protocol-core.md` (consumed by all team-based skills) covers boundaries, no-polling guarantees, trace emission, memory injection, phase announcements, self-monitoring protocol, and INSIGHT handling. `shared/lead-protocol-teams.md` (consumed by design/execute/simplify only) covers TeamCreate enforcement, liveness pipeline patterns, and team-member coordination. Research uses standalone Task() subagents and consumes only the core protocol.
+### Runtime Data (`.do/`)
 
-### Scripts
+Skills communicate through JSONL stores in `.do/` (gitignored):
 
-A single `shared/plan.py` at the repo root provides all deterministic operations. Each skill symlinks to it from `skills/{name}/scripts/plan.py` so SKILL.md can resolve a skill-local path.
+- `specs.jsonl` — Behavioral contract registry (register → satisfy → preflight)
+- `memory.jsonl` — Cross-session learnings (importance-scored, keyword-searchable)
+- `reflections.jsonl` — Post-execution observations (lens: product/process, urgency: immediate/deferred)
+- `traces.jsonl` — Append-only event log
+- `research/` — Per-artifact JSON files
+- `conventions.md` — Project-specific conventions (per-project, created by design)
+- `aesthetics.md` — UI/UX guidelines (per-project, created by design)
+- `plans/current.json` — Active execution plan
+- `history/` — Archived ephemeral state (timestamped)
 
-- **Query** (runtime-invoked): team-name, status, summary, overlap-matrix, tasklist-data, worker-pool, retry-candidates, circuit-breaker, memory-search, plan-health-summary
-- **Mutation** (runtime-invoked): update-status, memory-add, memory-feedback, reflection-add, resume-reset, archive, trace-add
-- **Validation** (runtime-invoked): expert-validate, validate-checks, validate-auxiliary-report, worker-completion-validate, research-validate, research-summary
-- **Spec** (runtime-invoked): spec-search, spec-add, spec-validate, spec-compact, spec-run, spec-extract — persistent behavioral spec store with EARS notation, SHA256 tamper detection, importance-based compaction, check execution, and characterization testing (spec-extract)
-- **Build** (1 command): finalize — validates role briefs, computes directory overlaps, validates state transitions, and computes SHA256 checksums for verification specs in one atomic operation
-- **Test** (2 commands): self-test — exercises every command against synthetic fixtures in a temp directory, reports pass/fail per command as JSON; test-internal — in-process test runner for CI/embedding use
-- **Developer inspection tools** (not invoked by skills at runtime): reflection-search, memory-review, health-check, plan-diff, sync-check, trace-search, trace-summary, reflection-validate, memory-summary, trace-validate
-
-Design uses query + finalize + spec commands (spec-add, spec-run, spec-search, spec-extract). Design auto-detects brownfield projects (existing code, no `spec.jsonl`) and bootstraps a behavioral baseline via `spec-extract` before planning. Execute uses all commands except spec-add and spec-extract (execute validates specs via spec-run but does not author them). Research uses query + research-validate + research-summary. `worker-pool` reads roles directly — one worker per role, named by role (e.g., `api-developer`, `test-writer`). Workers read `plan.json` directly — no per-worker task files needed.
-
-Scripts use python3 stdlib only (no dependencies), support Python 3.8+, and follow a consistent CLI pattern: `python3 plan.py <command> [plan_path] [options]`. All output is JSON to stdout with exit code 0 for success, 1 for errors.
-
-### Data Contracts: .design/plan.json and .design/research.json
-
-Skills communicate through structured JSON files in `.design/` (gitignored). Two primary contracts:
-
-**`.design/plan.json` (schemaVersion 5)** — used by design, execute, and simplify for role-based execution:
-
-- Authoritative state; TaskList is a derived view. Schema versions 4 and 5 both accepted (v4 backward compatible).
-- Roles use name-based dependencies resolved to indices by `finalize`.
-- **Persistent `.design/` files** (survive archiving): `memory.jsonl`, `reflection.jsonl`, `research.json`, `trace.jsonl`, `spec.jsonl`, `spec-meta.json`. Everything else archived to `.design/history/{timestamp}/`
-- **Reflection fields**: `promptFixes` (primary — captures failure-driven AND lead-side workarounds), `specObservations` (execute only — observations about spec health during pre-flight, replaces acMutations), `highValueInstructions` (proven instructions to protect from simplification), `specTightenings` (reflect only — proposals to tighten existing spec.jsonl checks, consumed by next design cycle), `stepsSkipped`, `instructionsIgnored`, `whatWorked`/`whatFailed`
-- **Spec ownership**: Design is the sole author of `spec.jsonl` (creates new specs, applies tightenings). Execute validates against spec.jsonl as a regression gate via `spec-run` (all specs must pass post-execution) but never writes to it. Reflect proposes tightenings via `specTightenings` in reflection.jsonl, consumed by the next design cycle. Design uses TDD: existing specs must pass (baseline), newly authored specs must fail (proving they test unimplemented behavior that execute will build).
-- Verification specs: optional `verificationSpecs[]` in plan.json. `finalize` computes SHA256 checksums for tamper detection.
-
-**Top-level fields**: schemaVersion (5), goal, context {stack, conventions, testCommand, buildCommand, lsp}, expertArtifacts [{name, path, summary}], designDecisions [{conflict, experts, decision, reasoning}], verificationSpecs [] (optional), roles[], auxiliaryRoles[], progress {completedRoles: []}
-
-**Role fields** — each role is a goal-directed scope for one specialist worker:
-- `name` — worker identity and naming (e.g., `api-developer`, `prompt-writer`)
-- `goal` — clear statement of what this role must achieve
-- `model` — preferred Claude model (`sonnet`, `opus`, `haiku`)
-- `scope` — `{directories, patterns, dependencies}` where dependencies are role names resolved to indices
-- `expertContext` — array of `{expert, artifact, relevance}` referencing full expert artifacts
-- `constraints` — array of hard rules the worker must follow (spec invariants are injected here with full check commands — format: `"Spec invariant — run this check before reporting done: check='{cmd}', description='{ears}', spec ID='{id}'"`)
-- `verificationChecks` — array of `{label, check}` for ephemeral role-scoped build/test/integration checks. These are NOT behavioral specs — they verify build environment and completion gates. Workers run these as part of Pre-Completion Verification. Checks must exit non-zero on failure. Anti-patterns to avoid: grep-only checks, `|| echo` or `|| true` fallbacks, `test -f` as sole verification, `wc -l` counts, pipe chains without explicit exit-code handling.
-- `assumptions` — array of `{text, severity}` documenting assumptions (`blocking` or `non-blocking`)
-- `rollbackTriggers` — array of conditions that should cause the worker to stop and report
-- `fallback` — alternative approach if primary fails (included in initial brief)
-
-**Status fields** (initialized by finalize): status (`pending`), result (null), attempts (0), directoryOverlaps (computed)
-
-**Verification spec fields**: `verificationSpecs[]` — top-level array of `{role, path, runCommand, properties, sha256}`. See design/SKILL.md Step 6 for authorship and content guidelines.
-
-**Auxiliary roles** — standalone Task tool agents (not team members) that improve quality without directly implementing features:
-- `challenger` (pre-execution) — reviews plan, challenges assumptions, finds gaps. Blocking issues are mandatory gates: lead must address each one before proceeding
-- `scout` (pre-execution) — reads actual codebase to verify expert assumptions match reality. Verifies that referenced dependencies resolve (classes→CSS, imports→modules, types→definitions)
-- `integration-verifier` (post-execution) — verifies cross-role integration, runs full test suite. Reports "skipped" for checks requiring unavailable capabilities (e.g., browser rendering) — never infers results
-- `memory-curator` (post-execution) — distills reflection.jsonl and role results into actionable memory entries in .design/memory.jsonl. Reflections are the primary signal for what to record
-
-**Auxiliary role fields**: name, type (pre-execution|post-execution), goal, model, trigger
-
-**`.design/research.json` (schemaVersion 1)** — used by `/do:research` for comprehensive knowledge research output:
-
-- Top-level: schemaVersion (1), goal, context, sections {prerequisites, mentalModels, usagePatterns, failurePatterns, productionReadiness}, recommendations[], researchGaps[], designHandoff[] (optional)
-- **Recommendation fields**: id, title, summary, confidence (low/medium/high), effort (low/medium/high), prerequisites, reasoning, bestFit[], wrongFit[]
-- **Finding fields**: id, section, source, summary, domain (codebase/literature/comparative/theoretical)
-- **Design handoff fields**: source, element, material, usage — preserves expert building blocks so /do:design can read research.json without re-reading expert artifacts
-
-### Execution Model
-
-- **Lead** (main conversation): orchestration only via `TeamCreate`, `SendMessage`, `TaskCreate`/`TaskUpdate`/`TaskList`, `Bash` (scripts, git, verification), `AskUserQuestion`. Never reads project source files.
-- **Teammates**: specialist agents spawned into the team. Discover lead name via `~/.claude/teams/{team-name}/config.json`.
-
-Team naming convention: `do-{skill}-{project}-{hash}` (generated by `team-name` command). Research uses standalone Task() subagents instead of a persistent team.
+Persistent files (survive archiving): `specs.jsonl`, `memory.jsonl`, `reflections.jsonl`, `traces.jsonl`, `conventions.md`, `aesthetics.md`, `research/`.
 
 ## Requirements
 
-- Claude Code 2.1.32+ with `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`
-- python3 3.8+ (for helper scripts)
+- Claude Code 2.1.32+
+- Python 3.10+ (for CLI package)
 
 ## Commit Conventions
 
@@ -136,7 +125,7 @@ Conventional commits with imperative mood: `feat:`, `fix:`, `chore:`, `refactor:
 
 Before every commit and push:
 
-1. **Update docs**: If SKILL.md changes affect architecture, update `CLAUDE.md` (Architecture section) and `README.md` to match. These three must stay in sync.
-2. **Update README features**: If a new feature or capability is added, check `README.md` — update the "What's Novel" or "How It Works" sections to reflect it. New user-facing features must be discoverable in the README.
-3. **Update changelog**: Add an entry to `CHANGELOG.md` under the current version for every functional change (feat, fix, refactor). Group under Added/Changed/Fixed per Keep a Changelog format. Do not skip this — the changelog is the project's history.
-4. **Bump version**: Increment the patch version in `.claude-plugin/plugin.json` (and the version badge in `README.md`) for every functional change. Use semver: patch for fixes/refactors, minor for new features, major for breaking changes.
+1. **Run tests**: `PYTHONPATH=shared pytest tests/ -x` — all must pass.
+2. **Update docs**: If SKILL.md changes affect architecture, update `CLAUDE.md` and `README.md` to match.
+3. **Update changelog**: Add an entry to `CHANGELOG.md` under the current version for every functional change.
+4. **Bump version**: Increment version in `.claude-plugin/plugin.json`, `shared/cli/__init__.py`, and `README.md` badge.

@@ -1,1 +1,0 @@
-../../shared/lead-protocol-core.md

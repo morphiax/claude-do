@@ -5,6 +5,85 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.0.0] - 2026-02-24
+
+### Changed
+
+- **Complete rewrite from monolith to modular Python package**: Replaced the 8,680-line `shared/plan.py` monolith with a three-layer package (`shared/cli/`): `store/` (persistence primitives), `ops/` (business logic), `cli/` (argument parsing). Clean separation of concerns.
+- **New CLI invocation pattern**: `python3 $DO <domain> <command> --root .do` via argparse with subparsers. Entry point `shared/do.py` resolves through symlinks so the CLI works when CWD is the user's project.
+- **Runtime directory**: `.do/` replaces `.design/`. JSONL stores throughout (`specs.jsonl`, `memory.jsonl`, `reflections.jsonl`, `traces.jsonl`).
+- **Skill: refine replaces simplify**: Convention-aware code refinement with regression gates, replacing the previous cascade simplification approach.
+- **Python 3.10+ required**: Up from 3.8. Uses modern type annotations and stdlib features.
+- **spec.md is the single source of truth**: Technology-agnostic behavioral specification. Everything else is disposable output rebuilt from the spec.
+- **Plan schema**: Schema versions 1 and 2 accepted. Roles use `contract_ids` linking to spec registry entries.
+
+### Added
+
+- **New skill: /do:refine** — Convention-aware code refinement with spec regression gates. Runs in isolated context (`context: fork`).
+- **pytest test suite**: 18 test modules (365 tests) covering store primitives, ops logic, contract tests, and integration tests.
+- **Dev tooling**: `pyproject.toml` (ruff, mypy, pytest config), `justfile` for common operations.
+- **spec.md**: 95KB behavioral specification at repo root.
+- **Seven CLI domains**: spec, memory, reflection, trace, research, plan, archive — each with subcommands.
+- **Spec operations**: register, satisfy, preflight (re-verify), divergence (vs spec doc), coverage, tighten, count.
+- **Plan operations**: finalize-file, order-file, transition, snapshot-scope, scope-check, file-delta, unexpected-outputs, cascade, coverage, execution-coverage.
+
+### Removed
+
+- `shared/plan.py` (8,680-line monolith)
+- `shared/lead-protocol-core.md` and `shared/lead-protocol-teams.md` (shared lead protocols)
+- `/do:simplify` skill (replaced by `/do:refine`)
+- `.design/plan.json` format (replaced by `.do/` JSONL stores)
+- `spec.json` nested tree format (replaced by `specs.jsonl` flat registry)
+
+## [3.5.0] - 2026-02-22
+
+### Changed
+
+- **Spec store migrated to nested tree (schemaVersion 2)**: Spec hierarchy is now expressed via nested `children` arrays instead of flat `supports` pointer fields. The `supports` field is removed entirely — nesting IS the structure.
+- **Level-skipping allowed**: Child specs only need `level > parent level` (not strictly N-1). An L4 can nest directly under an L2 without an intermediate L3.
+- **`--supports` renamed to `--parent`**: The CLI flag for spec-add is now `--parent` (hidden `--supports` alias preserved for backward compatibility).
+- **Auto-migration from v1 to v2**: Reading a v1 flat spec.json automatically migrates it to v2 nested tree format and writes it back.
+- **Compaction operates on tree**: Only leaf nodes are eligible for removal; parent nodes are structurally protected.
+- **Validation uses tree-level checks**: Replaced chain integrity validation (orphan detection, cycle detection) with tree-level validation (child level must be > parent level).
+
+### Removed
+
+- **7 functions removed**: `_validate_spec_supports`, `_check_spec_entry_supports`, `_validate_spec_chain_parents`, `_detect_spec_chain_cycles`, `_validate_spec_chains`, `_get_supports_targets`, flat `_filter_spec_entries`/`_cap_spec_entries`.
+
+### Added
+
+- **6 new tree functions**: `_flatten_spec_tree`, `_find_spec_node`, `_insert_spec_child`, `_remove_spec_node`, `_migrate_flat_to_nested`, `_validate_spec_tree_levels`.
+- **3 new tests**: `test_spec_migrate_v1_to_v2`, `test_spec_add_level_skipping`, `test_spec_compact_preserves_tree`.
+
+## [3.4.1] - 2026-02-22
+
+### Added
+
+- **Spec hierarchy via `supports` field**: L2+ specs now require a `supports` field pointing to a parent spec one level up (strict adjacency: L2→L1, L3→L2, L4→L3, L5→L4). L1 specs are roots with no parent. `spec-add` validates parent exists and is at the correct level. `spec-validate` enforces chain integrity with orphan detection, wrong-level parent detection, and cycle detection.
+- **Cascade protection in compaction**: Specs referenced via `supports` by other entries are protected from importance-based compaction, preventing orphaned children.
+- **Top-down spec authorship in design (Step 7)**: Rewritten to enforce L1→L2→L3 hierarchy-first authorship before deriving L4-L5 contracts. Includes rebuild test checkpoint after L1-L3 authorship.
+- **Quality gate 6 (Chain-linked)**: Every L4-L5 spec must `--supports` an existing spec one level up. If no parent can be identified, the spec is testing implementation, not behavior.
+- **Anti-pattern examples in design Step 7**: Bad/good EARS comparison showing mechanism-level specs vs technology-agnostic behavioral specs.
+
+### Changed
+
+- **Spec content rewritten for rebuild quality**: All 33 L4-L5 EARS statements rewritten to be technology-agnostic (removed references to `ok=true`, `schemaVersion`, `directoryOverlaps`, `cmd_status`, etc.). EARS describes what ANY implementation must do; `check` verifies THIS implementation does it.
+- **All L2-L5 specs now have `supports` links**: 48 entries linked into full hierarchy chains from L1 purpose specs down to L5 behavioral specs.
+- **5 new self-tests** for supports validation: L2 without supports fails, wrong parent level fails, nonexistent parent fails, chain integrity validated, L1 with supports rejected. Total: 154 self-tests passing.
+
+## [3.4.0] - 2026-02-22
+
+### Added
+
+- **Multi-level spec hierarchy**: Specs now have a `level` field (int 1-5) mapping to 5 categories: L1 Purpose, L2 Capability, L3 Process, L4 Contract, L5 Behavioral. New `intent` (optional string) field captures the spec's purpose in human-readable form.
+- **New spec categories**: purpose (L1), capability (L2), and process (L3) levels for higher-level architectural and design specs that don't require executable checks.
+- **L1-L2 compaction protection**: Purpose and capability specs are protected from importance-based compaction, preserving foundational project context.
+
+### Changed
+
+- **Spec format migrated from JSONL to JSON**: `spec.jsonl` + `spec-meta.json` replaced by single `spec.json` file. Auto-migration from legacy JSONL format on first use.
+- **L1-3 specs are review-only**: Purpose, capability, and process specs do not require `check` or `sha256` fields — they serve as documented constraints reviewed during planning, not executed during validation.
+
 ## [3.3.1] - 2026-02-22
 
 ### Added

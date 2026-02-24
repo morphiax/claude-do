@@ -7,7 +7,7 @@
     {
       "name": "do",
       "source": "./",
-      "description": "Structured planning and dependency-graph execution — /do:design and /do:execute",
+      "description": "Spec-first multi-agent planning, execution, and refinement — /do:design, /do:execute, /do:research, /do:reflect, /do:refine",
       "strict": false
     }
   ]

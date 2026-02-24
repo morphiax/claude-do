@@ -1,7 +1,7 @@
 {
   "name": "do",
-  "version": "3.3.1",
-  "description": "Structured planning, dependency-graph execution, comprehensive knowledge research, and cascade simplification for code and text — /do:design, /do:execute, /do:research, and /do:simplify. All four skills self-monitor and write episodic observations to .design/.",
+  "version": "4.0.0",
+  "description": "Multi-agent goal decomposition and execution — /do:design, /do:execute, /do:research, /do:reflect, and /do:refine. Spec-first development with behavioral contracts, modular CLI package, and pytest test suite.",
   "author": {
     "name": "morphiax",
     "url": "https://github.com/morphiax"

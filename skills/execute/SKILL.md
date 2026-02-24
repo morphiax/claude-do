@@ -1,286 +1,431 @@
 ---
 name: execute
-description: "Execute a plan from /design with standalone Task() workers."
-argument-hint: ""
+description: Execute a finalized plan — spawn workers per role, verify outputs, handle failures, satisfy specs.
+argument-hint: "[plan-path] — defaults to .do/plans/current.json"
+allowed-tools: Read,Write,Edit,Glob,Grep,Bash,Task,AskUserQuestion
+model: claude-opus-4-6
+satisfies:
+  [
+    EC-1,
+    EC-2,
+    EC-3,
+    EC-4,
+    EC-4a,
+    EC-4b,
+    EC-4c,
+    EC-5,
+    EC-6,
+    EC-7,
+    EC-8,
+    EC-9,
+    EC-10,
+    EM-1,
+    EM-2,
+    EM-3,
+    EM-4,
+    EM-10,
+    EM-13,
+    EM-14,
+    EM-15,
+    EM-16,
+    EM-17,
+    EM-18,
+    XC-1,
+    XC-2,
+    XC-3,
+    XC-5,
+    XC-6,
+    XC-7,
+    XC-8,
+    XC-9,
+    XC-41,
+    IE-8,
+    IE-9,
+    IE-13,
+    IE-15,
+    IE-16,
+    EC-11,
+    EC-12,
+    EC-13,
+    LC-2,
+    LC-3,
+    LC-7,
+    LC-15,
+    SL-46,
+    VC-1,
+    VC-2,
+    VC-3,
+    VC-4,
+    VC-5,
+  ]
 ---
 
-# Execute
+## CLI Setup
 
-Execute `.design/plan.json` with standalone Task() workers. Design produced the plan with role briefs — now workers read the codebase and achieve their goals. **This skill only executes — it does NOT design.**
+Resolve the helper script path at skill start. `scripts/do.py` is a symlink that resolves to `shared/do.py` in the plugin root.
 
-Before starting the Flow, Read `lead-protocol-core.md`. It defines the canonical lead protocol (boundaries, trace emission, memory injection, phase announcements). Substitute: {skill}=execute, {agents}=workers. Task() blocks until done — no polling logic is needed.
+Use the Glob tool to find `scripts/do.py` relative to this SKILL.md, then resolve its absolute path:
 
-> **Execute Lead Boundaries override**: Bash also includes `git` (for partial-work cleanup on retry and git status checks).
+```bash
+DO=$(python3 -c "import os; print(os.path.realpath('<absolute-path-to-scripts/do.py>'))" )
+```
 
-**Progress reporting**: After the initial summary, output brief progress updates for significant events. Keep updates to one line each. Suppress intermediate worker tool calls and chatter.
+All commands: `python3 $DO <domain> <command> --root .do`
+
+
+# LOAD STATE [IE-8, IE-9, LC-15] — deterministic
+
+Execute all loads before any work:
+
+1. Read plan file (default `.do/plans/current.json`). If not finalized:
+
+   ```
+   python3 $DO plan finalize-file .do/plans/current.json
+   ```
+
+   Parse result. On error: halt — plan must be valid before execution.
+
+2. Spec preflight — re-verify all satisfied contracts and establish regression baseline [EC-4, EC-4c]:
+
+   ```
+   python3 $DO spec preflight --root .do
+   ```
+
+   Record `preflight_baseline`: total, passed, failed, revoked. Preflight re-runs all satisfied contracts — some may have regressed and been revoked to pending.
+
+3. Contract coverage gate [EC-4a, EC-4c, SL-46] — verify plan contracts are registered AND determine work scope:
+
+   First, get the spec registry:
+
+   ```
+   python3 $DO spec list --root .do
+   ```
+
+   Extract the `contracts` array from the result. Then run coverage:
+
+   ```
+   python3 $DO plan coverage --plan-json '<plan-json>' --spec-json '<spec-contracts-json>'
+   ```
+
+   The coverage command returns:
+   - `missing`: contract_ids not in registry → HALT, design failed to register
+   - `pending`: registered but unsatisfied → these need work
+   - `satisfied`: registered and still satisfied after preflight → skip
+   - `roles_to_execute`: roles with at least one pending contract
+   - `roles_to_skip`: roles whose contracts are all satisfied
+   - `has_work`: false when nothing is pending → HALT, nothing to do
+
+   **Gates**:
+   - WHEN `missing` is non-empty: halt and report — design failed to register contracts
+   - WHEN `has_work` is false: halt — all contracts already satisfied, no work needed
+   - Record `pending_contract_ids` — only these will be satisfied after execution
+
+4. Execution order:
+
+   ```
+   python3 $DO plan order-file .do/plans/current.json
+   ```
+
+   Returns topologically sorted role indices. Filter against `roles_to_execute` — skip roles not in the execute list.
+
+5. Read `.do/conventions.md` if exists — workers inherit project conventions [XC-14].
+6. Read `.do/aesthetics.md` if exists — workers with UI scope inherit aesthetics [DS-6].
+7. `python3 $DO memory search --root .do --keyword execution` — prior execution learnings.
+8. `python3 $DO trace add --root .do --json '{"event":"execute_start","plan":"<plan-path>"}'`
 
 ---
 
-## Flow
+# TEST GENERATION [EC-11, EC-12, EC-13] — creative
 
-### 1. Setup
+Before spawning implementation workers, generate tests from behavioral contracts for all pending roles.
 
-1. **Lifecycle context**: Run Lifecycle Context protocol (see lead-protocol-core.md).
-2. Validate: `python3 $PLAN_CLI status .design/plan.json`. On failure: `not_found` = "No plan found. Run `/do:design <goal>` first." and stop; `bad_schema` = unsupported schema, stop; `empty_roles` = no roles, stop.
-3. Resume detection: If `isResume`: run `python3 $PLAN_CLI resume-reset .design/plan.json`. If `noWorkRemaining`: "All roles already resolved." and stop.
-4. **Worker pool**: Run `python3 $PLAN_CLI worker-pool .design/plan.json` to get workers (one per role).
-5. Summary: `python3 $PLAN_CLI summary .design/plan.json`. Store `goal`, `roleCount`, `maxDepth`.
-6. Pre-flight: Build a Bash script that checks `git status --porcelain` and runs any blocking checks.
+For each role in `roles_to_execute`:
 
-### 2. Pre-Execution Checks
+1. **Extract contracts**: get the role's `contract_ids` list filtered to `pending_contract_ids`.
 
-Check `auxiliaryRoles[]` in plan.json for `type: "pre-execution"` roles. If none exist (the default — `/do:reflect` handles plan verification between design and execute), skip directly to Spec Pre-flight below.
+2. **Spawn test-generation worker** via Task tool:
 
-If pre-execution auxiliaries ARE present (legacy plans or `/do:simplify` output), run them as standalone Task() calls. The Task() call returns their result directly.
+   Worker receives ONLY:
+   - The role's contract_ids and their spec content (behavioral descriptions)
+   - The role's scope, expected_outputs, and verification commands
+   - Project conventions from `.do/conventions.md`
+   - **NOT** implementation code — test authors must not see implementation [EC-11]
 
-**Spec Pre-flight**: Before spawning workers, run spec-run to establish a baseline and identify TDD targets:
+   Worker instructions:
+   - Write test files that assert the behavioral contracts as executable tests
+   - Tests go in the role's scope (typically `tests/` directory)
+   - Each contract should have at least one test asserting its expected behavior
+   - Use pytest conventions, tmp_path fixtures for isolation
+   - Report: test files created, test count per contract
 
-```bash
-python3 $PLAN_CLI spec-run .design/spec.jsonl
-```
+3. **Red check** [EC-12] — verify all new tests FAIL against current codebase:
 
-Interpret results as two buckets:
-- **Pre-existing passing specs** (exits 0 before any work) — these are the regression baseline. Workers must not break these.
-- **TDD targets** (failing before any work) — these are newly authored specs that execute must make pass. This is expected.
-
-**Show user**: "Spec pre-flight: {passing} pre-existing passing (regression baseline), {failing} TDD targets (expected to fail before workers run, must pass after)."
-
-If a spec has a broken check command (fails due to malformed command, not missing feature), record as a spec observation in reflection and fix or skip the spec before proceeding.
-
-**CLI signature verification**: Before spawning workers, scan role constraints for `python3 $PLAN_CLI` command references. For each referenced subcommand (e.g., `spec-add`, `reflection-add`), run `python3 $PLAN_CLI {subcommand} --help 2>&1` to verify the command exists and accepts the flags mentioned in constraints. If a constraint references a flag that doesn't exist, fix the constraint in plan.json before spawning the worker. Record any fixes as specObservations.
-
-**Spec observation recording** (MANDATORY): When spec pre-flight finds a broken spec check command, or when CLI signature verification finds a broken constraint reference, record each observation to reflection immediately. This is MANDATORY — skipping this recording is a protocol violation.
-
-```bash
-echo '{"specObservations":[{"specId":"{spec ID}","observation":"{what was found}","type":"fail|flaky"}],"whatWorked":[],"whatFailed":["Broken spec check detected during pre-flight"],"promptFixes":[{"section":"spec.jsonl","problem":"{issue description}","idealOutcome":"check command verifies actual behavior","fix":"{proposed fix}","failureClass":"spec-disobey"}]}' | python3 $PLAN_CLI reflection-add .design/reflection.jsonl \
-  --skill execute \
-  --goal "$GOAL" \
-  --outcome partial \
-  --goal-achieved false
-```
-
-Record one entry per pre-flight pass (batch all observations in one `specObservations` array via piped JSON). This feeds the spec health pipeline for the next design cycle.
-
-### 3. Report and Spawn Workers
-
-Report to user:
-```
-Executing: {goal}
-Roles: {roleCount} (depth: {maxDepth})
-Workers: {totalWorkers} ({names})
-Auxiliaries: {pre-execution auxiliaries run, post-execution pending}
-```
-Warn if git is dirty. If resuming: "Resuming execution."
-
-**Memory injection** — For each role:
-```bash
-python3 $PLAN_CLI memory-search .design/memory.jsonl --goal "{role.goal}" --stack "{context.stack}" --keywords "{role.scope.directories + role.name}"
-```
-If `ok: false` or no memories → proceed without injection. Otherwise take top 3-5. **Show user**: "Memory: {role.name} ← {count} learnings ({keyword summaries})."
-
-**Execution order**: For sequential roles (depth > 1), spawn Task() calls in order — wait for each to return before spawning the next. For parallel roles (same depth level with no dependencies), check `directoryOverlaps` in plan.json — if two parallel roles share overlapping directories, serialize them (spawn sequentially) to prevent merge conflicts on the same file. Only spawn multiple Task() calls in the same response when parallel roles have no directory overlaps.
-
-**Dependency cascade**: The lead tracks which roles completed or failed. For parallel roles with dependencies, if a dependency failed, skip the dependent role entirely (do not spawn it). Output progress update "⊘ Skipped: {role.name} (dependency failed)".
-
-Spawn workers as standalone Task() calls. Each worker prompt MUST include:
-
-**Role-specific context** (customize per worker):
-
-1. **Identity**: "You are a specialist: {role.name}. Your goal: {role.goal}"
-2. **Brief location**: "Read your full role brief from `.design/plan.json` at `roles[{roleIndex}]`."
-3. **Expert context**: "Read these expert artifacts for context: {expertContext entries with artifact paths and relevance notes}." If a scout report exists: "Also read `.design/scout-report.json` for codebase reality check."
-4. **Past learnings** (if memories found): "Relevant past learnings: {bullet list of memories with format: '- {category}: {summary} (from {created})'}"
-5. **Process**: "Explore your scope directories ({scope.directories}). Plan your own approach based on what you find in the actual codebase. Implement, test, verify against the spec invariants injected in your constraints."
-6. **Constraints**: "Constraints from role brief — read them from plan.json roles[{roleIndex}].constraints."
-7. **Done when**: "Done when — (1) run each spec check injected in your role constraints (these are your behavioral invariants — look for constraints prefixed 'Spec invariant' and run the check= command from each), (2) run each verificationCheck from your role brief (build, test runner checks — found at plan.json roles[{roleIndex}].verificationChecks), (3) if plan.json verificationSpecs[] has an entry for your role, run it last. Report results for all three."
-8. **Fallback**: If role has a fallback: "If your primary approach fails: {fallback}"
-9. **Dependency context** (if this role depends on others): Inject `keyDecisions` and `contextForDependents` from completed dependency roles. Include: "Dependency completed: {role.name}. Key decisions: {keyDecisions}. Context: {contextForDependents}. Files changed: {filesChanged}."
-10. **Working protocol** (inline):
-
-**Pre-Completion Verification (MANDATORY)**: Before reporting done, run all checks in order: (a) For each constraint prefixed "Spec invariant" in your role brief — extract and run the check= command as a separate shell invocation. (b) For each entry in your verificationChecks[] from plan.json roles[N].verificationChecks — run the check command as a separate shell invocation. (c) If plan.json verificationSpecs[] has an entry for your role, run it via its runCommand LAST. Capture exit code and output for each. Fix and re-run ALL checks if ANY fails. Don't report completion until every check exits 0. Spec files in `.design/specs/` are IMMUTABLE — fix code, never modify specs. Spec failures are blocking.
-
-**Universal Worker Rules**: Tool boundaries: You may use Read, Grep, Glob, Edit, Write, Bash (for tests/build/git), LSP. Do NOT use WebFetch, WebSearch, MCP tools, or Task (no sub-spawning). | Failure handling: If cannot complete, return a structured failure summary with: role name, what failed, why, what you tried, suggested alternative. If rollback triggers fire, stop immediately and report. | Scope boundaries: Stay within your scope directories. Don't modify files outside scope unless absolutely necessary for integration. | **Minimal edits**: Only change what is necessary. Do not reformat, re-indent, or reorder surrounding code/YAML. Formatting churn inflates diffs and obscures real changes. | **No-delete rule**: Do not delete or rename existing functions, classes, or constants unless your role goal explicitly requires removal. Additive goals mean additive changes. | **INSIGHT**: If you discover a surprising finding during your work (unexpected constraint, contradicts assumption, high-impact decision), include it prominently in your completion summary. Maximum one insight — choose the most surprising.
-
-**Completion format**: Return a structured text summary with these fields:
-```
-COMPLETION REPORT:
-role: {name}
-achieved: true|false
-filesChanged: [list of files]
-verificationResults:
-- type: "spec"|"check"|"verificationSpec" | id_or_label: "..." | passed: true|false | evidence: "..."
-keyDecisions: [list]
-contextForDependents: "summary for dependent roles"
-```
-
-**Before spawning each worker**, set the role to in_progress so the state machine allows the completed transition after return:
-```
-python3 -c "import subprocess,json; subprocess.run(['python3','$PLAN_CLI','update-status','.design/plan.json'], input=json.dumps([{'roleIndex':N,'status':'in_progress'}]), text=True)"
-python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event spawn --skill execute --agent "{worker-name}" --payload '{"model":"{model}","memoriesInjected":N}' || true
-Task(subagent_type: "general-purpose", model: "{model}", prompt: <role-specific prompt with all above>)
-```
-
-### 4. Process Results
-
-Process worker results as each Task() call returns.
-
-**On role completion**: Worker returns structured text summary with achieved, filesChanged, verificationResults, keyDecisions, contextForDependents.
-1. **Completion report validation**: Parse worker return value and validate structure. Required fields: role, achieved, filesChanged (list), verificationResults (list of type/id_or_label/passed/evidence), keyDecisions (list), contextForDependents (string). If any required field is missing, spawn a replacement Task() with instructions to re-run and return complete structured output. On second failure, escalate to user for manual review. Note: legacy v4 plan workers may return `acceptanceCriteria` instead of `verificationResults` — accept both formats.
-2. **Lead-side verification** (trust but verify): First, run `git diff --stat` to verify scope — flag any deleted files or modifications outside the role's scope.directories (unexpected deletions by additive-goal workers are a known failure mode). Then, for each verificationCheck in `plan.json roles[N].verificationChecks`, run the `check` command via Bash independently. Also run spec-run filtered to specs whose `source_role` matches the completed role: `python3 $PLAN_CLI spec-run .design/spec.jsonl`. **Before rejecting, verify the actual file state** — run `git diff --name-only HEAD` and `ls -la {relevant files}` to confirm the worker's changes are actually present on disk. Stale diagnostics from cached state or previous runs can produce false rejections. Only reject if the check fails AND the file state confirms the work is genuinely absent. If any check exits non-zero after confirming actual file state, spawn a retry Task() with explicit fix instructions (see retry handling below).
-3. Update plan.json — use `python3 -c` with subprocess to avoid pipe-to-script fragility (piping stdin directly to `python3 $PLAN_CLI` fails when the working directory is a Python package): `python3 -c "import subprocess,json; subprocess.run(['python3','$PLAN_CLI','update-status','.design/plan.json'], input=json.dumps([{'roleIndex':N,'status':'completed','result':'...'}]), text=True)"`. Then: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event completion --skill execute --agent "{worker-name}" --payload '{"specsPassed":N,"specsTotal":N,"filesChanged":N,"firstAttempt":true|false}' || true`
-4. Store `keyDecisions` and `contextForDependents` from the completion report. Inject this context into dependent role prompts when spawning them.
-5. **Progress update**: Output "Completed: {role.name} — {one-line summary}"
-6. **Post-worker CLI validation** (for SKILL.md-modifying roles only): If the completed role's filesChanged includes any SKILL.md file, scan the modified SKILL.md for `python3 $PLAN_CLI` references. For each referenced subcommand, run `python3 $PLAN_CLI {subcommand} --help 2>&1` to verify it exists. If a reference points to a non-existent command, fix the SKILL.md instruction before proceeding.
-
-**On role failure**: Worker returns a failure summary.
-1. Update plan.json: `echo '[{"roleIndex": N, "status": "failed", "result": "..."}]' | python3 $PLAN_CLI update-status .design/plan.json`. Then: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event failure --skill execute --agent "{worker-name}" --payload '{"reason":"...","attempt":N,"model":"..."}' || true`
-2. **Progress update**: Output "Failed: {role.name} — {failure reason}"
-3. Circuit breaker: `python3 $PLAN_CLI circuit-breaker .design/plan.json`. If `shouldAbort`: go to Post-Execution.
-4. Retries: `python3 $PLAN_CLI retry-candidates .design/plan.json`. If retryable (attempts < 3):
-   a. **Reflexion step**: Before retry, generate a 2-3 sentence reflection analyzing what went wrong. Ask: What was the root cause? What assumptions were incorrect? What should be done differently? Update plan.json to append reflection to role.result: `echo '[{"roleIndex": N, "status": "failed", "result": "{existing_result}\n\n--- Retry {attempt+1} Reflexion ---\n{reflection_text}\n--- End Reflexion ---"}]' | python3 $PLAN_CLI update-status .design/plan.json`.
-   b. Clean up partial work: `git checkout` + `rm` any artifacts from failed attempt.
-   c. **Adaptive model escalation**: On retry, escalate the worker's model to the next tier: haiku → sonnet → opus. If already on opus, keep opus.
-   d. Spawn retry Task() with structured context: Include in prompt "Retry {attempt+1}/3 for {role.name}. Previous attempt failed: {result}. Reflection: {generated reflection}. What to try differently: {suggested alternative or fallback}. Re-read acceptance criteria and verify each independently before reporting. **Fix constraint: modify existing files only — no new file creation allowed during retry.** If new files seem necessary, report it as a blocker instead." Use escalated model: `python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event respawn --skill execute --agent "{worker-name}" --payload '{"attempt":N,"escalatedModel":"...","reason":"..."}' || true`
-   e. **Progress update**: Output "Retry {attempt+1}/3: {role.name} (escalated to {new_model})"
-
-### 5. Post-Execution Auxiliaries
-
-Check `auxiliaryRoles[]` for `type: "post-execution"` roles. **Progress update** for each auxiliary: "Running {auxiliary.name}..."
-
-Post-execution auxiliaries are standalone Task() calls.
-
-**Integration Verifier** (integration-verifier): Spawn via `Task(subagent_type: "general-purpose", model: "sonnet")`. Prompt includes:
-- "Reject assumptions — verify everything by running actual commands. Skip nothing; report only what you can prove with evidence. If you cannot test something, say so explicitly rather than guessing."
-- "Verify all completed roles' work integrates correctly."
-- Completed roles: subjects, files changed (from worker reports)
-- Test command from `plan.json context.testCommand`
-- All `verificationChecks` from all completed roles
-- "Run the full test suite. Check for import/dependency conflicts. Verify cross-role connections. Run spec-run to verify all behavioral invariants pass. Test the goal end-to-end."
-- "**Verification spec integrity** (if plan.json has verificationSpecs[]): For each spec entry with a sha256 field, compute the current SHA256 of the file at path and compare to the stored value. Use command: `python3 -c \"import hashlib; print(hashlib.sha256(open('{path}', 'rb').read()).hexdigest())\"` or `shasum -a 256 {path} | awk '{print $1}'`. If ANY checksum mismatch is found, report as BLOCKING tamper detection failure — spec files are immutable and must not be modified during execution. Then run each spec via its runCommand and record results."
-- "**Only report results for checks you actually performed.** If a check requires capabilities you don't have (e.g., visual rendering, browser access), report it as `\"result\": \"skipped\"` with `\"details\": \"requires browser rendering\"`. Never infer visual or behavioral results from grep/file-reading alone — a CSS rule existing in a file does not mean it takes effect on the page."
-- "Save findings to `.design/integration-verifier-report.json` with this structure: `{\"status\": \"PASS|FAIL\", \"verificationSpecs\": [{\"role\": \"...\", \"path\": \"...\", \"checksumValid\": true|false, \"specResult\": \"pass|fail|skipped\", \"details\": \"...\"}] (if applicable), \"verificationResults\": [{\"role\": \"...\", \"label\": \"...\", \"result\": \"pass|fail|skipped\", \"details\": \"...\"}], \"crossRoleIssues\": [{\"issue\": \"...\", \"affectedRoles\": [...], \"severity\": \"blocking|high|medium|low\", \"suggestedFix\": \"...\"}], \"testResults\": {\"command\": \"...\", \"exitCode\": 0, \"output\": \"...\"}, \"endToEndVerification\": {\"tested\": true|false, \"result\": \"pass|fail|skipped\", \"details\": \"...\"}, \"summary\": \"...\"}`. Return PASS or FAIL with summary."
-
-**After integration-verifier completes**: Validate artifact via `python3 $PLAN_CLI validate-auxiliary-report --type integration-verifier .design/integration-verifier-report.json`. On validation failure: bypass Task() and perform integration verification directly via Bash: run `{testCommand}` from plan.json context if available, manually check that all worker-reported filesChanged exist via `ls -l {files}`, grep acceptance criteria for common issues. Save minimal report: `echo '{"status":"PASS","acceptanceCriteria":[],"crossRoleIssues":[],"testResults":{"command":"manual","exitCode":0,"output":"Bash bypass"},"endToEndVerification":{"tested":false,"result":"skipped","details":"Bash bypass fallback"},"summary":"Bash bypass — manual checks passed"}' > .design/integration-verifier-report.json`.
-
-On FAIL: spawn targeted fix workers for specific issues. Re-run verifier after fixes (max 2 fix rounds). **Progress update** after verifier runs: "Integration verification: {PASS|FAIL}"
-
-**Skip when**: only 1 role was executed, or all roles were independent (no shared directories, no cross-references), or all roles were fully sequential (maxDepth == roleCount) and all lead-side AC checks passed (lead already verified integration at each step).
-
-**Spec Regression Gate** (runs after integration-verifier): If `.design/spec.jsonl` exists, validate that all specs still pass — specs are the durable regression contract authored by design.
-
-```bash
-python3 $PLAN_CLI spec-run .design/spec.jsonl
-```
-
-**All specs MUST pass.** Specs that were failing before execution (newly authored by design as TDD targets) should now pass after workers implemented the behavior. Specs that were passing before execution must still pass (no regressions).
-
-**On failure**: For each failing spec, identify which role's work likely caused the regression (match spec `source_role` or EARS description to role scope). Spawn targeted fix workers for specific regressions. Re-run `spec-run` after fixes (max 2 fix rounds). **Show user**: "Spec regression gate: {passed}/{total} passing, {failed} regressions detected."
-
-**On all passing**: **Show user**: "Spec regression gate: {total}/{total} passing."
-
-**Spec tightening observations**: If during execution a worker discovers that a spec's check could be stricter (e.g., a boundary was looser than actual behavior), record the observation in reflection as a tightening proposal for the next design cycle. Execute does NOT write to spec.jsonl — design is the sole author.
-
-**Skip when**: `.design/spec.jsonl` does not exist.
-
-### 6. Goal Review
-
-Before declaring completion, evaluate whether the work achieves the original goal.
-
-Review against the goal from `plan.json`:
-1. **Completeness** — Does the sum of completed roles deliver the goal end-to-end?
-2. **Coherence** — Do the pieces fit together? Naming conventions consistent? Data models match across roles?
-3. **User intent** — Would a user looking at the result say "this is what I asked for"?
-
-If gaps are found: spawn a targeted worker to address them.
-
-4. **Deployment state** — Run `git status --porcelain`. If changes exist and the project uses GitOps or CI/CD (check CLAUDE.md, context.stack, or project conventions), the goal is NOT achieved until changes are committed and in the deployment pipeline. Report as "partial" and prompt the user to commit/push, or offer to do so.
-
-### 7. Complete
-
-1. Summary: `python3 $PLAN_CLI status .design/plan.json`. Display a rich end-of-run summary:
-
-```
-Execution Complete: {goal}
-Result: {goal achieved? yes/partial/no}
-
-Roles: {completed}/{total} completed, {failed} failed, {skipped} skipped
-{for each completed role: "  Completed: {name} — {one-line result}"}
-{for each failed role: "  Failed: {name} — {failure reason}"}
-
-Files Changed:
-{deduplicated list from worker reports, grouped by role — use bullet list}
-
-Verification Results:
-{use markdown table format for clarity:}
-| Label / Spec | Type | Result |
-|--------------|------|--------|
-| {label or spec EARS summary} | spec|check|verificationSpec | pass/fail |
-
-Integration: {PASS|FAIL|SKIPPED — with details}
-Spec Regression: {passed}/{total} passing {or "no spec.jsonl" if absent}
-
-{if any worker returned an INSIGHT: display "INSIGHT: {finding}" — these are the surprising discoveries worth highlighting}
-
-{if failures: "Recommended: /do:execute to retry failed roles, or /do:design to redesign."}
-{if all passed: "All roles complete."}
-
-{if goal involves external system (API, website, database, third-party service):
-"Manual Validation Required:
-  {specific command to run against live system, e.g. 'cd scraper && npm run scrape -- --headed --max-resorts 1'}
-  Automated tests used fixture/mock data. Verify against the live system before relying on this in production."}
-```
-2. **Trace** — Emit completion trace:
-
-   ```bash
-   python3 $PLAN_CLI trace-add .design/trace.jsonl --session-id $SESSION_ID --event skill-complete --skill execute --payload '{"outcome":"<completed|partial|failed|aborted>","rolesCompleted":N,"rolesFailed":N,"retries":N,"auxiliariesRun":["..."],"auxiliariesSkipped":["..."]}' || true
+   ```
+   python3 -m pytest <test-files> -x 2>&1
    ```
 
-3. **Memory curation** — Spawn memory-curator via `Task(subagent_type: "general-purpose")`:
+   - Tests that FAIL: correct — behavior not yet implemented
+   - Tests that PASS: investigate — either behavior already exists (contract should not be pending) or test is vacuous
+   - If all tests pass: halt role — contracts may already be satisfied, re-check with preflight
 
-Prompt includes:
-- "Reject aggressively — only store what a future engineer would find surprising and useful. If in doubt, reject. Prioritize unexpected findings over routine successes. Two high-quality entries are worth more than ten mediocre ones."
-- "Read all artifacts: `.design/plan.json` (all roles including completed, failed, skipped, in_progress, pending — read result field for each), `.design/reflection.jsonl` (most recent entry — the self-evaluation for this run), `.design/challenger-report.json` (if exists), `.design/scout-report.json` (if exists), `.design/integration-verifier-report.json` (if exists)."
-- "Read existing memories: `.design/memory.jsonl` (if exists). Note what is already recorded to avoid duplicates."
-- "The reflection entry contains the lead's honest self-evaluation of what worked and what didn't. Use it as a primary signal for what to record — reflections that identify surprising failures or unexpected successes are high-value memory candidates."
+4. **Trace**:
 
-**Quality gates** (all must pass before storing):
-
-- TRANSFERABILITY TEST: Useful in new session? (reject: test counts, metrics, file lists, timings, exit codes)
-- CATEGORY TEST: Fits convention|pattern|mistake|approach|failure|procedure? (reject: uncategorizable)
-- SURPRISE TEST: Unexpected/contradicts assumptions? Score 7-10. Routine success? Score 1-3.
-- DEDUPLICATION TEST: Not already in memory.jsonl? (reject: duplicates)
-- SPECIFICITY TEST: Contains concrete reference (path|command|error|pattern|tool)? (reject: vague)
-
-**Format:**
-- "For each memory that passes all gates: call `python3 $PLAN_CLI memory-add .design/memory.jsonl --category <cat> --keywords <csv> --content <text> --importance <1-10>`"
-- "Keywords: include technology names, directory paths, error types, tool names — terms a future goal description would contain."
-- "Content: <200 words. State what you learned AND why it matters. Not what happened."
-- "For failed/skipped roles: always create a `failure` or `mistake` memory with root cause analysis."
-- "For Known Gaps that describe persistent architectural limitations (not one-off session artifacts): create a `procedure` memory. Example: reflection says 'Keyword scoring is basic (tokenized overlap)' — this recurs across runs and should be stored as procedure memory with importance 7+ so future sessions are aware of the limitation."
-- "Return a summary when complete: 'Memory curation complete. Added {count} memories ({breakdown by category}). Rejected {rejected_count} candidates (not transferable or duplicates).'."
-
-```
-Task(subagent_type: "general-purpose", model: "haiku", prompt: <above>)
-```
-
-Wait for curator completion. **Show user**: "Memory curation: {count} learnings stored, {rejected} rejected." On failure: proceed (memory curation is optional).
-
-   **Memory feedback** — Close the feedback loop on injected memories. For each role that had memories injected (tracked during spawn in Step 3), build a JSON array and pipe to memory-feedback:
-
-   ```bash
-   echo '[{"memoryIds":["id1","id2"],"roleSucceeded":true,"firstAttempt":true},{"memoryIds":["id3"],"roleSucceeded":false,"firstAttempt":false}]' | python3 $PLAN_CLI memory-feedback .design/memory.jsonl
+   ```
+   python3 $DO trace add --root .do --json '{"event":"tests_generated","role":"<name>","test_count":<N>,"all_failing":true}'
    ```
 
-   This boosts memories that correlated with first-attempt success (+1 importance) and decays memories that correlated with failure (-1 importance). Ambiguous cases (succeeded on retry) are left unchanged. All entries get `usage_count` incremented. On failure: proceed (non-blocking).
+WHEN test generation is complete for all roles, proceed to the execution loop. Workers will implement until these tests pass.
 
-4. **Next action** — Always include `/do:reflect` first, then the situation-specific follow-up:
-   - All roles passed: "Next: `/do:reflect`" then "review the output" or `/do:simplify {target}` if significant code was added.
-   - Partial/failed: "Next: `/do:reflect`" then `/do:execute` to retry, or `/do:design {goal}` if failures are structural.
+---
 
-5. Archive: If all completed, move artifacts to history:
-   ```bash
-   python3 $PLAN_CLI archive .design
+# EXECUTION LOOP [EM-3, EM-14, EM-15, EM-18, XC-2] — creative
+
+Process roles in topological order from step 4, but ONLY roles in `roles_to_execute`.
+
+For roles in `roles_to_skip` (all contracts already satisfied): transition directly to `completed` without spawning a worker.
+
+For each role at index `i` in `roles_to_execute`:
+
+1. **Dependency gate**: all roles in `dep_indices` must be `completed`. If any dependency is `failed` or `skipped`: skip this role via cascade (handled automatically by failure path).
+
+2. **Snapshot scope** [EC-7] — record files before execution:
+
    ```
-   If partial (failures remain): leave artifacts in `.design/` for resume.
+   python3 $DO plan snapshot-scope --json '<plan-json>' --role-index <i>
+   ```
 
-**Arguments**: $ARGUMENTS
+   Record `before_files` for delta comparison after worker completes.
+
+3. **Transition to in_progress** and trace:
+
+   ```
+   python3 $DO plan transition --file .do/plans/current.json --role-index <i> --new-status in_progress
+   ```
+
+   ```
+   python3 $DO trace add --root .do --json '{"event":"role_start","role":"<name>","role_index":<i>}'
+   ```
+
+4. **Spawn worker** via Task tool [EM-3]:
+
+   Worker receives the role object directly from the plan — name, goal, context, constraints, verification, scope, expected_outputs, assumptions, rollback_triggers, fallback [EM-18, XC-2].
+
+   Worker instructions:
+   - Implement ONLY what the role specifies
+   - Respect scope boundaries — do not create/modify files outside `scope` directories [EC-8, EC-9]
+   - Contract tests were pre-generated in the TEST GENERATION phase — implementation must make those tests pass [EC-13]
+   - Run all `verification` commands — every command must exit 0 [EC-5]
+   - Report back: files created/modified, verification results, any issues
+   - On rollback trigger: stop and report failure with reason
+
+   Model from role's `model` field [EM-15]:
+   - `opus` = complex judgment tasks
+   - `sonnet` = typical implementation
+   - `haiku` = straightforward/mechanical tasks
+
+5. **Parallel execution** [EM-4]: roles with no mutual dependencies MAY run concurrently. Roles with overlapping scope (from plan `overlaps`) MUST be serialized.
+
+---
+
+# PER-WORKER VERIFICATION [EC-5, EC-6, EC-7, EC-9, EC-10] — deterministic
+
+After each worker completes:
+
+1. **Scope check** — every file the worker touched [EC-9]:
+
+   ```
+   python3 $DO plan scope-check --json '<plan-json>' --role-index <i> --file <touched-file>
+   ```
+
+   Any out-of-scope file is a violation. Worker must undo or the role fails.
+
+2. **File delta** [EC-7] — compare against pre-execution snapshot:
+
+   ```
+   python3 $DO plan snapshot-scope --json '<plan-json>' --role-index <i>
+   ```
+
+   Then compute delta:
+
+   ```
+   python3 $DO plan file-delta --before <before-files-csv> --after <after-files-csv>
+   ```
+
+   New files in delta absent from `expected_outputs` are unexpected output violations.
+
+3. **Unexpected outputs** [EC-10]:
+
+   ```
+   python3 $DO plan unexpected-outputs --json '<plan-json>' --role-index <i> --files <file1>,<file2>,...
+   ```
+
+   Files present but not in `expected_outputs` are flagged. Undeclared new files (from delta) are violations — role fails.
+
+4. **Verification commands** [EC-5]:
+
+   Run each command in the role's `verification` list. ALL must exit 0. On any failure: the role fails.
+
+5. **Status transition** and trace:
+   - Success:
+     ```
+     python3 $DO plan transition --file .do/plans/current.json --role-index <i> --new-status completed
+     python3 $DO trace add --root .do --json '{"event":"role_completed","role":"<name>","role_index":<i>}'
+     ```
+   - Failure:
+     ```
+     python3 $DO plan transition --file .do/plans/current.json --role-index <i> --new-status failed
+     python3 $DO trace add --root .do --json '{"event":"role_failed","role":"<name>","role_index":<i>,"reason":"<reason>"}'
+     ```
+
+---
+
+# FAILURE HANDLING [EC-2, EC-3, EM-7, EM-10] — deterministic
+
+WHEN a role fails:
+
+1. **Cascade** [EC-2, EC-3]:
+
+   ```
+   python3 $DO plan cascade --file .do/plans/current.json --role-index <i>
+   ```
+
+   Returns: `skipped` (list of role names), `pending_before` (count), `abort` (bool).
+   Transitively dependent pending roles are marked `skipped` [EM-7].
+
+2. **Abort check** [EM-10]:
+
+   If `abort` is true (>50% of pending roles would be skipped): halt entire execution.
+   Log abort reason. Do NOT continue with remaining roles.
+
+3. **Continue**: if not aborting, proceed to next role in execution order. Already-skipped roles are skipped automatically by the dependency gate.
+
+   (Role failure is already traced in PER-WORKER VERIFICATION step 5.)
+
+---
+
+# REGRESSION GATE [EC-4, SL-30] — deterministic
+
+After ALL roles complete (or execution halts):
+
+1. **Spec preflight** — re-verify all previously satisfied specs:
+
+   ```
+   python3 $DO spec preflight --root .do
+   ```
+
+2. Compare against `preflight_baseline` from load phase. Any newly failing spec is a regression.
+
+3. WHEN the regression gate has zero specs to verify: report as **vacuous**, not passing.
+
+4. On regression: report which specs regressed, which roles likely caused them (by scope overlap with spec artifacts). Execution is NOT successful if regressions exist.
+
+---
+
+# SPEC SATISFACTION [XC-6, XC-8, XC-9, EC-4b, EC-4c] — deterministic
+
+Only satisfy contracts that were PENDING at execution start (recorded in `pending_contract_ids` from load step 3).
+
+For each COMPLETED role:
+
+1. Get the role's `contract_ids` list.
+2. For each contract ID that is in `pending_contract_ids`, satisfy via CLI [XC-6]:
+
+   ```
+   python3 $DO spec satisfy --root .do --id <contract-id> --json '{"role":"<name>","verification":"passed"}'
+   ```
+
+3. Skip contract_ids that were already satisfied at execution start — do not re-satisfy.
+4. Only satisfy contracts whose verification commands passed [XC-8]. Never satisfy contracts for failed/skipped roles.
+5. Design is the sole spec author [XC-7] — execute never registers or modifies specs [EC-9].
+
+6. **Satisfaction completeness report** [EC-4b]: after all satisfaction attempts, report:
+   - Which contract_ids were satisfied (newly)
+   - Which contract_ids were already satisfied (skipped)
+   - Which contract_ids remain unsatisfied and why (role failed, verification failed, etc.)
+   - WHEN any contract_id from a completed role remains unsatisfied: report as a gap
+
+---
+
+# PERSIST [IE-8, IE-9] — deterministic
+
+1. **Trace** — record execution_complete with summary:
+
+   ```
+   python3 $DO trace add --root .do --json TRACE_JSON
+   ```
+
+   TRACE_JSON keys: event=execute_complete, completed=N, failed=N, skipped=N, contracts_satisfied=N, contracts_already_satisfied=N.
+
+2. **Reflection** — record execution outcome [LC-2]. Required fields: type, outcome, lens=process, urgency=deferred, failures=[], fix_proposals=[]:
+
+   ```
+   python3 $DO reflection add --root .do --json REFLECTION_JSON
+   ```
+
+   REFLECTION_JSON keys: type=execution, outcome=summary, lens=process, urgency=deferred, failures=[], fix_proposals=[].
+   If failures occurred: populate failures list with role names and reasons. Populate fix_proposals with actionable improvements.
+
+3. **Memory** — record significant execution learnings. Required fields: category=execution, keywords, content, source=do-execute, importance (3–10):
+
+   ```
+   python3 $DO memory add --root .do --json MEMORY_JSON
+   ```
+
+   MEMORY_JSON keys: category=execution, keywords=[...], content=learning, source=do-execute, importance=5.
+
+4. **Propose updates** [XC-16, DS-8]:
+   - Conventions: note patterns discovered during execution
+   - Aesthetics: note interaction patterns from UI-producing roles
+
+5. **Report to user** [LC-1] — present execution summary (completed/failed/skipped roles, regression gate result, satisfaction completeness). Wait for user acknowledgment before proceeding.
+
+6. **Invoke reflect** [LC-2, LC-8, XC-23] — MANDATORY. Execute without reflect is an incomplete cycle.
+   Invoke do-reflect via Skill tool. do-reflect uses `context: fork` — automatically runs in an isolated subagent.
+   After reflect completes, present immediate findings to user [LC-3].
+   User resolves each immediate finding before proceeding.
+
+7. **Invoke refine** [LC-7] — MANDATORY. Every execution cycle produces artifacts that benefit from a consistency and clarity pass.
+   Invoke do-refine via Skill tool (uses `context: fork` — automatically runs in an isolated subagent).
+   Trace the invocation:
+   ```
+   python3 $DO trace add --root .do --json '{"event":"refine_start"}'
+   ```
+   After refine completes:
+   ```
+   python3 $DO trace add --root .do --json '{"event":"refine_complete"}'
+   ```
+
+8. **Archive** [LC-5, XC-41] — after cycle complete (execute + reflect + refine, all immediate findings resolved):
+   ```
+   python3 $DO archive --root .do
+   ```
+   Verify archive post-conditions are met (no ephemeral dirs remain, persistent files intact, history contains archived artifacts).
+
+---
+
+# VERSION CONTROL [VC-2, VC-3, VC-5]
+
+Commit all changes produced by this execution cycle. Working tree must be clean afterward.
+
+1. Check working tree status: `git status --porcelain`
+2. Resolve untracked files:
+   - Implementation artifacts, tests, config produced by workers → `git add`
+   - Generated/environment-specific files (caches, build output) → add to `.gitignore`, then `git add .gitignore`
+   - Scratch output that should not persist → delete
+3. Stage all changes: `git add` relevant files
+4. Commit: message summarizing execution output (roles completed/failed/skipped, contracts satisfied, regressions)
+5. Verify clean: `git status --porcelain` — must produce no output
+
+If no changes were produced [VC-4]: skip commit.
+
+Run this AFTER archive (step 8) — the commit captures the final post-archive state of the cycle.
+
+---
+
+# PROHIBITIONS
+
+- `[EC-8]` MUST NOT modify the plan structure — only transition role statuses
+- `[EC-9]` MUST NOT author or modify spec contracts — design is the sole author
+- `[EC-10]` MUST NOT allow workers to modify files outside their declared scope
+- `[EM-16]` MUST NOT read project source files directly — delegate to workers
+- `[EM-17]` MUST NOT write implementation artifacts — workers produce all outputs
