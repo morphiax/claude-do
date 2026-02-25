@@ -1,7 +1,7 @@
 {
   "name": "do",
-  "version": "5.0.0",
-  "description": "Two skills for collaborative problem-solving — /shape evolves a shared spec through dialogue, /build implements what the spec describes and flags mismatches.",
+  "version": "5.1.0",
+  "description": "Three skills for collaborative problem-solving — /shape evolves a spec, /frame converges on the approach, /build implements and flags mismatches.",
   "author": {
     "name": "morphiax",
     "url": "https://github.com/morphiax"
@@ -9,10 +9,5 @@
   "homepage": "https://github.com/morphiax/claude-do",
   "repository": "https://github.com/morphiax/claude-do",
   "license": "MIT",
-  "keywords": [
-    "spec",
-    "planning",
-    "workflow",
-    "collaboration"
-  ]
+  "keywords": ["spec", "planning", "workflow", "collaboration"]
 }

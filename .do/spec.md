@@ -2,7 +2,7 @@
 
 ## What this is
 
-A Claude Code plugin that provides two skills — `/shape` and `/build` — for collaborative problem-solving between a human and an AI, where neither party fully understands the problem at the start, but together they converge on both understanding and solution.
+A Claude Code plugin that provides three skills — `/shape`, `/frame`, and `/build` — for collaborative problem-solving between a human and an AI, where neither party fully understands the problem at the start, but together they converge on both understanding and solution.
 
 The human brings domain knowledge, intent, and constraints they may not be able to fully articulate. The AI brings broad technical knowledge, pattern recognition, and the ability to structure fuzzy ideas. The spec is the shared document where their understanding meets.
 
@@ -22,9 +22,15 @@ The root spec lives at `.do/spec.md`. This file is always loaded — it's passiv
 
 When a problem decomposes into smaller problems, each gets its own spec under `.do/specs/`. The root spec acts as an index — a compressed map of what exists and where to find it. Sub-specs contain the full detail for their scope. The AI reads the root spec on every session and pulls in sub-specs as needed.
 
+## Where the context lives
+
+The context lives at `.do/context.md`, alongside the spec. It captures the specific choices and facts that steer the build — language, framework, deployment target, paths, conventions. The spec describes what; the context describes with-what. Same spec with different context produces different valid implementations.
+
+The context is not the spec. The spec is portable and technology-agnostic. The context is specific and may vary per environment or team. They change for different reasons — the spec changes when understanding of the problem evolves, the context changes when technology choices or environment change.
+
 ## How it works
 
-Two operations, expressed as skills. That's it.
+Three operations, expressed as skills.
 
 ### Shape
 
@@ -34,21 +40,35 @@ When decisions arise, shape uses structured questions to get quick, clear human 
 
 Shape is not one-directional. The human isn't dictating requirements. The AI isn't just transcribing. It's a brainstorm where both contribute what the other lacks. But the human has final authority over the spec. Shape never writes to the spec unilaterally — changes are discussed and agreed in conversation first, then captured.
 
+Shape sometimes starts from existing code rather than a blank page — the human has built something but never captured the intent behind it. When this happens, the code is evidence, not the spec. Shape does a quick survey to understand the domain, then pivots to the human: what problem were you solving? What was broken? What does success look like? Code details become probes to surface intent — "I see you built X, is that because Y?" — but the spec is written from the human's answers, not from the code structure.
+
+Shape can target either the current project's spec or do's own spec. By default it works on the project. When explicitly directed to work on itself, it reads and evolves the do plugin spec instead.
+
+### Frame
+
+A conversation that converges on the approach. Given a spec, frame explores what to build it with — language, framework, tools, patterns, infrastructure. It researches options, evaluates fit against the spec's constraints, surfaces tradeoffs, and captures idiomatic practices and gotchas for the chosen stack.
+
+Like shape, frame is a dialogue. The AI brings broad technical knowledge and awareness of the landscape. The human brings preferences, team constraints, and existing infrastructure realities. Frame proposes, the human decides. The result is captured in `.do/context.md`.
+
+Frame can revisit choices. Switching from Node to Bun, or Python to Rust, is a context change — update `context.md` and rebuild. The spec doesn't change because the problem didn't change.
+
 ### Build
 
-Read the spec. Implement what it describes. Use judgment on technology, architecture, patterns, and approach — the spec describes outcomes and constraints, not mechanisms.
+Read the spec and the context. Implement what they describe. Use judgment on architecture, patterns, and approach within the technology choices the context establishes.
 
-After building, compare the result to the spec. When a mismatch is found, build stops and flags it. It doesn't silently deviate and it doesn't unilaterally fix the spec. The mismatch feeds back into shape — either the spec needs updating (our understanding evolved) or the implementation needs fixing (it drifted from intent). That decision belongs to the human.
+After building, compare the result to the spec and context. When a mismatch is found, build stops and flags it. It doesn't silently deviate and it doesn't unilaterally fix the spec or context. The mismatch feeds back — either the spec needs updating (understanding evolved), the context needs updating (technology choice doesn't fit), or the implementation needs fixing (it drifted). That decision belongs to the human.
 
-This feedback loop is the core mechanism. Build produces evidence. Shape incorporates that evidence into shared understanding. The cycle continues until spec and implementation agree.
+This feedback loop is the core mechanism. Build produces evidence. Shape and frame incorporate that evidence into shared understanding. The cycle continues until spec, context, and implementation agree.
 
 ## What the spec contains
 
 - **Intent**: What we're trying to achieve. Starts vague, sharpens over time.
-- **Constraints**: Things that must hold. Both conceptual (the system must be simple) and environmental (must use Python, must run on X).
+- **Constraints**: Things that must hold. Conceptual constraints (the system must be simple) belong in the spec. Environmental and technology constraints (must use Python, must run on X) belong in the context.
 - **Understanding**: Concepts, patterns, and frameworks we've identified together that inform the solution.
 
 The spec is written for both audiences — the human and the AI. The human carries context between sessions; the AI reads the spec fresh each time. The language should serve both: clear enough for the human to skim and confirm, structured enough for the AI to act on without ambiguity.
+
+Every line should describe intent, state a constraint, or capture understanding that affects future decisions. Justifications, rationale for rejected alternatives, and explanatory prose that doesn't change behavior don't belong — those were resolved in conversation. The spec captures what was decided, not the deliberation.
 
 The spec is not a contract system. It's not numbered requirements. It's a living document in plain language. If it's getting long or complex, that's a signal to decompose — break the problem into smaller problems, each with their own spec under `.do/specs/`.
 
@@ -56,7 +76,7 @@ The spec is not a contract system. It's not numbered requirements. It's a living
 
 - **Simplicity above all.** Eliminate before solving. Reuse before building. The right amount of complexity is the minimum needed for the current problem. This hierarchy — eliminate > reuse > configure > extend > build — is the default approach for all work driven by this process.
 - **Outcomes over mechanisms.** The spec describes what, not how. The AI is trusted to choose the best approach.
-- **The spec is the source of truth.** If the spec and the solution disagree, one of them needs to change. Which one depends on whether our understanding has evolved.
+- **The spec and context are the source of truth.** If they disagree with the solution, something needs to change. Which one depends on whether understanding, technology choices, or the implementation drifted.
 - **Human authority.** Both human and AI contribute to shaping the spec. Understanding flows both ways. But the human has final say on what the spec contains.
 - **No ceremony for ceremony's sake.** If a step in the process doesn't directly help us converge on understanding or build the right thing, it doesn't belong.
 

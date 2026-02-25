@@ -7,7 +7,7 @@
     {
       "name": "do",
       "source": "./",
-      "description": "Shape specs collaboratively, build what they describe — /shape and /build",
+      "description": "Shape specs, frame the approach, build what they describe — /shape, /frame, and /build",
       "strict": false
     }
   ]
