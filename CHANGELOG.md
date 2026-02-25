@@ -1,5 +1,9 @@
 # Changelog
 
+## 5.7.1
+
+Frame audits existing tooling before researching. Assesses current project tooling against ecosystem best practices, surfaces gaps proactively rather than waiting for the human to ask.
+
 ## 5.7.0
 
 Subagent delegation and structured user questions. Skills delegate heavy work to subagents via Task tool with model tiers (haiku/sonnet/opus) based on complexity. Shape and frame use AskUserQuestion for decision points instead of prose questions.
