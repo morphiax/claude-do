@@ -84,6 +84,8 @@ The spec is written for both audiences — the human and the AI. The human carri
 
 Every line should describe intent, state a constraint, or capture understanding that affects future decisions. Justifications, rationale for rejected alternatives, and explanatory prose that doesn't change behavior don't belong — those were resolved in conversation. The spec captures what was decided, not the deliberation.
 
+**The spec contains no explanations.** Everything is specification. Build treats every section as actionable — either something to implement, a constraint to respect, or understanding that steers decisions. If a section describes behavior, build builds it. If it states a property, build ensures it holds. There is no "background context" in the spec — that's what `context.md` is for. This means shape must write concretely: when a conversation surfaces something that needs to be built, capture it as behavior (what it does, what it takes, what it produces), not as a concept (why it matters, what category it belongs to).
+
 The spec is not a contract system. It's not numbered requirements. It's a living document in plain language. If it's getting long or complex, that's a signal to decompose — break the problem into smaller problems, each with their own spec under `.do/specs/`.
 
 ## Constraints

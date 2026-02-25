@@ -1,5 +1,9 @@
 # Changelog
 
+## 5.5.0
+
+Specs are all specification, no explanations. Shape writes concretely for build — behavior, not concepts. Build treats every spec line as work, not background.
+
 ## 5.4.0
 
 Gap detection through version control. All three skills now check git diffs at session start, each through its own lens — shape detects intent drift (code changed, spec didn't), build detects spec/context evolution, frame detects undocumented technology changes and recurring struggles in commit history.

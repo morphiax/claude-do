@@ -56,6 +56,8 @@ Every line should describe intent, state a constraint, or capture understanding 
 
 Justifications, rationale for rejected alternatives, and explanatory prose that doesn't change behavior don't belong — those were resolved in conversation. The spec captures what was decided, not the deliberation.
 
+**Write for build.** Build treats every line of the spec as actionable — there are no explanations in a spec. When a conversation surfaces something that needs to be built, capture it as concrete behavior: what it does, what it takes as input, what it produces. Don't capture the concept or the rationale — capture the thing. "Verify source catalog against S3 schemas" is a concept. "A CLI command that samples N tables, re-extracts their Avro schema from S3, and compares column counts and types against the stored YAML — reporting mismatches" is specification build can act on.
+
 ### Keep it plain
 
 No contract IDs, no numbered requirements. Plain language. Written for both audiences — clear enough for the human to skim and confirm, structured enough for the AI to act on without ambiguity.
