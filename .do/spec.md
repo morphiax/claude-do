@@ -44,6 +44,8 @@ When decisions arise, shape uses AskUserQuestion to present structured choices �
 
 Shape is not one-directional. The human isn't dictating requirements. The AI isn't just transcribing. It's a brainstorm where both contribute what the other lacks. But the human has final authority over the spec. Shape never writes to the spec unilaterally — changes are discussed and agreed in conversation first, then captured.
 
+Shape actively guards its boundary with frame. When the conversation drifts toward technology choices — "should we use X?", "what framework?", "how should we deploy?" — shape redirects rather than engages. It notes the topic for frame and steers back to intent and constraints. Shape does not evaluate technology options or suggest tools.
+
 Shape sometimes starts from existing code rather than a blank page — the human has built something but never captured the intent behind it. When this happens, the code is evidence, not the spec. Shape does a quick survey to understand the domain, then pivots to the human: what problem were you solving? What was broken? What does success look like? Code details become probes to surface intent — "I see you built X, is that because Y?" — but the spec is written from the human's answers, not from the code structure.
 
 Shape can target either the current project's spec or do's own spec. By default it works on the project. When explicitly directed to work on itself, it reads and evolves the do plugin spec instead.

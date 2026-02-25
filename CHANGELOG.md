@@ -1,5 +1,9 @@
 # Changelog
 
+## 5.8.0
+
+Shape actively guards its boundary with frame. Technology questions are redirected, not engaged with — shape steers back to intent and constraints instead of evaluating tools or frameworks.
+
 ## 5.7.1
 
 Frame audits existing tooling before researching. Assesses current project tooling against ecosystem best practices, surfaces gaps proactively rather than waiting for the human to ask.
