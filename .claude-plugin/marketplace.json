@@ -7,7 +7,7 @@
     {
       "name": "do",
       "source": "./",
-      "description": "Spec-first multi-agent planning, execution, and refinement — /do:design, /do:execute, /do:research, /do:reflect, /do:refine",
+      "description": "Shape specs collaboratively, build what they describe — /shape and /build",
       "strict": false
     }
   ]
