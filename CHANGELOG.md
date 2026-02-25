@@ -1,5 +1,9 @@
 # Changelog
 
+## 5.9.0
+
+Spec exclusion clarity — implementation artifacts (file paths, API field names, deletion checklists, line numbers) don't belong in specs alongside deliberation artifacts. They feel concrete but describe what exists, not what to achieve.
+
 ## 5.8.0
 
 Shape actively guards its boundary with frame. Technology questions are redirected, not engaged with — shape steers back to intent and constraints instead of evaluating tools or frameworks.

@@ -58,7 +58,10 @@ Every line should describe intent, state a constraint, or capture understanding 
 - **Constraints**: Conceptual things that must hold. Technology and environment constraints belong in the context (`.do/context.md`), not the spec.
 - **Understanding**: Concepts, patterns, and frameworks we've identified together that inform the solution.
 
-Justifications, rationale for rejected alternatives, and explanatory prose that doesn't change behavior don't belong — those were resolved in conversation. The spec captures what was decided, not the deliberation.
+Two categories don't belong:
+
+- **Deliberation artifacts**: justifications, rationale for rejected alternatives, explanatory prose. Those were resolved in conversation.
+- **Implementation artifacts**: file paths, API field names, specific code changes, deletion checklists, line numbers. These feel concrete and actionable, which is why they slip in — but they describe what exists or what to change, not what to achieve. They belong in context or in build's task list.
 
 **Write for build.** Build treats every line of the spec as actionable — there are no explanations in a spec. When a conversation surfaces something that needs to be built, capture it as concrete behavior: what it does, what it takes as input, what it produces. Don't capture the concept or the rationale — capture the thing. "Verify source catalog against S3 schemas" is a concept. "A CLI command that samples N tables, re-extracts their Avro schema from S3, and compares column counts and types against the stored YAML — reporting mismatches" is specification build can act on.
 

@@ -90,7 +90,10 @@ The diff is a conversation starter, not an action trigger. Each skill uses it to
 
 The spec is written for both audiences — the human and the AI. The human carries context between sessions; the AI reads the spec fresh each time. The language should serve both: clear enough for the human to skim and confirm, structured enough for the AI to act on without ambiguity.
 
-Every line should describe intent, state a constraint, or capture understanding that affects future decisions. Justifications, rationale for rejected alternatives, and explanatory prose that doesn't change behavior don't belong — those were resolved in conversation. The spec captures what was decided, not the deliberation.
+Every line should describe intent, state a constraint, or capture understanding that affects future decisions. Two categories don't belong:
+
+- **Deliberation artifacts**: justifications, rationale for rejected alternatives, explanatory prose that doesn't change behavior. Those were resolved in conversation.
+- **Implementation artifacts**: file paths, API field names, specific code changes, deletion checklists, line numbers. These feel concrete and actionable, which is why they slip in — but they describe what exists or what to change, not what to achieve. They belong in context or in build's task list.
 
 **The spec contains no explanations.** Everything is specification. Build treats every section as actionable — either something to implement, a constraint to respect, or understanding that steers decisions. If a section describes behavior, build builds it. If it states a property, build ensures it holds. There is no "background context" in the spec — that's what `context.md` is for. This means shape must write concretely: when a conversation surfaces something that needs to be built, capture it as behavior (what it does, what it takes, what it produces), not as a concept (why it matters, what category it belongs to).
 
