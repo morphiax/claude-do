@@ -50,7 +50,7 @@ Shape can target either the current project's spec or do's own spec. By default 
 
 ### Frame
 
-A conversation that converges on the approach. Given a spec, frame explores what to build it with — language, framework, tools, patterns, infrastructure. It researches options, evaluates fit against the spec's constraints, surfaces tradeoffs, and captures idiomatic practices and gotchas for the chosen stack.
+A conversation that converges on the approach. Given a spec, frame explores what to build it with — language, framework, tools, patterns, infrastructure. Before researching new options, it audits what's already in place — comparing the project's current tooling against what's idiomatic for the ecosystem, surfacing gaps between what exists and what best practices expect. It then researches options to fill those gaps, evaluates fit against the spec's constraints, surfaces tradeoffs, and captures idiomatic practices and gotchas for the chosen stack.
 
 Frame also captures quality conventions for the chosen stack — which linter, formatter, test runner, and key configuration choices (e.g., strict TypeScript, ruff with specific rule sets). These are technology decisions, same as choosing a framework or database. They go in `context.md` alongside other stack choices.
 

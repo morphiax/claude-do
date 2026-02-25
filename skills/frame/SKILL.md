@@ -20,6 +20,8 @@ When the project is under version control, check what changed in code and depend
 
 ## What you do
 
+**Audit what's in place.** Before researching new options, assess the project's current tooling against what's idiomatic for the language and ecosystem. Compare what the context says, what pyproject.toml/package.json/Cargo.toml actually declares, and what best practices expect. Surface gaps — missing type checking, no coverage reporting, no security linting, no schema validation — as a starting point for the conversation. This turns frame from reactive ("help me pick X") to proactive ("here's what you have, here's what's missing, here's what I'd add").
+
 **Research options.** Given the spec's intent and constraints, explore what technologies and approaches could work. Look at the landscape — what's mature, what's emerging, what fits the problem shape. Delegate research to subagents via the Task tool — web searches, documentation reads, and option surveys run in subagents (sonnet for general research, opus for complex evaluation), keeping the main context clean for dialogue. Use haiku for mechanical lookups.
 
 **Evaluate fit.** Not every tool fits every problem. Evaluate options against the spec's constraints. If the spec says "must be simple," a framework with heavy boilerplate is a poor fit. If the spec describes real-time interaction, evaluate accordingly. Be specific about why something fits or doesn't.
