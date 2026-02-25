@@ -37,6 +37,7 @@ Changes to the context follow from conversation, not the other way around. Discu
 When technology choices are made and the human agrees, update `.do/context.md`. The context should capture:
 
 - **Technology choices**: Language, framework, tools, runtime
+- **Quality conventions**: Linter, formatter, test runner, key configuration choices (e.g., strict TypeScript, ruff rule sets, coverage thresholds)
 - **Environment facts**: Paths, deployment targets, infrastructure
 - **Conventions**: Naming, structure, patterns to follow
 - **Practices and gotchas**: Idiomatic usage, things to watch out for

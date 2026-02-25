@@ -22,6 +22,8 @@ When the project is under version control, check what changed in the spec and co
 
 **Treat the spec as all specification.** The spec contains no explanations, no background context, no philosophy. Every section is either intent (build it), a constraint (enforce it), or understanding (use it to make decisions). If a section describes behavior — even abstractly — that behavior needs to exist in the implementation. Don't classify any section as "just context" or "nice to know." That's what `context.md` is for. If it's in the spec, it's work.
 
+**Set up quality infrastructure first.** When the context defines quality conventions (linter, formatter, test runner), create the config files that encode them before writing application code — `.prettierrc`, `eslint.config.js`, `ruff.toml`, test runner config, etc. The config files are the source of truth for quality practices; `context.md` has the human-readable summary, config files have the machine-readable details.
+
 **Implement.** Read the spec and context, then build what they describe. Use your judgment on architecture, patterns, and approach within the technology choices the context establishes. The spec tells you what and why. The context tells you with-what. You decide the rest.
 
 **Prefer simplicity.** Apply the hierarchy: eliminate the need before solving it. Reuse an existing solution before building one. Configure before extending. Extend before creating from scratch. Build the minimum that satisfies the spec.
