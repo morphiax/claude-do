@@ -24,6 +24,18 @@ If there's no context file, use your judgment on technology — but flag that th
 
 **Stop on mismatch.** When you find a mismatch, stop and flag it. Don't silently deviate and don't unilaterally fix the spec or context. The mismatch is evidence — it means either the spec needs updating (understanding evolved), the context needs updating (technology choice doesn't fit), or the implementation needs fixing (it drifted). That decision belongs to the human. Raise it so they can take it back to shape or frame, or tell you to fix the implementation.
 
+## Track progress with tasks
+
+When the build involves multiple components — more than one file, module, or logical piece — use the task list to track progress:
+
+1. **Decompose** the work into tasks using TaskCreate before writing code. Each task should be one buildable unit (a module, a template, a test suite).
+2. **Mark in_progress** when you start a task, **completed** when it's done and verified.
+3. **Check the list** at the start of any session. If tasks already exist, resume from where you left off rather than starting over.
+
+This makes multi-component builds visible and resumable. The human can see what's done, what's in progress, and what's left — especially useful across sessions.
+
+Skip the task list for trivial builds (single file, quick fix). Use it when the work has enough parts that tracking matters.
+
 ## The feedback loop
 
 Build produces evidence. When you implement something and discover that the spec is ambiguous, the context is incomplete, or something doesn't work in practice — that's valuable. Flag it clearly. That evidence feeds back into shape (for spec issues) or frame (for technology/context issues), where the shared understanding gets updated. Then build continues.

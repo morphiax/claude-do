@@ -56,6 +56,8 @@ Frame can revisit choices. Switching from Node to Bun, or Python to Rust, is a c
 
 Read the spec and the context. Implement what they describe. Use judgment on architecture, patterns, and approach within the technology choices the context establishes.
 
+When the build involves multiple components, build decomposes the work into tasks (using the task list) before writing code. Each task is one buildable unit — a module, a template, a test suite. Tasks are marked in_progress when started, completed when done and verified. This makes multi-component builds visible and resumable across sessions. At the start of any session, build checks the task list and resumes from where it left off rather than starting over. Skip the task list for trivial builds (single file, quick fix).
+
 After building, compare the result to the spec and context. When a mismatch is found, build stops and flags it. It doesn't silently deviate and it doesn't unilaterally fix the spec or context. The mismatch feeds back — either the spec needs updating (understanding evolved), the context needs updating (technology choice doesn't fit), or the implementation needs fixing (it drifted). That decision belongs to the human.
 
 This feedback loop is the core mechanism. Build produces evidence. Shape and frame incorporate that evidence into shared understanding. The cycle continues until spec, context, and implementation agree.
