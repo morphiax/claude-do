@@ -32,13 +32,15 @@ Context captures choices and environment facts that affect how future work is do
 
 ## How it works
 
-Three operations, expressed as skills.
+Three operations, expressed as skills. Each skill runs in the main agent context for human interaction, but delegates heavy lifting — code surveys, research, implementation — to subagents via the Task tool. This keeps the main context clean and focused on the dialogue.
+
+Subagents are spawned with a model tier matching the task complexity: haiku for mechanical work (creating config files, reading and summarizing files), sonnet for moderate work (researching a library, implementing a straightforward module), opus for complex work (architectural decisions, nuanced code requiring deep understanding). The skill chooses the tier per subtask.
 
 ### Shape
 
 A conversation that evolves the spec. Not a drafting exercise — a dialogue. The AI asks questions, the human answers, and those answers may lead to new questions. Understanding emerges through the exchange, not from either party working alone.
 
-When decisions arise, shape uses structured questions to get quick, clear human input. The conversation narrows the circle — each exchange makes the shared understanding more precise.
+When decisions arise, shape uses AskUserQuestion to present structured choices — not prose questions buried in output. This gives the human clear, quick decision points. The conversation narrows the circle — each exchange makes the shared understanding more precise.
 
 Shape is not one-directional. The human isn't dictating requirements. The AI isn't just transcribing. It's a brainstorm where both contribute what the other lacks. But the human has final authority over the spec. Shape never writes to the spec unilaterally — changes are discussed and agreed in conversation first, then captured.
 

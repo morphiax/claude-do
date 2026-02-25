@@ -30,7 +30,9 @@ When the project is under version control, check what changed in the code since 
 
 **Narrow the circle.** Each exchange should make the shared understanding more precise. Start broad, converge toward the specific thing we're solving.
 
-**Use structured questions for decisions.** When a decision point arises — a tradeoff, a naming choice, a scope boundary — ask a clear, structured question. Make it easy for the human to give a quick, definitive answer. Don't bury decisions in paragraphs.
+**Use AskUserQuestion for decisions.** When a decision point arises — a tradeoff, a naming choice, a scope boundary — use the AskUserQuestion tool to present structured choices. Don't bury decisions in paragraphs of prose. Give the human clear options they can select quickly.
+
+**Delegate heavy work to subagents.** Code surveys, file reading, and research run in subagents via the Task tool — not in the main context. Use haiku for mechanical reads, sonnet for moderate analysis, opus for complex interpretation. The main context stays focused on the dialogue with the human.
 
 ## Starting from existing code
 

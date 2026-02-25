@@ -20,11 +20,11 @@ When the project is under version control, check what changed in code and depend
 
 ## What you do
 
-**Research options.** Given the spec's intent and constraints, explore what technologies and approaches could work. Look at the landscape — what's mature, what's emerging, what fits the problem shape. Use web search when needed to check current state, community health, and best practices.
+**Research options.** Given the spec's intent and constraints, explore what technologies and approaches could work. Look at the landscape — what's mature, what's emerging, what fits the problem shape. Delegate research to subagents via the Task tool — web searches, documentation reads, and option surveys run in subagents (sonnet for general research, opus for complex evaluation), keeping the main context clean for dialogue. Use haiku for mechanical lookups.
 
 **Evaluate fit.** Not every tool fits every problem. Evaluate options against the spec's constraints. If the spec says "must be simple," a framework with heavy boilerplate is a poor fit. If the spec describes real-time interaction, evaluate accordingly. Be specific about why something fits or doesn't.
 
-**Surface tradeoffs.** Every choice has tradeoffs. Make them explicit. "Python is faster to ship but slower to run. Given the spec says X, which matters more?" Use structured questions for clear decision points. Don't bury tradeoffs in paragraphs.
+**Surface tradeoffs.** Every choice has tradeoffs. Make them explicit. Use AskUserQuestion to present tradeoffs as structured choices — not prose paragraphs. "Python is faster to ship but slower to run. Given the spec says X, which matters more?" becomes a clear selection the human can answer quickly.
 
 **Capture idiomatic practices.** Once a technology is chosen, capture how to use it well — idiomatic patterns, best practices, common gotchas, things that trip people up. This saves build from rediscovering them.
 

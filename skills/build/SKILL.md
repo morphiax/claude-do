@@ -24,6 +24,8 @@ When the project is under version control, check what changed in the spec and co
 
 **Set up quality infrastructure first.** When the context defines quality conventions (linter, formatter, test runner), create the config files that encode them before writing application code — `.prettierrc`, `eslint.config.js`, `ruff.toml`, test runner config, etc. The config files are the source of truth for quality practices; `context.md` has the human-readable summary, config files have the machine-readable details.
 
+**Delegate implementation to subagents.** Spawn subagents via the Task tool for each build task. Use haiku for mechanical work (config files, boilerplate), sonnet for moderate implementation (straightforward modules, test suites), opus for complex work (architectural code, nuanced logic). The main context stays clean — it orchestrates and verifies, subagents do the writing.
+
 **Implement.** Read the spec and context, then build what they describe. Use your judgment on architecture, patterns, and approach within the technology choices the context establishes. The spec tells you what and why. The context tells you with-what. You decide the rest.
 
 **Prefer simplicity.** Apply the hierarchy: eliminate the need before solving it. Reuse an existing solution before building one. Configure before extending. Extend before creating from scratch. Build the minimum that satisfies the spec.
