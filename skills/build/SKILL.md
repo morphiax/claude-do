@@ -14,6 +14,10 @@ Read `.do/spec.md` and `.do/context.md`. The spec tells you what to build and wh
 
 If there's no context file, use your judgment on technology — but flag that the context is missing so frame can establish it.
 
+## Check what changed
+
+When the spec or context is under version control, check what changed since the last commit (`git diff`) before starting. The diff is the most direct signal of what evolved — it shows where understanding shifted and often indicates what needs to be built or rebuilt. This signal isn't always available (new projects, no git history), but when present, use it to focus your work.
+
 ## What you do
 
 **Implement.** Read the spec and context, then build what they describe. Use your judgment on architecture, patterns, and approach within the technology choices the context establishes. The spec tells you what and why. The context tells you with-what. You decide the rest.

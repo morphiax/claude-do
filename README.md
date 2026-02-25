@@ -3,7 +3,7 @@
 > Shape specs, frame the approach, build what they describe
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Version](https://img.shields.io/badge/version-5.2.0-green.svg)
+![Version](https://img.shields.io/badge/version-5.3.0-green.svg)
 
 ## What It Does
 

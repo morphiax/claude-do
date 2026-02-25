@@ -37,6 +37,8 @@ When technology choices are made and the human agrees, update `.do/context.md`. 
 - **Conventions**: Naming, structure, patterns to follow
 - **Practices and gotchas**: Idiomatic usage, things to watch out for
 
+The context captures choices and environment facts that affect how future work is done. It does not capture build outputs, runtime statistics, or results from specific runs — those are ephemeral and belong in commit messages or session notes, not in a document that steers the next build.
+
 The context is a living document. Revisiting choices is normal — switching from Node to Bun, or adding a new tool, is just a context update. The spec doesn't change because the problem didn't change.
 
 ## Working on do's own context

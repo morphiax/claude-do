@@ -1,5 +1,12 @@
 # Changelog
 
+## 5.3.0
+
+Add context boundary and build diff-awareness.
+
+- **Context boundary**: Spec and frame skill now explicitly state that context captures choices and environment facts, not build outputs or runtime stats
+- **Build reads the diff**: Build skill checks `git diff` on spec/context before starting — the delta since last commit is the most direct signal of what evolved and what needs attention
+
 ## 5.0.0
 
 Complete rewrite. Replaced 5 skills, a Python CLI, 341 behavioral contracts, and 365 tests with 2 skills and a spec convention.

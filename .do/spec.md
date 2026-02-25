@@ -28,6 +28,8 @@ The context lives at `.do/context.md`, alongside the spec. It captures the speci
 
 The context is not the spec. The spec is portable and technology-agnostic. The context is specific and may vary per environment or team. They change for different reasons — the spec changes when understanding of the problem evolves, the context changes when technology choices or environment change.
 
+Context captures choices and environment facts that affect how future work is done. It does not capture build outputs, runtime statistics, or results from specific runs — those are ephemeral and belong in commit messages or session notes, not in a document that steers the next build.
+
 ## How it works
 
 Three operations, expressed as skills.
@@ -55,6 +57,8 @@ Frame can revisit choices. Switching from Node to Bun, or Python to Rust, is a c
 ### Build
 
 Read the spec and the context. Implement what they describe. Use judgment on architecture, patterns, and approach within the technology choices the context establishes.
+
+When the spec or context is under version control, build checks what changed since the last commit before starting. The diff is the most direct signal of what evolved — it shows where understanding shifted and often indicates what needs to be built or rebuilt. This signal isn't always available (new projects, no git history), but when present, build uses it.
 
 When the build involves multiple components, build decomposes the work into tasks (using the task list) before writing code. Each task is one buildable unit — a module, a template, a test suite. Tasks are marked in_progress when started, completed when done and verified. This makes multi-component builds visible and resumable across sessions. At the start of any session, build checks the task list and resumes from where it left off rather than starting over. Skip the task list for trivial builds (single file, quick fix).
 
