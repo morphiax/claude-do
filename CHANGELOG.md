@@ -1,5 +1,13 @@
 # Changelog
 
+## 5.7.0
+
+Subagent delegation and structured user questions. Skills delegate heavy work to subagents via Task tool with model tiers (haiku/sonnet/opus) based on complexity. Shape and frame use AskUserQuestion for decision points instead of prose questions.
+
+## 5.6.0
+
+Quality infrastructure as project-local concern. Frame captures quality conventions (linter, formatter, test runner) in context.md. Build materializes them as config files before application code.
+
 ## 5.5.0
 
 Specs are all specification, no explanations. Shape writes concretely for build — behavior, not concepts. Build treats every spec line as work, not background.
