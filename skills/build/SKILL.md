@@ -16,7 +16,7 @@ If there's no context file, use your judgment on technology — but flag that th
 
 ## Check what changed
 
-When the spec or context is under version control, check what changed since the last commit (`git diff`) before starting. The diff is the most direct signal of what evolved — it shows where understanding shifted and often indicates what needs to be built or rebuilt. This signal isn't always available (new projects, no git history), but when present, use it to focus your work.
+When the project is under version control, check what changed in the spec and context since the last commit (`git diff .do/`) before starting. The diff shows what understanding or technology choices evolved — it's the most direct signal of what needs to be built or rebuilt. When version control isn't available, skip this step.
 
 ## What you do
 

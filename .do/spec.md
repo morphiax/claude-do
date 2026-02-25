@@ -58,13 +58,21 @@ Frame can revisit choices. Switching from Node to Bun, or Python to Rust, is a c
 
 Read the spec and the context. Implement what they describe. Use judgment on architecture, patterns, and approach within the technology choices the context establishes.
 
-When the spec or context is under version control, build checks what changed since the last commit before starting. The diff is the most direct signal of what evolved — it shows where understanding shifted and often indicates what needs to be built or rebuilt. This signal isn't always available (new projects, no git history), but when present, build uses it.
-
 When the build involves multiple components, build decomposes the work into tasks (using the task list) before writing code. Each task is one buildable unit — a module, a template, a test suite. Tasks are marked in_progress when started, completed when done and verified. This makes multi-component builds visible and resumable across sessions. At the start of any session, build checks the task list and resumes from where it left off rather than starting over. Skip the task list for trivial builds (single file, quick fix).
 
 After building, compare the result to the spec and context. When a mismatch is found, build stops and flags it. It doesn't silently deviate and it doesn't unilaterally fix the spec or context. The mismatch feeds back — either the spec needs updating (understanding evolved), the context needs updating (technology choice doesn't fit), or the implementation needs fixing (it drifted). That decision belongs to the human.
 
 This feedback loop is the core mechanism. Build produces evidence. Shape and frame incorporate that evidence into shared understanding. The cycle continues until spec, context, and implementation agree.
+
+### Gap detection through version control
+
+When a project is under version control, each skill checks what changed since the last commit at session start. The diff is evidence of what happened between sessions — each skill reads it through its own lens to detect a specific type of gap between what's documented and what's real.
+
+- **Shape** reads code and implementation diffs against the spec. If the code changed in ways the spec doesn't account for, shape surfaces it: was this intentional, or should the spec catch up? This matters because work often happens outside the shape → frame → build flow — quick fixes, experiments, ad-hoc changes. The diff catches those so the spec stays honest.
+- **Build** reads spec and context diffs to see what understanding or technology choices evolved, and focuses its work accordingly.
+- **Frame** reads code and dependency diffs against the context. If tools, dependencies, or infrastructure changed without a context update, frame surfaces it. Frame also uses commit history to detect recurring patterns — repeated fixes or reverts in the same area signal a technology choice that isn't working and may need rethinking.
+
+The diff is a conversation starter, not an action trigger. Each skill uses it to ask better questions and focus its work, not to act unilaterally. When version control isn't available, the skills work without it — the diff is a signal, not a requirement.
 
 ## What the spec contains
 

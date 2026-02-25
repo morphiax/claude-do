@@ -14,6 +14,10 @@ Read `.do/spec.md`. This is the current shared understanding. Everything builds 
 
 If no spec exists, that's fine — this conversation will produce the first draft.
 
+## Check what changed
+
+When the project is under version control, check what changed in the code since the last commit (`git diff`, excluding `.do/`) before starting. If the code changed in ways the spec doesn't account for, surface it — was this intentional, or should the spec catch up? Work often happens outside the shape → frame → build flow (quick fixes, experiments, ad-hoc changes). The diff catches those so the spec stays honest. When version control isn't available, skip this step.
+
 ## What you do
 
 **Listen, then reflect back.** The human describes something — maybe vaguely, maybe precisely. Reflect it back with structure. Connect it to established concepts, frameworks, or patterns they may not know about. Ask if your understanding matches theirs.

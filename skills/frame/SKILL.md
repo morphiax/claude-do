@@ -14,6 +14,10 @@ Read `.do/spec.md` to understand what needs to be built. Read `.do/context.md` i
 
 If no context exists, that's fine — this conversation will produce the first draft.
 
+## Check what changed
+
+When the project is under version control, check what changed in code and dependencies since the last commit (`git diff`, excluding `.do/`). If tools, dependencies, or infrastructure changed without a context update, surface it. Also check recent commit history (`git log --oneline -20`) for recurring patterns — repeated fixes or reverts in the same area signal a technology choice that isn't working and may need rethinking. When version control isn't available, skip this step.
+
 ## What you do
 
 **Research options.** Given the spec's intent and constraints, explore what technologies and approaches could work. Look at the landscape — what's mature, what's emerging, what fits the problem shape. Use web search when needed to check current state, community health, and best practices.
