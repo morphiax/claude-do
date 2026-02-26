@@ -2,9 +2,11 @@
 
 ## What this is
 
-A Claude Code plugin that provides three skills — `/shape`, `/frame`, and `/build` — for collaborative problem-solving between a human and an AI, where neither party fully understands the problem at the start, but together they converge on both understanding and solution.
+A collaborative sensemaking system. Two parties — a human and an AI — converge on shared understanding of a problem and its solution through dialogue, with that understanding externalized in persistent documents that survive across sessions.
 
-The human brings domain knowledge, intent, and constraints they may not be able to fully articulate. The AI brings broad technical knowledge, pattern recognition, and the ability to structure fuzzy ideas. The spec is the shared document where their understanding meets.
+The human brings domain knowledge, intent, and constraints they may not be able to fully articulate. The AI brings pattern recognition, broad technical knowledge, and the ability to structure fuzzy ideas. Neither fully understands the problem at the start. Understanding emerges through the exchange, not from either party working alone.
+
+The spec is the externalized shared mental model — the single document where understanding meets. It captures what we're trying to achieve and what must hold true while we achieve it. The context captures the approach — technology, conventions, plan, and progress. Together they are the complete re-entry point: any new session reads them and picks up where the last one left off.
 
 This spec is both the description of the process and the first application of it.
 
@@ -24,71 +26,60 @@ When a problem decomposes into smaller problems, each gets its own spec under `.
 
 ## Where the context lives
 
-The context lives at `.do/context.md`, alongside the spec. It captures the specific choices and facts that steer the build — language, framework, deployment target, paths, conventions. The spec describes what; the context describes with-what. Same spec with different context produces different valid implementations.
+The context lives at `.do/context.md`, alongside the spec. It captures everything that steers and tracks the build — technology choices, conventions, environment facts, the current plan, and progress. The spec describes what; the context describes with-what, in-what-order, and where-we-are. Same spec with different context produces different valid implementations.
 
-The context is not the spec. The spec is portable and technology-agnostic. The context is specific and may vary per environment or team. They change for different reasons — the spec changes when understanding of the problem evolves, the context changes when technology choices or environment change.
+The context is not the spec. The spec is portable and technology-agnostic. The context is specific and may vary per environment or team. They change for different reasons — the spec changes when understanding of the problem evolves, the context changes when technology choices, plans, or progress change.
 
-Context captures choices and environment facts that affect how future work is done. It does not capture build outputs, runtime statistics, or results from specific runs — those are ephemeral and belong in commit messages or session notes, not in a document that steers the next build.
+The context is a shared document. Shape writes the approach — technology choices, conventions, environment facts, and the plan for what to build next. Build writes status — what's done, what's blocked, what decisions are pending. This makes the context the complete handoff between sessions: shape plans, build executes and reports, the next session picks up from what the context says.
 
 ## How it works
 
-Three operations, expressed as skills. Each skill runs in the main agent context for human interaction only — the main context is reserved for dialogue with the human and orchestration of subagents. All other work runs in subagents via the Task tool: file reading, code surveys, research, web searches, implementation, test execution. The test is simple: if the action gathers information or produces artifacts rather than talking to the human, it belongs in a subagent. The only exception is reading `.do/spec.md` and `.do/context.md` at session start.
+Two skills — shape and build — expressed as a Claude Code plugin. Skills run in the main agent context for human interaction only. The main context is reserved for dialogue and orchestration — all other work (file reading, research, implementation) runs in subagents. Skills use structured sequential thinking when a problem has enough dimensions that reasoning in a single pass would lose nuance. Skills signal their activity so the human can see what's happening and at what phase.
 
-Subagents are spawned with a model tier matching the task complexity: haiku for mechanical work (creating config files, reading and summarizing files), sonnet for moderate work (researching a library, implementing a straightforward module), opus for complex work (architectural decisions, nuanced code requiring deep understanding). The skill chooses the tier per subtask.
-
-When a skill encounters a problem with enough dimensions that reasoning through it in a single pass would lose nuance, it uses structured sequential thinking to work through it step by step. Each step can build on, revise, or branch from earlier steps — the reasoning adapts as understanding deepens. This applies to each skill differently: shape uses it when disentangling competing constraints or connecting fuzzy intent to known patterns, frame uses it when evaluating technology options against interacting tradeoffs, and build uses it when decomposing a spec into buildable units or tracing constraints through an implementation. Sequential thinking is a tool for complex reasoning, not a ceremony — skills skip it when the problem is straightforward.
-
-Each skill signals its activity through a task spinner. On activation, the skill creates a task with a descriptive `activeForm` and sets it to `in_progress` — the UI shows a spinner with that text for the duration of the work. The spinner text updates as the skill progresses through phases. This gives the human confidence that the right skill is active and what it's doing, without verbose output.
+Each skill is an instruction set the agent reads fresh each session. A well-formed skill makes three things unambiguous: what to do and in what order (protocol), what must always hold (rules), and what to apply situationally (techniques). An agent following the skill should produce consistent behavior — the same skill with the same inputs should yield recognizably similar sessions.
 
 ### Shape
 
-A conversation that evolves the spec. Not a drafting exercise — a dialogue. The AI asks questions, the human answers, and those answers may lead to new questions. Understanding emerges through the exchange, not from either party working alone.
+The dialogue skill. Shape is how the human and AI talk about the project — both what it should do and how to build it. It writes to both documents: intent, constraints, and behavior go in the spec; technology choices, conventions, plan, and environment go in the context. Shape routes internally based on what the conversation is about.
 
-When decisions arise, shape uses AskUserQuestion to present structured choices — not prose questions buried in output. This gives the human clear, quick decision points. The conversation narrows the circle — each exchange makes the shared understanding more precise.
+Shape is a brainstorm where both parties contribute what the other lacks. The human brings domain knowledge and intent. The AI brings pattern recognition and the ability to connect ideas to established concepts. Both propose, challenge, and refine. But the human has final authority. Shape never writes to the spec or context unilaterally — changes are discussed and agreed first, then captured.
 
-Shape is not one-directional. The human isn't dictating requirements. The AI isn't just transcribing. It's a brainstorm where both contribute what the other lacks. But the human has final authority over the spec. Shape never writes to the spec unilaterally — changes are discussed and agreed in conversation first, then captured.
+When decisions arise, shape presents structured choices — not prose questions buried in output. Each exchange should make the shared understanding more precise.
 
-Shape actively guards its boundary with frame. When the conversation drifts toward technology choices — "should we use X?", "what framework?", "how should we deploy?" — shape redirects rather than engages. It notes the topic for frame and steers back to intent and constraints. Shape does not evaluate technology options or suggest tools.
+When the conversation touches technology — language, framework, tools, deployment — shape evaluates options against the spec's constraints, surfaces tradeoffs, and captures choices in the context. Before researching new options, it audits what's already in place, comparing current tooling against ecosystem best practices and surfacing gaps.
 
-Shape sometimes starts from existing code rather than a blank page — the human has built something but never captured the intent behind it. When this happens, the code is evidence, not the spec. Shape does a quick survey to understand the domain, then pivots to the human: what problem were you solving? What was broken? What does success look like? Code details become probes to surface intent — "I see you built X, is that because Y?" — but the spec is written from the human's answers, not from the code structure.
+Shape sometimes starts from existing code rather than a blank page. When this happens, the code is evidence, not the spec. Code details become probes to surface intent — but the spec is written from the human's answers, not from the code structure.
 
-Shape can target either the current project's spec or do's own spec. By default it works on the project. When explicitly directed to work on itself, it reads and evolves the do plugin spec instead.
+Shape periodically steps back to assess the spec as a whole — is it still coherent? Has it accumulated redundancy or fragmentation through incremental changes? Could the same intent be expressed more clearly? This zoom-out is not a separate operation but a mode shape enters when the spec has grown or shifted enough to warrant it.
 
-### Frame
+Shape writes a project CLAUDE.md with file conventions — which files are modified through which skills. This ensures the agent respects skill boundaries on every session. CLAUDE.md is loaded into context on every turn, so the instruction is always visible.
 
-A conversation that converges on the approach. Given a spec, frame explores what to build it with — language, framework, tools, patterns, infrastructure. Before researching new options, it audits what's already in place — comparing the project's current tooling against what's idiomatic for the ecosystem, surfacing gaps between what exists and what best practices expect. It then researches options to fill those gaps, evaluates fit against the spec's constraints, surfaces tradeoffs, and captures idiomatic practices and gotchas for the chosen stack.
-
-Frame also captures quality conventions for the chosen stack — which linter, formatter, test runner, and key configuration choices (e.g., strict TypeScript, ruff with specific rule sets). These are technology decisions, same as choosing a framework or database. They go in `context.md` alongside other stack choices.
-
-Like shape, frame is a dialogue. The AI brings broad technical knowledge and awareness of the landscape. The human brings preferences, team constraints, and existing infrastructure realities. Frame proposes, the human decides. The result is captured in `.do/context.md`.
-
-Frame also writes a project CLAUDE.md with file conventions — which files are modified through which skills (`.do/spec.md` through shape, `.do/context.md` through frame). This ensures the agent respects skill boundaries on every session without hooks or markers. CLAUDE.md is loaded into context on every turn, so the instruction is always visible.
-
-Frame can revisit choices. Switching from Node to Bun, or Python to Rust, is a context change — update `context.md` and rebuild. The spec doesn't change because the problem didn't change.
+Shape can target either the current project or do itself. By default it works on the project.
 
 ### Build
 
-Read the spec and the context. Implement what they describe. Use judgment on architecture, patterns, and approach within the technology choices the context establishes.
+The execution skill. Build reads the spec and context, then implements what they describe. It uses judgment on architecture, patterns, and approach within the boundaries the context establishes.
 
-Build follows test-driven development. For every piece of behavior, build writes a failing test first, then writes the minimum code to make it pass. Tests come before implementation, always. The test is the specification made executable — the implementation is just whatever it takes to satisfy it. This naturally enforces minimality: no code exists without a test that demands it.
+Build follows test-driven development. For every piece of behavior, build writes a failing test first, then writes the minimum code to make it pass. The test is the specification made executable. This naturally enforces minimality: no code exists without a test that demands it.
 
-When the context defines quality conventions, build's first action is setting up quality infrastructure — the config files that encode those conventions (.prettierrc, eslint config, ruff.toml, test runner config, etc.). This precedes application code. The config files are the source of truth for quality practices; no separate documentation layer is needed. `context.md` has the human-readable summary of conventions, config files have the machine-readable details.
+When the context defines quality conventions, build sets up quality infrastructure first — the config files that encode those conventions. This precedes application code.
 
-When the build involves multiple components, build decomposes the work into tasks (using the task list) before writing code. Each task is one buildable unit — a module, a template, a test suite. Tasks are marked in_progress when started, completed when done and verified. This makes multi-component builds visible and resumable across sessions. At the start of any session, build checks the task list and resumes from where it left off rather than starting over. Skip the task list for trivial builds (single file, quick fix).
+When the build involves multiple components, build decomposes the work into tasks before writing code. Each task is one buildable unit. Tasks are tracked so multi-component builds are visible and resumable across sessions.
 
-After building, compare the result to the spec and context. When a mismatch is found, build stops and flags it. It doesn't silently deviate and it doesn't unilaterally fix the spec or context. The mismatch feeds back — either the spec needs updating (understanding evolved), the context needs updating (technology choice doesn't fit), or the implementation needs fixing (it drifted). That decision belongs to the human.
+After building, build compares the result to the spec and context. When a mismatch is found, build stops and flags it — it doesn't silently deviate and it doesn't unilaterally fix the spec or context. The mismatch is evidence: either the spec needs updating, the context needs updating, or the implementation drifted. That decision belongs to the human.
 
-This feedback loop is the core mechanism. Build produces evidence. Shape and frame incorporate that evidence into shared understanding. The cycle continues until spec, context, and implementation agree.
+Build writes status to the context — what's done, what's next, what's blocked, what decisions are pending. This is factual reporting, not deliberation. The context becomes the handoff: the next session reads it and knows where to resume.
+
+This feedback loop is the core mechanism. Build produces evidence. Shape incorporates that evidence into shared understanding. The cycle continues until spec, context, and implementation agree.
 
 ### Gap detection through version control
 
-When a project is under version control, each skill checks what changed since the last commit at session start. The diff is evidence of what happened between sessions — each skill reads it through its own lens to detect a specific type of gap between what's documented and what's real.
+When a project is under version control, each skill checks what changed since the last commit at session start. The diff is evidence of what happened between sessions — each skill reads it through its own lens.
 
-- **Shape** reads code and implementation diffs against the spec. If the code changed in ways the spec doesn't account for, shape surfaces it: was this intentional, or should the spec catch up? This matters because work often happens outside the shape → frame → build flow — quick fixes, experiments, ad-hoc changes. The diff catches those so the spec stays honest.
-- **Build** reads spec and context diffs to see what understanding or technology choices evolved, and focuses its work accordingly.
-- **Frame** reads code and dependency diffs against the context. If tools, dependencies, or infrastructure changed without a context update, frame surfaces it. Frame also uses commit history to detect recurring patterns — repeated fixes or reverts in the same area signal a technology choice that isn't working and may need rethinking.
+- **Shape** reads code, dependency, and implementation diffs against both the spec and context. If the code changed in ways the spec doesn't account for, shape surfaces it — was this intentional, or should the spec catch up? If tools or infrastructure changed without a context update, shape surfaces that too. Shape also uses commit history to detect recurring patterns — repeated fixes in the same area signal something that may need rethinking.
+- **Build** reads spec and context diffs to see what understanding or choices evolved, and focuses its work accordingly.
 
-The diff is a conversation starter, not an action trigger. Each skill uses it to ask better questions and focus its work, not to act unilaterally. When version control isn't available, the skills work without it — the diff is a signal, not a requirement.
+The diff is a conversation starter, not an action trigger. Each skill uses it to ask better questions and focus its work, not to act unilaterally. When version control isn't available, the skills work without it.
 
 ## What the spec contains
 
@@ -102,6 +93,8 @@ Every line should describe intent, state a constraint, or capture understanding 
 
 - **Deliberation artifacts**: justifications, rationale for rejected alternatives, explanatory prose that doesn't change behavior. Those were resolved in conversation.
 - **Implementation artifacts**: file paths, API field names, specific code changes, deletion checklists, line numbers. These feel concrete and actionable, which is why they slip in — but they describe what exists or what to change, not what to achieve. They belong in context or in build's task list.
+
+**When the system produces artifacts, define their properties.** A spec that describes a system generating reports, APIs, config files, or any other output should define what properties those artifacts must have — not their format, but what makes them well-formed. This gives build a target and gives shape a question to ask: "what properties must this output have?"
 
 **The spec contains no explanations.** Everything is specification. Build treats every section as actionable — either something to implement, a constraint to respect, or understanding that steers decisions. If a section describes behavior, build builds it. If it states a property, build ensures it holds. There is no "background context" in the spec — that's what `context.md` is for. This means shape must write concretely: when a conversation surfaces something that needs to be built, capture it as behavior (what it does, what it takes, what it produces), not as a concept (why it matters, what category it belongs to).
 
