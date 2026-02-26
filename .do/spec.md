@@ -89,6 +89,13 @@ The diff is a conversation starter, not an action trigger. Each skill uses it to
 
 The spec is written for both audiences — the human and the AI. The human carries context between sessions; the AI reads the spec fresh each time. The language should serve both: clear enough for the human to skim and confirm, structured enough for the AI to act on without ambiguity.
 
+Behavior exists at two levels, and the spec captures both:
+
+- **User-facing behavior**: What the user does and what they see. "The user swipes to vote on a selfie."
+- **System behavior**: What happens behind the scenes when an event occurs — triggers, cascades, pipelines, side-effect chains. "When a vote is created, the system updates selfie counts, recalculates the owner's stats, updates leaderboard buckets, checks for milestones, and queues a notification."
+
+For simple systems, user-facing behavior may be sufficient. For systems with backend processes, scheduled jobs, event-driven triggers, or multi-step pipelines, the process chains are the behavior that most constrains architecture. A build agent that knows the features but not the cascades will invent a different system. Capture both levels.
+
 Every line should describe intent, state a constraint, or capture understanding that affects future decisions. Two categories don't belong:
 
 - **Deliberation artifacts**: justifications, rationale for rejected alternatives, explanatory prose that doesn't change behavior. Those were resolved in conversation.
