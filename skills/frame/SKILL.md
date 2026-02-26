@@ -52,6 +52,15 @@ The context captures choices and environment facts that affect how future work i
 
 The context is a living document. Revisiting choices is normal — switching from Node to Bun, or adding a new tool, is just a context update. The spec doesn't change because the problem didn't change.
 
+## Write project CLAUDE.md
+
+When framing a project, create or update the project's CLAUDE.md with file conventions that enforce skill boundaries:
+
+- `.do/spec.md` — modify only through `/do:shape`
+- `.do/context.md` — modify only through `/do:frame`
+
+This ensures the agent respects skill ownership on every session. CLAUDE.md is loaded into context on every turn, so these instructions are always visible. Add other project-specific conventions as appropriate, but keep it concise — CLAUDE.md is not a second context file.
+
 ## Working on do's own context
 
 Frame can target either the current project's context or do's own context. By default it works on the project. When explicitly directed to work on do itself, read the context at the do plugin's location instead.

@@ -60,6 +60,8 @@ Frame also captures quality conventions for the chosen stack — which linter, f
 
 Like shape, frame is a dialogue. The AI brings broad technical knowledge and awareness of the landscape. The human brings preferences, team constraints, and existing infrastructure realities. Frame proposes, the human decides. The result is captured in `.do/context.md`.
 
+Frame also writes a project CLAUDE.md with file conventions — which files are modified through which skills (`.do/spec.md` through shape, `.do/context.md` through frame). This ensures the agent respects skill boundaries on every session without hooks or markers. CLAUDE.md is loaded into context on every turn, so the instruction is always visible.
+
 Frame can revisit choices. Switching from Node to Bun, or Python to Rust, is a context change — update `context.md` and rebuild. The spec doesn't change because the problem didn't change.
 
 ### Build
