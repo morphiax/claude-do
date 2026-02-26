@@ -1,7 +1,7 @@
 {
   "name": "do",
-  "version": "5.10.0",
-  "description": "Three skills for collaborative problem-solving — /shape evolves a spec, /frame converges on the approach, /build implements and flags mismatches.",
+  "version": "6.0.0",
+  "description": "Two skills for collaborative sensemaking — /shape evolves the spec and context through dialogue, /build implements and writes status.",
   "author": {
     "name": "morphiax",
     "url": "https://github.com/morphiax"
