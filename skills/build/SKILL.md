@@ -34,6 +34,8 @@ When the project is under version control, check what changed in the spec and co
 
 **Prefer simplicity.** Apply the hierarchy: eliminate the need before solving it. Reuse an existing solution before building one. Configure before extending. Extend before creating from scratch. TDD enforces this naturally — you only write code a test demands.
 
+**Think through decomposition and comparison with sequential thinking.** When breaking the spec into buildable units, or when comparing the finished implementation against the spec, use the `sequentialthinking` tool to work through it methodically. Each thought can map a spec section to an implementation task, flag a gap, revise an earlier decomposition as dependencies become clear, or trace a constraint through multiple files. This catches mismatches that a quick scan would miss. Don't use it for straightforward single-file builds — use it when the spec-to-implementation mapping has enough moving parts to benefit from structured reasoning.
+
 **Compare.** After building, compare the result to the spec and context. Does the implementation satisfy the intent? Does it respect the constraints? Does it use the technology the context establishes?
 
 **Stop on mismatch.** When you find a mismatch, stop and flag it. Don't silently deviate and don't unilaterally fix the spec or context. The mismatch is evidence — it means either the spec needs updating (understanding evolved), the context needs updating (technology choice doesn't fit), or the implementation needs fixing (it drifted). That decision belongs to the human. Raise it so they can take it back to shape or frame, or tell you to fix the implementation.

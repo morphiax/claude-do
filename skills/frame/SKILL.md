@@ -34,6 +34,8 @@ When the project is under version control, check what changed in code and depend
 
 **Capture idiomatic practices.** Once a technology is chosen, capture how to use it well — idiomatic patterns, best practices, common gotchas, things that trip people up. This saves build from rediscovering them.
 
+**Think through evaluations with sequential thinking.** When comparing multiple technology options against spec constraints, use the `sequentialthinking` tool to work through the evaluation step by step. Each thought can score an option against a constraint, revise an earlier assessment as new information surfaces, or branch into alternative approaches. This is especially valuable when tradeoffs interact — where choosing A for one constraint affects the best choice for another. Don't use it for simple lookups or obvious choices — use it when the evaluation has enough dimensions that holding it all in one pass would lose nuance.
+
 **Converge through dialogue.** Like shape, this is a conversation. The AI brings broad technical knowledge and awareness of the landscape. The human brings preferences, team experience, existing infrastructure, and practical constraints. Frame proposes, the human decides.
 
 ## Capture choices in the context

@@ -40,6 +40,8 @@ When the project is under version control, check what changed in the code since 
 
 **Delegate heavy work to subagents.** Code surveys, file reading, and research run in subagents via the Task tool — not in the main context. Use haiku for mechanical reads, sonnet for moderate analysis, opus for complex interpretation. The main context stays focused on the dialogue with the human.
 
+**Think through complexity with sequential thinking.** When the conversation surfaces a tangled problem — competing constraints, fuzzy intent that resists simple framing, or an idea that connects to multiple known patterns — use the `sequentialthinking` tool to work through it step by step before responding. This makes the reasoning visible and revisable: you can branch, backtrack, or revise earlier steps as understanding sharpens. Don't use it for straightforward exchanges — use it when the reasoning itself is the hard part.
+
 ## Starting from existing code
 
 Sometimes there's already a codebase but no spec — the human built something and never captured the intent behind it. When this happens, the code is evidence, not the spec. Do a quick survey to understand the domain, then pivot to the human: what problem were you solving? What was broken? What does success look like? Use code details as probes to surface intent — "I see you built X, is that because Y?" — but write the spec from the human's answers, not from the code structure.
