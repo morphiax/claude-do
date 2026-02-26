@@ -64,6 +64,8 @@ Frame can revisit choices. Switching from Node to Bun, or Python to Rust, is a c
 
 Read the spec and the context. Implement what they describe. Use judgment on architecture, patterns, and approach within the technology choices the context establishes.
 
+Build follows test-driven development. For every piece of behavior, build writes a failing test first, then writes the minimum code to make it pass. Tests come before implementation, always. The test is the specification made executable — the implementation is just whatever it takes to satisfy it. This naturally enforces minimality: no code exists without a test that demands it.
+
 When the context defines quality conventions, build's first action is setting up quality infrastructure — the config files that encode those conventions (.prettierrc, eslint config, ruff.toml, test runner config, etc.). This precedes application code. The config files are the source of truth for quality practices; no separate documentation layer is needed. `context.md` has the human-readable summary of conventions, config files have the machine-readable details.
 
 When the build involves multiple components, build decomposes the work into tasks (using the task list) before writing code. Each task is one buildable unit — a module, a template, a test suite. Tasks are marked in_progress when started, completed when done and verified. This makes multi-component builds visible and resumable across sessions. At the start of any session, build checks the task list and resumes from where it left off rather than starting over. Skip the task list for trivial builds (single file, quick fix).

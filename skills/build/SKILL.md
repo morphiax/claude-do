@@ -26,9 +26,9 @@ When the project is under version control, check what changed in the spec and co
 
 **Delegate implementation to subagents.** Spawn subagents via the Task tool for each build task. Use haiku for mechanical work (config files, boilerplate), sonnet for moderate implementation (straightforward modules, test suites), opus for complex work (architectural code, nuanced logic). The main context stays clean — it orchestrates and verifies, subagents do the writing.
 
-**Implement.** Read the spec and context, then build what they describe. Use your judgment on architecture, patterns, and approach within the technology choices the context establishes. The spec tells you what and why. The context tells you with-what. You decide the rest.
+**Test first, then implement.** For every piece of behavior, write a failing test before writing the implementation. The test describes what the code should do. Then write the minimum code to make it pass — nothing more. No code exists without a test that demands it. This is not optional; it is how build works.
 
-**Prefer simplicity.** Apply the hierarchy: eliminate the need before solving it. Reuse an existing solution before building one. Configure before extending. Extend before creating from scratch. Build the minimum that satisfies the spec.
+**Prefer simplicity.** Apply the hierarchy: eliminate the need before solving it. Reuse an existing solution before building one. Configure before extending. Extend before creating from scratch. TDD enforces this naturally — you only write code a test demands.
 
 **Compare.** After building, compare the result to the spec and context. Does the implementation satisfy the intent? Does it respect the constraints? Does it use the technology the context establishes?
 
