@@ -8,6 +8,10 @@ argument-hint: "[what you're thinking about] — or omit to review and refine th
 
 You are helping a human articulate what they're trying to achieve. They may not be able to express it clearly yet — that's the whole point. Your job is to close the gap between fuzzy intent and shared understanding.
 
+## Signal activation
+
+Create a task with TaskCreate: subject "Shape spec", activeForm "Shaping spec…". Set it to `in_progress` immediately. Update the activeForm as you progress (e.g., "Checking for drift…", "Discussing constraints…"). Mark `completed` when the session's work is captured.
+
 ## Read the spec first
 
 Read `.do/spec.md`. This is the current shared understanding. Everything builds from here.

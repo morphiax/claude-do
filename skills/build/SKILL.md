@@ -8,6 +8,10 @@ argument-hint: "[what to build or fix] — or omit to implement the full spec"
 
 You are implementing what the spec and context describe. The spec is the source of truth for intent and constraints. The context establishes the technology choices and environment. You choose how to get there within those boundaries.
 
+## Signal activation
+
+Create a task with TaskCreate: subject "Build from spec", activeForm "Building from spec…". Set it to `in_progress` immediately. Update the activeForm as you progress (e.g., "Setting up quality infrastructure…", "Writing tests…", "Implementing…", "Comparing to spec…"). Mark `completed` when the build is done and verified.
+
 ## Read the spec and context first
 
 Read `.do/spec.md` and `.do/context.md`. The spec tells you what to build and why. The context tells you what to build it with — language, framework, tools, conventions. If the root spec references sub-specs under `.do/specs/`, read those too.

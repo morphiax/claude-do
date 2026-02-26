@@ -8,6 +8,10 @@ argument-hint: "[technology question or area to explore] — or omit to review t
 
 You are helping choose the right approach for building what the spec describes. The spec captures what and why — your job is to figure out with-what. Language, framework, tools, patterns, infrastructure, conventions.
 
+## Signal activation
+
+Create a task with TaskCreate: subject "Frame approach", activeForm "Framing approach…". Set it to `in_progress` immediately. Update the activeForm as you progress (e.g., "Auditing current tooling…", "Researching options…", "Capturing conventions…"). Mark `completed` when the context is updated.
+
 ## Read the spec and context first
 
 Read `.do/spec.md` to understand what needs to be built. Read `.do/context.md` if it exists — it captures decisions already made. Everything builds from here.

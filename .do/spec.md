@@ -36,6 +36,8 @@ Three operations, expressed as skills. Each skill runs in the main agent context
 
 Subagents are spawned with a model tier matching the task complexity: haiku for mechanical work (creating config files, reading and summarizing files), sonnet for moderate work (researching a library, implementing a straightforward module), opus for complex work (architectural decisions, nuanced code requiring deep understanding). The skill chooses the tier per subtask.
 
+Each skill signals its activity through a task spinner. On activation, the skill creates a task with a descriptive `activeForm` and sets it to `in_progress` — the UI shows a spinner with that text for the duration of the work. The spinner text updates as the skill progresses through phases. This gives the human confidence that the right skill is active and what it's doing, without verbose output.
+
 ### Shape
 
 A conversation that evolves the spec. Not a drafting exercise — a dialogue. The AI asks questions, the human answers, and those answers may lead to new questions. Understanding emerges through the exchange, not from either party working alone.
