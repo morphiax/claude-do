@@ -1,5 +1,9 @@
 # Changelog
 
+## 5.10.0
+
+Build follows TDD — failing test first, minimum code to pass. Skills signal activation via task spinner. Frame writes project CLAUDE.md to enforce skill boundaries.
+
 ## 5.9.0
 
 Spec exclusion clarity — implementation artifacts (file paths, API field names, deletion checklists, line numbers) don't belong in specs alongside deliberation artifacts. They feel concrete but describe what exists, not what to achieve.

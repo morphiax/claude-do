@@ -1,6 +1,6 @@
 {
   "name": "do",
-  "version": "5.9.0",
+  "version": "5.10.0",
   "description": "Three skills for collaborative problem-solving — /shape evolves a spec, /frame converges on the approach, /build implements and flags mismatches.",
   "author": {
     "name": "morphiax",
