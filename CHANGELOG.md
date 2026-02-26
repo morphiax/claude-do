@@ -1,5 +1,9 @@
 # Changelog
 
+## 6.2.0
+
+Add release command for version bumps, changelog updates, docs sync, tagging, and pushing.
+
 ## 6.1.0
 
 Specs capture two levels of behavior: user-facing interactions and system-level processes (triggers, cascades, pipelines). Shape surfaces process chains by asking what else the system does when an event occurs.
