@@ -32,7 +32,7 @@ Context captures choices and environment facts that affect how future work is do
 
 ## How it works
 
-Three operations, expressed as skills. Each skill runs in the main agent context for human interaction, but delegates heavy lifting — code surveys, research, implementation — to subagents via the Task tool. This keeps the main context clean and focused on the dialogue.
+Three operations, expressed as skills. Each skill runs in the main agent context for human interaction only — the main context is reserved for dialogue with the human and orchestration of subagents. All other work runs in subagents via the Task tool: file reading, code surveys, research, web searches, implementation, test execution. The test is simple: if the action gathers information or produces artifacts rather than talking to the human, it belongs in a subagent. The only exception is reading `.do/spec.md` and `.do/context.md` at session start.
 
 Subagents are spawned with a model tier matching the task complexity: haiku for mechanical work (creating config files, reading and summarizing files), sonnet for moderate work (researching a library, implementing a straightforward module), opus for complex work (architectural decisions, nuanced code requiring deep understanding). The skill chooses the tier per subtask.
 
