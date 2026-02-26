@@ -72,6 +72,20 @@ Build writes status to the context — what's done, what's next, what's blocked,
 
 This feedback loop is the core mechanism. Build produces evidence. Shape incorporates that evidence into shared understanding. The cycle continues until spec, context, and implementation agree.
 
+### Commands
+
+Commands are single-purpose actions. Unlike skills, they don't participate in the shape/build cycle — they run, produce output, and finish. They don't maintain state in `.do/` files. Some read the spec and context for orientation, but none write to them.
+
+Three commands:
+
+- **Release** (`/do:release`) — operational. Detects all version sources in the project, bumps them, updates the changelog from git history, syncs README prose against actual code changes, commits, tags, and pushes. The only command that makes changes. Accepts a bump type (patch, minor, major) or infers it from the commit history.
+- **Audit** (`/do:audit`) — analytical. Evaluates the tech stack, patterns, dependencies, and practices against current best practices and community conventions. Researches what a greenfield project would look like today. Produces opinionated findings prioritized by impact-to-effort ratio. Does not make changes.
+- **Challenge** (`/do:challenge`) — analytical. Reviews the project from a product manager's perspective — pressure-tests the value proposition, questions assumptions, identifies gaps, and researches the competitive landscape. Produces findings grounded in evidence. Does not propose technical solutions.
+
+Audit and challenge are the bridge to shape: they produce raw material — findings — that the human can route into shape to evolve the spec or context. Release operates independently on completed work.
+
+The distinction: skills are collaborative and stateful — they evolve shared understanding over sessions. Commands are fire-and-forget — they do one thing and they're done.
+
 ### Gap detection through version control
 
 When a project is under version control, each skill checks what changed since the last commit at session start. The diff is evidence of what happened between sessions — each skill reads it through its own lens.

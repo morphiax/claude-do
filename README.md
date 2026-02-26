@@ -3,11 +3,11 @@
 > Collaborative sensemaking — shape understanding through dialogue, build what it describes
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Version](https://img.shields.io/badge/version-6.2.0-green.svg)
+![Version](https://img.shields.io/badge/version-6.3.0-green.svg)
 
 ## What It Does
 
-Two skills for collaborative problem-solving between a human and an AI.
+Two skills and three commands for collaborative problem-solving between a human and an AI.
 
 The human has intent and constraints they may not be able to fully articulate. The AI has broad technical knowledge and pattern recognition. A shared spec captures the problem understanding. A context file captures the approach, plan, and progress. Together they drive the build.
 
@@ -17,6 +17,14 @@ The human has intent and constraints they may not be able to fully articulate. T
 |---|---|
 | `/do:shape` | Talk about the project — clarify intent, evaluate technology, surface constraints, plan what to build next |
 | `/do:build` | Implement what the spec describes, compare result, write status to context |
+
+## Commands
+
+| Command | Description |
+|---|---|
+| `/do:release` | Version bump, changelog, docs sync, commit, tag, push |
+| `/do:audit` | Technical audit — evaluate stack, patterns, and practices against best practices |
+| `/do:challenge` | Product challenge — question assumptions, find gaps, pressure-test the value proposition |
 
 ## Usage
 
@@ -34,6 +42,17 @@ The human has intent and constraints they may not be able to fully articulate. T
 # Refine after building
 /do:shape the build revealed that Y doesn't work, let's rethink Z
 /do:shape we need to switch from Node to Bun
+
+# Audit — what could be better technically?
+/do:audit
+/do:audit error handling
+
+# Challenge — is the product right?
+/do:challenge
+/do:challenge onboarding experience
+
+# Release — ship a version
+/do:release
 ```
 
 ## How It Works
@@ -43,6 +62,8 @@ The human has intent and constraints they may not be able to fully articulate. T
 **`/do:build`** is the execution skill. It reads the spec and context, implements what they describe using TDD, then compares the result to both. Mismatches are flagged — not silently fixed. Build writes status to the context (what's done, what's next, what's blocked), making it the complete handoff for the next session.
 
 The feedback loop is the core mechanism. Build produces evidence. Shape incorporates it into shared understanding. Each cycle sharpens the spec, the context, and the solution.
+
+**Commands** are single-purpose actions that run and finish. `/do:audit` evaluates the tech stack against current best practices. `/do:challenge` pressure-tests the product from a PM perspective. Both produce findings that feed into shape. `/do:release` handles versioning, changelog, and shipping.
 
 ## Conventions
 

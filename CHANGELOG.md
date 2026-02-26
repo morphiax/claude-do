@@ -1,5 +1,14 @@
 # Changelog
 
+## 6.3.0
+
+### Added
+
+- **Audit command** (`/do:audit`) — technical audit that evaluates stack, patterns, and practices against current best practices. Produces prioritized findings by impact-to-effort ratio.
+- **Challenge command** (`/do:challenge`) — product review from a PM perspective. Pressure-tests value proposition, questions assumptions, researches the competitive landscape.
+- **Commands section in spec** — documents the distinction between skills (collaborative, stateful) and commands (fire-and-forget). Commands produce findings that feed into shape.
+- **Plugin structure in context** — context now documents the full file layout of the plugin.
+
 ## 6.2.0
 
 Add release command for version bumps, changelog updates, docs sync, tagging, and pushing.
