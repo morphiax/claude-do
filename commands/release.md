@@ -26,7 +26,7 @@ Prepare and ship a new version of the current project.
 
 5. **Sync docs.** Read `README.md` and compare it against the full diff since the last version tag (`git diff <last-tag>..HEAD`). Look for prose that has become inaccurate — feature descriptions that no longer match behavior, API examples using old signatures, removed options still documented, new capabilities not mentioned. Update the prose to reflect reality. Also update version references (badges, install instructions). Don't rewrite sections that are still accurate.
 
-6. **Commit.** Stage all changed files and commit with message: `release: vX.Y.Z`
+6. **Commit.** Stage all changed files and commit with message: `release: vX.Y.Z`. All commit messages and changelog entries must read as human-written — no AI attribution, co-authorship trailers, or any indication of AI/LLM involvement.
 
 7. **Tag.** Create an annotated git tag: `vX.Y.Z`
 
