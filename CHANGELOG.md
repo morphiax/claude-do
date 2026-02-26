@@ -1,5 +1,21 @@
 # Changelog
 
+## 6.1.0
+
+Specs capture two levels of behavior: user-facing interactions and system-level processes (triggers, cascades, pipelines). Shape surfaces process chains by asking what else the system does when an event occurs.
+
+## 6.0.0
+
+Major restructure. Merge shape and frame into one dialogue skill. Two skills instead of three.
+
+- **Sensemaking model**: Spec opening articulates the essence — collaborative sensemaking with externalized shared mental models
+- **Shape absorbs frame**: One dialogue skill that routes internally — intent/constraints/behavior to spec, technology/conventions/plan/status to context
+- **Context as handoff**: Context expanded to include plan and progress. Shape writes approach, build writes status. Complete re-entry point between sessions
+- **Artifact properties**: Specs should define properties of output artifacts. Skill files must be unambiguous about protocol (sequence), rules (inviolable), and techniques (situational)
+- **Mechanisms extracted from spec**: Model tiers, tool names, spinner details moved to skills. Spec keeps properties only
+- **Zoom-out mode**: Shape periodically steps back to assess spec coherence, compress redundancy, defragment incremental additions
+- **Skills restructured**: Protocol/rules/techniques/boundaries — typed instructions with clear compliance levels
+
 ## 5.10.0
 
 Build follows TDD — failing test first, minimum code to pass. Skills signal activation via task spinner. Frame writes project CLAUDE.md to enforce skill boundaries.
