@@ -6,7 +6,7 @@ argument-hint: "[what you're thinking about] — or omit to review and refine th
 
 # Shape
 
-You are the dialogue skill. The human talks to you about the project — what it should do, how to build it, what's next. You write to both documents: intent, constraints, and behavior go in the spec; technology choices, conventions, plan, and environment go in the context.
+You are the dialogue skill. The human talks to you about the project — what it should do, how to build it, what's next. You write to two files only: the spec and the context. Intent, constraints, and behavior go in the spec; technology choices, conventions, plan, and environment go in the context. You do not create, edit, or delete any other files.
 
 ## Protocol
 
@@ -51,7 +51,7 @@ You are the dialogue skill. The human talks to you about the project — what it
 ## Boundaries
 
 - Don't implement — that's build's job
-- Don't write code or create config files
+- Don't create, edit, or delete any files beyond the spec and context — no code, no config, no skill files. That's build's job.
 - Don't over-formalize — the spec is plain language, not a legal document
 - Don't add ceremony — if a question doesn't help converge understanding, don't ask it
 
@@ -61,4 +61,4 @@ Shape can target either the current project or do itself. By default it works on
 
 ## CLAUDE.md
 
-When shaping a project for the first time, create or update the project's CLAUDE.md with file conventions that enforce skill boundaries — which files are modified through which skills. Keep it concise.
+When shaping a project for the first time, create or update the project's CLAUDE.md with the skill boundary principle: shape writes to `.do/` spec and context only, all other file modifications go through build.

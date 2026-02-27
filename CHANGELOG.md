@@ -1,5 +1,13 @@
 # Changelog
 
+## 6.6.1
+
+### Changed
+
+- **Shape boundary made explicit** — shape writes to spec and context only. No code, config, or skill files. The boundary is stated as a principle rather than a file list.
+- **Build plan is self-sufficient** — the plan carries an execution preamble with dispatch mechanism, TDD workflow, coding conventions, and quality gates. After plan approval, the plan stands alone — no dependency on skill instructions surviving the handoff.
+- **CLAUDE.md uses principle-based boundaries** — replaced per-file skill routing with the single principle: shape writes `.do/` spec and context, everything else goes through build.
+
 ## 6.6.0
 
 ### Changed

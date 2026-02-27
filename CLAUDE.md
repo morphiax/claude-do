@@ -2,5 +2,4 @@
 
 ## Skill boundaries
 
-- `.do/spec.md` — modify only through `/do:shape`
-- `.do/context.md` — approach, conventions, plan: modify through `/do:shape`; status: updated by `/do:build`
+- Shape writes to `.do/` spec and context files only. All other file modifications go through build.

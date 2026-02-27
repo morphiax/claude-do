@@ -31,6 +31,10 @@ Build leverages three built-in Claude Code mechanisms:
 
 TDD is enforced structurally: each task in the plan must specify its test. The approved plan is the TDD contract.
 
+### The plan carries its execution methodology
+
+After plan approval with context clearing, the SKILL.md is no longer in scope. The plan's execution preamble must specify the execution mechanism: create a task list (TaskCreate) for visible progress tracking, execute each task in an isolated subagent (Task tool with `bypassPermissions`), and follow TDD within each subagent. The main context post-approval handles only orchestration — dispatching tasks and handling exceptions.
+
 ## Status
 
 **Completed**: Updated both SKILL.md files for component folder model — replaced `.do/specs/` references with `.do/<component>/`, updated main context rules to allow component spec/context reads. Spec and skills are aligned.

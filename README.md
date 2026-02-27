@@ -3,7 +3,7 @@
 > Collaborative sensemaking — shape understanding through dialogue, build what it describes
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Version](https://img.shields.io/badge/version-6.6.0-green.svg)
+![Version](https://img.shields.io/badge/version-6.6.1-green.svg)
 
 ## What It Does
 

@@ -38,7 +38,7 @@ Each skill is an instruction set the agent reads fresh each session. A well-form
 
 ### Shape
 
-The dialogue skill. Shape is how the human and AI talk about the project — both what it should do and how to build it. It writes to both documents: intent, constraints, and behavior go in the spec; technology choices, conventions, plan, and environment go in the context. Shape routes internally based on what the conversation is about.
+The dialogue skill. Shape is how the human and AI talk about the project — both what it should do and how to build it. It writes to two files only: the spec and the context. Intent, constraints, and behavior go in the spec; technology choices, conventions, plan, and environment go in the context. Shape does not create, edit, or delete any other files — no code, no config, no skill files. That's build's job. Shape routes internally based on what the conversation is about.
 
 Shape is a brainstorm where both parties contribute what the other lacks. The human brings domain knowledge and intent. The AI brings pattern recognition and the ability to connect ideas to established concepts. Both propose, challenge, and refine. But the human has final authority. Shape never writes to the spec or context unilaterally — changes are discussed and agreed first, then captured.
 
@@ -50,7 +50,7 @@ Shape sometimes starts from existing code rather than a blank page. When this ha
 
 Shape periodically steps back to assess the spec as a whole — is it still coherent? Has it accumulated redundancy or fragmentation through incremental changes? Could the same intent be expressed more clearly? This zoom-out is not a separate operation but a mode shape enters when the spec has grown or shifted enough to warrant it.
 
-Shape writes a project CLAUDE.md with file conventions — which files are modified through which skills. This ensures the agent respects skill boundaries on every session. CLAUDE.md is loaded into context on every turn, so the instruction is always visible.
+Shape writes a project CLAUDE.md with the skill boundary principle: shape writes to `.do/` spec and context only, all other file modifications go through build. This ensures the agent respects skill boundaries on every session. CLAUDE.md is loaded into context on every turn, so the instruction is always visible.
 
 Shape can target either the current project or do itself. By default it works on the project.
 
@@ -60,7 +60,9 @@ The execution skill. Build drives work to completion through two phases — plan
 
 **Planning phase.** Build reads the spec and context, enters plan mode, and explores the codebase. Plan mode constrains build to read-only operations — no files are created or modified during planning. Build produces a concrete plan: work decomposed into tasks, each with its test specified alongside its implementation goal. The plan makes visible what will be built, in what order, and how each piece will be verified. Exiting plan mode requires human approval — the plan is reviewed before any implementation begins.
 
-**Execution phase.** After plan approval, build implements. Each task follows test-driven development: the test specified in the plan is written first, then the minimum implementation to pass it. Execution runs without interruption — the plan approval is the permission gate. Build uses judgment on architecture, patterns, and approach within the boundaries the context establishes.
+The plan is the complete execution contract. It must be self-sufficient — executable by an agent with no context beyond the plan itself. This means the plan carries everything forward from the planning phase: the execution mechanism (how tasks are dispatched and isolated), execution conventions (TDD order, coding standards, quality gates), relevant codebase patterns and file paths, and enough context per task that no prior knowledge is assumed. After plan approval, the plan may be the only instruction set available — skill instructions loaded at session start may not survive the handoff. The plan must stand alone. The planning phase's value is absorbing the spec, context, and codebase, then distilling that into a plan that loses nothing at the handoff.
+
+**Execution phase.** After plan approval, build implements. Each task follows test-driven development: the test specified in the plan is written first, then the minimum implementation to pass it. Execution runs without interruption — the plan approval is the permission gate. Build uses judgment on architecture, patterns, and approach within the boundaries the plan establishes.
 
 Build interacts with the human during planning when multiple valid paths exist. During execution, build follows the approved plan. If execution reveals something the plan didn't anticipate — a spec ambiguity, a technical constraint, a mismatch — build stops and flags it rather than deviating silently.
 
