@@ -22,6 +22,14 @@ The do plugin lives at `~/.claude/plugins/marketplaces/do`. This is the canonica
 
 ## Conventions
 
+### Shared skill conventions
+
+Both skills follow these Claude Code tool conventions:
+- **Activity signaling** — `TaskCreate` at activation with `activeForm` for spinner text, `TaskUpdate` to reflect phase changes, mark `completed` on finish
+- **Main context isolation** — main context is for human interaction and `.do/` file reads only. All other work (file exploration, research, implementation) delegates to subagents via the Task tool
+- **Model tiers for subagents** — haiku for mechanical reads, sonnet for moderate analysis, opus for complex interpretation or implementation
+- **Structured decisions** — `AskUserQuestion` when tradeoffs, naming choices, or scope boundaries arise. Don't bury decisions in prose.
+
 ### Build uses Claude Code plan mode
 
 Build leverages three built-in Claude Code mechanisms:

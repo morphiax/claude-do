@@ -1,5 +1,11 @@
 # Changelog
 
+## 6.6.2
+
+### Added
+
+- **Shared skill conventions in context** — documented Claude Code tool conventions used by both skills: activity signaling (`TaskCreate`/`TaskUpdate`), main context isolation, model tiers for subagents, and structured decisions via `AskUserQuestion`.
+
 ## 6.6.1
 
 ### Changed
