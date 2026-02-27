@@ -56,21 +56,19 @@ Shape can target either the current project or do itself. By default it works on
 
 ### Build
 
-The execution skill. Build drives work to completion — not just writing code, but applying it, verifying it works, and confirming the outcome is real. "Done" means the outcome described in the spec and context is achieved, not that an artifact exists. Build uses judgment on architecture, patterns, and approach within the boundaries the context establishes.
+The execution skill. Build drives work to completion through two phases — planning and execution — separated by a structural gate.
 
-Build interacts with the human throughout. It uses structured questions for direction when multiple valid paths exist, and respects permission prompts for irreversible or high-impact actions. But it doesn't stop at code and hand off remaining steps — it continues through apply, verify, and whatever else the context defines as "done" for this project.
+**Planning phase.** Build reads the spec and context, enters plan mode, and explores the codebase. Plan mode constrains build to read-only operations — no files are created or modified during planning. Build produces a concrete plan: work decomposed into tasks, each with its test specified alongside its implementation goal. The plan makes visible what will be built, in what order, and how each piece will be verified. Exiting plan mode requires human approval — the plan is reviewed before any implementation begins.
 
-Build follows test-driven development. For every piece of behavior, build writes a failing test first, then writes the minimum code to make it pass. The test is the specification made executable. This naturally enforces minimality: no code exists without a test that demands it.
+**Execution phase.** After plan approval, build implements. Each task follows test-driven development: the test specified in the plan is written first, then the minimum implementation to pass it. Execution runs without interruption — the plan approval is the permission gate. Build uses judgment on architecture, patterns, and approach within the boundaries the context establishes.
+
+Build interacts with the human during planning when multiple valid paths exist. During execution, build follows the approved plan. If execution reveals something the plan didn't anticipate — a spec ambiguity, a technical constraint, a mismatch — build stops and flags it rather than deviating silently.
 
 When the context defines quality conventions, build sets up quality infrastructure first — the config files that encode those conventions. This precedes application code.
 
-When the build involves multiple components, build decomposes the work into tasks before writing code. Each task is one buildable unit. Tasks are tracked so multi-component builds are visible and resumable across sessions.
+After building, build compares the result to the spec and context. Mismatches are evidence for the human to route — either the spec, context, or implementation needs updating. That decision belongs to the human.
 
-After building, build compares the result to the spec and context. When a mismatch is found, build stops and flags it — it doesn't silently deviate and it doesn't unilaterally fix the spec or context. The mismatch is evidence: either the spec needs updating, the context needs updating, or the implementation drifted. That decision belongs to the human.
-
-When build reaches the limit of what it can do — whether it finished a component, hit a blocker, or completed everything in the plan — it produces concrete next steps. These are contextual: the next buildable unit if work remains, a suggestion to shape areas where the spec was ambiguous and build had to assume, specific human actions needed if blocked on something build can't do, or spec gaps that surfaced during implementation. Next steps are actionable, not summaries.
-
-Build writes status to the context — what's done, what's next, what's blocked, what decisions are pending. This is factual reporting, not deliberation. The context becomes the handoff: the next session reads it and knows where to resume.
+When build reaches its limit — finished, blocked, or between components — it produces concrete next steps and writes factual status to the context. The context becomes the handoff: the next session reads it and knows where to resume.
 
 This feedback loop is the core mechanism. Build produces evidence. Shape incorporates that evidence into shared understanding. The cycle continues until spec, context, and implementation agree.
 

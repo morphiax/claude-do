@@ -1,5 +1,13 @@
 # Changelog
 
+## 6.6.0
+
+### Changed
+
+- **Build uses two-phase protocol** — planning and execution separated by a structural gate. Build enters plan mode (read-only), explores the codebase, and produces a plan where each task specifies its test alongside its implementation goal. Human approves the plan before any code is written. Execution runs without interruption via bypassPermissions subagents.
+- **TDD enforced structurally** — tests are specified in the plan, not left to the agent's discretion. The approved plan is the TDD contract.
+- **Plan mode leverages Claude Code built-ins** — EnterPlanMode/ExitPlanMode for the read-only gate, sequential thinking for decomposition, Task tool with bypassPermissions for execution.
+
 ## 6.5.0
 
 ### Changed
