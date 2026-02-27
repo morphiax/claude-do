@@ -19,3 +19,7 @@ The do plugin lives at `~/.claude/plugins/marketplaces/do`. This is the canonica
 - `commands/challenge.md` — product review from PM perspective
 - `.do/spec.md` — this plugin's own spec (self-targeted by shape)
 - `.do/context.md` — this file
+
+## Status
+
+**Completed**: Updated build SKILL.md to reflect spec changes — drive to completion, interactive direction, next steps on stop. Spec and skill are aligned.

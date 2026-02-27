@@ -3,7 +3,7 @@
 > Collaborative sensemaking — shape understanding through dialogue, build what it describes
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Version](https://img.shields.io/badge/version-6.3.0-green.svg)
+![Version](https://img.shields.io/badge/version-6.4.0-green.svg)
 
 ## What It Does
 
@@ -16,7 +16,7 @@ The human has intent and constraints they may not be able to fully articulate. T
 | Skill | Description |
 |---|---|
 | `/do:shape` | Talk about the project — clarify intent, evaluate technology, surface constraints, plan what to build next |
-| `/do:build` | Implement what the spec describes, compare result, write status to context |
+| `/do:build` | Drive work to completion — apply, verify, produce next steps |
 
 ## Commands
 
@@ -59,7 +59,7 @@ The human has intent and constraints they may not be able to fully articulate. T
 
 **`/do:shape`** is the dialogue skill. The human talks about the project — both what it should do and how to build it. Shape routes internally: intent, constraints, and behavior go in the spec; technology choices, conventions, plan, and environment go in the context. It audits existing tooling, researches options, evaluates fit against constraints, and surfaces tradeoffs. Periodically it steps back to assess whether the spec is still coherent.
 
-**`/do:build`** is the execution skill. It reads the spec and context, implements what they describe using TDD, then compares the result to both. Mismatches are flagged — not silently fixed. Build writes status to the context (what's done, what's next, what's blocked), making it the complete handoff for the next session.
+**`/do:build`** is the execution skill. It drives work to completion — not just writing code, but applying it, verifying it works, and confirming the outcome is real. It reads the spec and context, implements using TDD, then continues through apply and verify until the context's definition of done is met. Build interacts with the human for direction and permission along the way. When it stops, it produces concrete next steps — the next buildable unit, spec gaps to shape, or human actions needed.
 
 The feedback loop is the core mechanism. Build produces evidence. Shape incorporates it into shared understanding. Each cycle sharpens the spec, the context, and the solution.
 

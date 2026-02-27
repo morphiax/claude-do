@@ -1,5 +1,13 @@
 # Changelog
 
+## 6.4.0
+
+### Changed
+
+- **Build drives to completion** — build no longer stops at code. It continues through apply and verify until the context's definition of done is met. Interacts with the human for direction and permission along the way.
+- **Context defines "done"** — shape captures what completion and verification look like for each project in the context. Build drives to that definition.
+- **Next steps on stop** — when build reaches its limit, it produces concrete actionable next steps: next buildable unit, spec gaps to shape, or human actions needed.
+
 ## 6.3.0
 
 ### Added

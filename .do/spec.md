@@ -30,7 +30,7 @@ The context lives at `.do/context.md`, alongside the spec. It captures everythin
 
 The context is not the spec. The spec is portable and technology-agnostic. The context is specific and may vary per environment or team. They change for different reasons — the spec changes when understanding of the problem evolves, the context changes when technology choices, plans, or progress change.
 
-The context is a shared document. Shape writes the approach — technology choices, conventions, environment facts, and the plan for what to build next. Build writes status — what's done, what's blocked, what decisions are pending. This makes the context the complete handoff between sessions: shape plans, build executes and reports, the next session picks up from what the context says.
+The context is a shared document. Shape writes the approach — technology choices, conventions, environment facts, the plan for what to build next, and the definition of done — what verification and completion looks like for this project. Build writes status — what's done, what's blocked, what decisions are pending. The definition of done tells build what to drive toward: for an infrastructure project it might mean "config applied, cluster healthy"; for a library it might mean "tests pass, package builds." This makes the context the complete handoff between sessions: shape plans, build executes and reports, the next session picks up from what the context says.
 
 ## How it works
 
@@ -58,7 +58,9 @@ Shape can target either the current project or do itself. By default it works on
 
 ### Build
 
-The execution skill. Build reads the spec and context, then implements what they describe. It uses judgment on architecture, patterns, and approach within the boundaries the context establishes.
+The execution skill. Build drives work to completion — not just writing code, but applying it, verifying it works, and confirming the outcome is real. "Done" means the outcome described in the spec and context is achieved, not that an artifact exists. Build uses judgment on architecture, patterns, and approach within the boundaries the context establishes.
+
+Build interacts with the human throughout. It uses structured questions for direction when multiple valid paths exist, and respects permission prompts for irreversible or high-impact actions. But it doesn't stop at code and hand off remaining steps — it continues through apply, verify, and whatever else the context defines as "done" for this project.
 
 Build follows test-driven development. For every piece of behavior, build writes a failing test first, then writes the minimum code to make it pass. The test is the specification made executable. This naturally enforces minimality: no code exists without a test that demands it.
 
@@ -67,6 +69,8 @@ When the context defines quality conventions, build sets up quality infrastructu
 When the build involves multiple components, build decomposes the work into tasks before writing code. Each task is one buildable unit. Tasks are tracked so multi-component builds are visible and resumable across sessions.
 
 After building, build compares the result to the spec and context. When a mismatch is found, build stops and flags it — it doesn't silently deviate and it doesn't unilaterally fix the spec or context. The mismatch is evidence: either the spec needs updating, the context needs updating, or the implementation drifted. That decision belongs to the human.
+
+When build reaches the limit of what it can do — whether it finished a component, hit a blocker, or completed everything in the plan — it produces concrete next steps. These are contextual: the next buildable unit if work remains, a suggestion to shape areas where the spec was ambiguous and build had to assume, specific human actions needed if blocked on something build can't do, or spec gaps that surfaced during implementation. Next steps are actionable, not summaries.
 
 Build writes status to the context — what's done, what's next, what's blocked, what decisions are pending. This is factual reporting, not deliberation. The context becomes the handoff: the next session reads it and knows where to resume.
 

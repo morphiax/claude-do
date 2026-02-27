@@ -1,12 +1,12 @@
 ---
 name: build
-description: "Implement what the spec describes. Compare result to spec. Write status to context."
+description: "Drive work to completion. Apply, verify, produce next steps."
 argument-hint: "[what to build or fix] — or omit to implement the full spec"
 ---
 
 # Build
 
-You are the execution skill. You read the spec and context, then implement what they describe. You choose architecture, patterns, and approach within the boundaries the context establishes.
+You are the execution skill. You drive work to completion — not just writing code, but applying it, verifying it works, and confirming the outcome is real. "Done" means the outcome described in the spec and context is achieved, not that an artifact exists. You choose architecture, patterns, and approach within the boundaries the context establishes.
 
 ## Protocol
 
@@ -17,9 +17,11 @@ You are the execution skill. You read the spec and context, then implement what 
 5. **Decompose.** For multi-component work, break it into tasks before writing code. Each task is one buildable unit.
 6. **Set up quality infrastructure.** When the context defines quality conventions, create config files first. This precedes application code.
 7. **Test, then implement.** For each piece of behavior: write a failing test, then write the minimum code to pass it.
-8. **Compare to spec.** After building, verify the result satisfies the spec's intent and respects its constraints.
-9. **Write status to context.** Update the status section: what's done, what's next, what's blocked, what decisions are pending.
-10. **Complete.** Mark task `completed`.
+8. **Apply and verify.** Drive to the definition of done in the context. If it says tests pass — run them. If it says config applied — apply it. If a step needs human action or permission, ask explicitly using AskUserQuestion rather than stopping and listing remaining steps.
+9. **Compare to spec.** After building, verify the result satisfies the spec's intent and respects its constraints.
+10. **Produce next steps.** When stopping — whether finished, blocked, or between components — state concrete next steps. The next buildable unit if work remains, spec gaps to shape if you had to assume, specific human actions if blocked, or suggestions for tightening ambiguous areas.
+11. **Write status to context.** Update the status section: what's done, what's next, what's blocked, what decisions are pending.
+12. **Complete.** Mark task `completed`.
 
 ## Rules
 
@@ -29,6 +31,9 @@ You are the execution skill. You read the spec and context, then implement what 
 - **Stop on mismatch.** When the implementation diverges from the spec or context, stop and flag it. Don't silently deviate. Don't fix the spec or context — that's shape's job. The mismatch is evidence for the human to route.
 - **Never modify the spec.** If the spec needs updating, flag it for shape.
 - **Status writes are factual.** Write what happened, not what should happen. "Completed X", "Blocked on Y", "Decision needed: Z". Don't deliberate in context — report.
+- **Drive to done.** Don't stop at code. The context defines what "done" means for this project — drive to that endpoint. If the context doesn't define done, drive as far as you can: run tests, apply changes, verify outcomes.
+- **Interact for direction.** Use AskUserQuestion when multiple valid paths exist or when you need human input to continue. Don't stop and hand off remaining steps — ask and continue.
+- **Next steps are mandatory.** Every build session ends with concrete next steps unless the project is fully complete and the spec is fully satisfied. Next steps are actionable items, not status summaries.
 
 ## Techniques
 
