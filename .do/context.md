@@ -22,4 +22,4 @@ The do plugin lives at `~/.claude/plugins/marketplaces/do`. This is the canonica
 
 ## Status
 
-**Completed**: Updated build SKILL.md to reflect spec changes — drive to completion, interactive direction, next steps on stop. Spec and skill are aligned.
+**Completed**: Updated both SKILL.md files for component folder model — replaced `.do/specs/` references with `.do/<component>/`, updated main context rules to allow component spec/context reads. Spec and skills are aligned.

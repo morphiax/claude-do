@@ -1,5 +1,13 @@
 # Changelog
 
+## 6.5.0
+
+### Changed
+
+- **Component folders replace flat subspecs** — problems with distinct components decompose into folders under `.do/`, each a workspace with `spec.md`, `context.md`, and supporting materials (designs, images, reference data). Root level becomes the integration layer.
+- **Decomposition trigger is logical separation, not size** — two components with different concerns should be separate from the start, even if they'd fit in one file.
+- **Skills read component specs and contexts** — both shape and build follow component references from the root spec into `.do/<component>/` folders.
+
 ## 6.4.0
 
 ### Changed

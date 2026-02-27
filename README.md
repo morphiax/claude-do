@@ -3,7 +3,7 @@
 > Collaborative sensemaking — shape understanding through dialogue, build what it describes
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Version](https://img.shields.io/badge/version-6.4.0-green.svg)
+![Version](https://img.shields.io/badge/version-6.5.0-green.svg)
 
 ## What It Does
 
@@ -71,4 +71,4 @@ The feedback loop is the core mechanism. Build produces evidence. Shape incorpor
 |---|---|
 | `.do/spec.md` | Root spec — the shared understanding of what and why |
 | `.do/context.md` | Approach, plan, and progress — the with-what and where-we-are |
-| `.do/specs/` | Sub-specs for decomposed problems |
+| `.do/<component>/` | Component workspace — spec.md, context.md, and supporting materials |

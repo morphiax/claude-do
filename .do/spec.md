@@ -18,15 +18,13 @@ The root cause: there is no persistent, shared source of truth that captures wha
 
 The spec solves this by persisting across sessions. At the start of any new session, the AI reads the spec and re-enters the shared understanding. No re-explanation needed. The spec is the re-entry point. The first shape session creates the spec. Every session after that reads it.
 
-## Where the spec lives
+## Where the spec and context live
 
-The root spec lives at `.do/spec.md`. This file is always loaded — it's passive context available on every turn without the AI needing to decide to look it up.
+The root spec lives at `.do/spec.md` and the root context at `.do/context.md`. These are always loaded — passive context available on every turn without the AI needing to decide to look them up. The root level is the integration layer: cross-cutting intent, shared constraints, how components relate, shared conventions, and environment facts.
 
-When a problem decomposes into smaller problems, each gets its own spec under `.do/specs/`. The root spec acts as an index — a compressed map of what exists and where to find it. Sub-specs contain the full detail for their scope. The AI reads the root spec on every session and pulls in sub-specs as needed.
+When a problem has distinct components with different concerns, each gets its own folder under `.do/`. The trigger for decomposition is logical separation, not size — two components with different concerns should be separate from the start, even if they'd fit in one file. Each component folder is a workspace containing `spec.md` and `context.md` as the structured core, plus whatever supporting material the component needs — designs, images, reference data, Figma exports, anything that helps shape or build understand it. The root spec acts as an index — a compressed map of what components exist and how they relate.
 
-## Where the context lives
-
-The context lives at `.do/context.md`, alongside the spec. It captures everything that steers and tracks the build — technology choices, conventions, environment facts, the current plan, and progress. The spec describes what; the context describes with-what, in-what-order, and where-we-are. Same spec with different context produces different valid implementations.
+The spec describes what; the context describes with-what, in-what-order, and where-we-are. They exist at both levels. The root context captures shared conventions and environment. Component contexts capture component-specific technology choices, definition of done, and build status. Same spec with different context produces different valid implementations.
 
 The context is not the spec. The spec is portable and technology-agnostic. The context is specific and may vary per environment or team. They change for different reasons — the spec changes when understanding of the problem evolves, the context changes when technology choices, plans, or progress change.
 
@@ -123,7 +121,7 @@ Every line should describe intent, state a constraint, or capture understanding 
 
 **The spec contains no explanations.** Everything is specification. Build treats every section as actionable — either something to implement, a constraint to respect, or understanding that steers decisions. If a section describes behavior, build builds it. If it states a property, build ensures it holds. There is no "background context" in the spec — that's what `context.md` is for. This means shape must write concretely: when a conversation surfaces something that needs to be built, capture it as behavior (what it does, what it takes, what it produces), not as a concept (why it matters, what category it belongs to).
 
-The spec is not a contract system. It's not numbered requirements. It's a living document in plain language. If it's getting long or complex, that's a signal to decompose — break the problem into smaller problems, each with their own spec under `.do/specs/`.
+The spec is not a contract system. It's not numbered requirements. It's a living document in plain language. When the problem has distinct components with different concerns, decompose — each component gets its own folder under `.do/` with a spec, context, and whatever supporting material it needs.
 
 ## Constraints
 

@@ -11,7 +11,7 @@ You are the execution skill. You drive work to completion — not just writing c
 ## Protocol
 
 1. **Signal activation.** Create a task: subject "Build", activeForm "Building…". Set `in_progress`. Update activeForm as you progress.
-2. **Read spec and context.** Read `.do/spec.md` and `.do/context.md`. The spec is what to build. The context is with-what, in-what-order, and where-we-are. If the root spec references sub-specs under `.do/specs/`, read those too.
+2. **Read spec and context.** Read `.do/spec.md` and `.do/context.md`. The spec is what to build. The context is with-what, in-what-order, and where-we-are. If the root spec references components, read their spec and context from `.do/<component>/` as needed.
 3. **Check what changed.** When under version control, check diffs in `.do/` since last commit. Focus on what understanding or choices evolved — this is the most direct signal of what to build or rebuild. Skip when no version control.
 4. **Check status in context.** If context has a status section, resume from where the last session left off rather than starting over.
 5. **Decompose.** For multi-component work, break it into tasks before writing code. Each task is one buildable unit.
@@ -25,7 +25,7 @@ You are the execution skill. You drive work to completion — not just writing c
 
 ## Rules
 
-- **Main context is orchestration-only.** Before using Read, Glob, Grep, Bash, Edit, or Write, ask: orchestration or implementation? If implementation → spawn subagent (Task tool). Only `.do/spec.md`, `.do/context.md`, and task list management belong in the main context. Use haiku for mechanical work, sonnet for moderate implementation, opus for complex work.
+- **Main context is orchestration-only.** Before using Read, Glob, Grep, Bash, Edit, or Write, ask: orchestration or implementation? If implementation → spawn subagent (Task tool). Only `.do/` spec and context reads (root and component) and task list management belong in the main context. Use haiku for mechanical work, sonnet for moderate implementation, opus for complex work.
 - **Treat the spec as all specification.** Every section is either intent (build it), a constraint (enforce it), or understanding (use it to make decisions). Nothing in the spec is "just context" or "nice to know."
 - **Test before implementation.** No code exists without a test that demands it.
 - **Stop on mismatch.** When the implementation diverges from the spec or context, stop and flag it. Don't silently deviate. Don't fix the spec or context — that's shape's job. The mismatch is evidence for the human to route.
