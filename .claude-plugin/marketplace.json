@@ -7,7 +7,7 @@
     {
       "name": "do",
       "source": "./",
-      "description": "Shape specs, frame the approach, build what they describe — /shape, /frame, and /build",
+      "description": "Unified skill for collaborative sensemaking — /do:work for dialogue, planning, execution, and analysis in one workflow",
       "strict": false
     }
   ]

@@ -1,144 +1,72 @@
 # Changelog
 
-## 6.6.2
+## [7.1.0] — 2026-03-01
 
 ### Added
+- Bidirectional spec↔code sync invariant — project files and code must always agree at session end
+- Protocol step 6 "Sync project files" — after execution, diff what was built against .do/ files and propose updates for any drift
+- Spec satisfaction quality dimension is now explicitly bidirectional — verify code matches spec AND spec matches code
 
-- **Shared skill conventions in context** — documented Claude Code tool conventions used by both skills: activity signaling (`TaskCreate`/`TaskUpdate`), main context isolation, model tiers for subagents, and structured decisions via `AskUserQuestion`.
-
-## 6.6.1
-
-### Changed
-
-- **Shape boundary made explicit** — shape writes to spec and context only. No code, config, or skill files. The boundary is stated as a principle rather than a file list.
-- **Build plan is self-sufficient** — the plan carries an execution preamble with dispatch mechanism, TDD workflow, coding conventions, and quality gates. After plan approval, the plan stands alone — no dependency on skill instructions surviving the handoff.
-- **CLAUDE.md uses principle-based boundaries** — replaced per-file skill routing with the single principle: shape writes `.do/` spec and context, everything else goes through build.
-
-## 6.6.0
+## [7.0.0] — 2026-02-28
 
 ### Changed
+- Unified shape and build into single `/do:work` skill with four modes: dialogue, planning, execution, analysis
+- Expanded project files from two (spec, context) to six (spec, reference, stack, design, decisions, pitfalls)
+- Absorbed audit and challenge commands as analytical modes within the skill
+- Removed status file — state reconstructed from project files and git diffs each session
+- Project file updates allowed from any mode with human agreement (previously build couldn't modify spec)
 
-- **Build uses two-phase protocol** — planning and execution separated by a structural gate. Build enters plan mode (read-only), explores the codebase, and produces a plan where each task specifies its test alongside its implementation goal. Human approves the plan before any code is written. Execution runs without interruption via bypassPermissions subagents.
-- **TDD enforced structurally** — tests are specified in the plan, not left to the agent's discretion. The approved plan is the TDD contract.
-- **Plan mode leverages Claude Code built-ins** — EnterPlanMode/ExitPlanMode for the read-only gate, sequential thinking for decomposition, Task tool with bypassPermissions for execution.
+### Removed
+- Shape skill (merged into /do:work)
+- Build skill (merged into /do:work)
+- Audit command (now /do:work analysis mode)
+- Challenge command (now /do:work analysis mode)
 
-## 6.5.0
+## [6.6.2]
 
 ### Changed
+- Added shared skill conventions in context
 
-- **Component folders replace flat subspecs** — problems with distinct components decompose into folders under `.do/`, each a workspace with `spec.md`, `context.md`, and supporting materials (designs, images, reference data). Root level becomes the integration layer.
-- **Decomposition trigger is logical separation, not size** — two components with different concerns should be separate from the start, even if they'd fit in one file.
-- **Skills read component specs and contexts** — both shape and build follow component references from the root spec into `.do/<component>/` folders.
-
-## 6.4.0
+## [6.6.1]
 
 ### Changed
+- Shape boundary made explicit — writes only to .do/ spec and context
+- Build plan is self-sufficient execution contract
+- CLAUDE.md is principle-based
 
-- **Build drives to completion** — build no longer stops at code. It continues through apply and verify until the context's definition of done is met. Interacts with the human for direction and permission along the way.
-- **Context defines "done"** — shape captures what completion and verification look like for each project in the context. Build drives to that definition.
-- **Next steps on stop** — when build reaches its limit, it produces concrete actionable next steps: next buildable unit, spec gaps to shape, or human actions needed.
+## [6.6.0]
 
-## 6.3.0
+### Changed
+- Build two-phase protocol: planning (read-only) then execution (uninterrupted)
+- TDD enforced structurally — each plan task specifies test and implementation goal
+
+## [6.5.0]
+
+### Changed
+- Component folders replace flat subspecs (.do/<component>/ with their own spec and context)
+
+## [6.4.0]
+
+### Changed
+- Build drives to completion — context defines "done"
+
+## [6.3.0]
 
 ### Added
+- Audit command — technical evaluation against best practices
+- Challenge command — product review from PM perspective
 
-- **Audit command** (`/do:audit`) — technical audit that evaluates stack, patterns, and practices against current best practices. Produces prioritized findings by impact-to-effort ratio.
-- **Challenge command** (`/do:challenge`) — product review from a PM perspective. Pressure-tests value proposition, questions assumptions, researches the competitive landscape.
-- **Commands section in spec** — documents the distinction between skills (collaborative, stateful) and commands (fire-and-forget). Commands produce findings that feed into shape.
-- **Plugin structure in context** — context now documents the full file layout of the plugin.
+## [6.2.0]
 
-## 6.2.0
+### Added
+- Release command — version bump, changelog, docs sync, commit, tag, push
 
-Add release command for version bumps, changelog updates, docs sync, tagging, and pushing.
+## [6.1.0]
 
-## 6.1.0
+### Changed
+- Specs capture system-level processes (triggers, cascades, pipelines)
 
-Specs capture two levels of behavior: user-facing interactions and system-level processes (triggers, cascades, pipelines). Shape surfaces process chains by asking what else the system does when an event occurs.
+## [6.0.0]
 
-## 6.0.0
-
-Major restructure. Merge shape and frame into one dialogue skill. Two skills instead of three.
-
-- **Sensemaking model**: Spec opening articulates the essence — collaborative sensemaking with externalized shared mental models
-- **Shape absorbs frame**: One dialogue skill that routes internally — intent/constraints/behavior to spec, technology/conventions/plan/status to context
-- **Context as handoff**: Context expanded to include plan and progress. Shape writes approach, build writes status. Complete re-entry point between sessions
-- **Artifact properties**: Specs should define properties of output artifacts. Skill files must be unambiguous about protocol (sequence), rules (inviolable), and techniques (situational)
-- **Mechanisms extracted from spec**: Model tiers, tool names, spinner details moved to skills. Spec keeps properties only
-- **Zoom-out mode**: Shape periodically steps back to assess spec coherence, compress redundancy, defragment incremental additions
-- **Skills restructured**: Protocol/rules/techniques/boundaries — typed instructions with clear compliance levels
-
-## 5.10.0
-
-Build follows TDD — failing test first, minimum code to pass. Skills signal activation via task spinner. Frame writes project CLAUDE.md to enforce skill boundaries.
-
-## 5.9.0
-
-Spec exclusion clarity — implementation artifacts (file paths, API field names, deletion checklists, line numbers) don't belong in specs alongside deliberation artifacts. They feel concrete but describe what exists, not what to achieve.
-
-## 5.8.0
-
-Shape actively guards its boundary with frame. Technology questions are redirected, not engaged with — shape steers back to intent and constraints instead of evaluating tools or frameworks.
-
-## 5.7.1
-
-Frame audits existing tooling before researching. Assesses current project tooling against ecosystem best practices, surfaces gaps proactively rather than waiting for the human to ask.
-
-## 5.7.0
-
-Subagent delegation and structured user questions. Skills delegate heavy work to subagents via Task tool with model tiers (haiku/sonnet/opus) based on complexity. Shape and frame use AskUserQuestion for decision points instead of prose questions.
-
-## 5.6.0
-
-Quality infrastructure as project-local concern. Frame captures quality conventions (linter, formatter, test runner) in context.md. Build materializes them as config files before application code.
-
-## 5.5.0
-
-Specs are all specification, no explanations. Shape writes concretely for build — behavior, not concepts. Build treats every spec line as work, not background.
-
-## 5.4.0
-
-Gap detection through version control. All three skills now check git diffs at session start, each through its own lens — shape detects intent drift (code changed, spec didn't), build detects spec/context evolution, frame detects undocumented technology changes and recurring struggles in commit history.
-
-## 5.3.0
-
-Add context boundary and build diff-awareness.
-
-- **Context boundary**: Spec and frame skill now explicitly state that context captures choices and environment facts, not build outputs or runtime stats
-- **Build reads the diff**: Build skill checks `git diff` on spec/context before starting — the delta since last commit is the most direct signal of what evolved and what needs attention
-
-## 5.0.0
-
-Complete rewrite. Replaced 5 skills, a Python CLI, 341 behavioral contracts, and 365 tests with 2 skills and a spec convention.
-
-### What changed
-
-- **Skills**: `/do:design`, `/do:execute`, `/do:research`, `/do:reflect`, `/do:refine` replaced by `/do:shape` and `/do:build`
-- **No CLI**: Removed the `shared/cli` Python package, all store/ops/cli layers, and helper scripts
-- **No contracts**: Removed behavioral contract system (specs.jsonl, contract IDs, tamper detection, preflight verification)
-- **No ceremony**: Removed DAG scheduling, FSMs, Eisenhower matrices, content-addressable hashing, double-blind review protocols, regression gates, archive system
-
-### What remains
-
-- A spec file (`.do/spec.md`) as persistent shared understanding
-- Two skills: shape (evolve the spec through dialogue) and build (implement and compare)
-- A feedback loop between them
-
-### Why
-
-The previous system over-specified a process that works better when left to the LLM's judgment. 341 contracts and 8 mechanical phases per skill constrained creativity without improving outcomes. The core need — persistent shared understanding between human and AI — was buried under infrastructure.
-
-## 4.0.0
-
-Modular CLI package rewrite with three-layer architecture. 365 tests across 18 modules.
-
-## 3.0.0
-
-Spec-based validation with brownfield auto-detection.
-
-## 2.0.0
-
-Migration from acceptance-criteria to spec-based validation.
-
-## 1.0.0
-
-Initial release with five skills and monolithic helper script.
+### Changed
+- Major restructure — merge shape and frame into one dialogue skill

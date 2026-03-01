@@ -1,7 +1,7 @@
 {
   "name": "do",
-  "version": "6.6.2",
-  "description": "Two skills and three commands for collaborative sensemaking — /shape evolves the spec and context through dialogue, /build implements and writes status.",
+  "version": "7.1.0",
+  "description": "One skill and one command for collaborative sensemaking — /do:work evolves understanding through dialogue, plans and builds through execution, and analyzes through audit and challenge modes.",
   "author": {
     "name": "morphiax",
     "url": "https://github.com/morphiax"

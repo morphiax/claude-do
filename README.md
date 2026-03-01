@@ -1,74 +1,79 @@
-# do - Claude Code Plugin
+# do
 
-> Collaborative sensemaking — shape understanding through dialogue, build what it describes
+One skill and one command for collaborative sensemaking.
 
-![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Version](https://img.shields.io/badge/version-6.6.2-green.svg)
+## What it does
 
-## What It Does
+`/do:work` is a unified skill for working on projects through four modes:
 
-Two skills and three commands for collaborative problem-solving between a human and an AI.
+| Mode | What it does | When to use |
+|------|-------------|-------------|
+| Dialogue | Conversation about the project, update understanding | Clarifying intent, evaluating technology, surfacing constraints |
+| Planning | Decompose work into testable tasks | Ready to implement something |
+| Execution | Build the approved plan via TDD | Plan approved, ready to code |
+| Analysis | Technical audit or product challenge | Want an honest assessment |
 
-The human has intent and constraints they may not be able to fully articulate. The AI has broad technical knowledge and pattern recognition. A shared spec captures the problem understanding. A context file captures the approach, plan, and progress. Together they drive the build.
+`/do:release` ships versions — bump, changelog, docs sync, commit, tag, push.
 
-## Skills
+## Project files
 
-| Skill | Description |
-|---|---|
-| `/do:shape` | Talk about the project — clarify intent, evaluate technology, surface constraints, plan what to build next |
-| `/do:build` | Drive work to completion — apply, verify, produce next steps |
+The plugin maintains shared understanding in six files under `.do/`:
 
-## Commands
-
-| Command | Description |
-|---|---|
-| `/do:release` | Version bump, changelog, docs sync, commit, tag, push |
-| `/do:audit` | Technical audit — evaluate stack, patterns, and practices against best practices |
-| `/do:challenge` | Product challenge — question assumptions, find gaps, pressure-test the value proposition |
+| File | Purpose | Question it answers |
+|------|---------|-------------------|
+| `spec.md` | Behaviors, constraints, data contracts | What should it do? |
+| `reference.md` | External system models | How does the target system work? |
+| `stack.md` | Runtime, frameworks, conventions | What are we building with? |
+| `design.md` | Visual identity, aesthetic direction, UI patterns | What should it look like? |
+| `decisions.md` | Decision log with rationale | Why did we choose this? |
+| `pitfalls.md` | Debugging insights and gotchas | What breaks and how to avoid it? |
 
 ## Usage
 
-```bash
-# Install
-/plugin marketplace add morphiax/claude-do
-/plugin install do@do
-
-# Shape — what are we building, why, and with what?
-/do:shape I want to build a tool that does X
-
-# Build — implement from spec + context
-/do:build
-
-# Refine after building
-/do:shape the build revealed that Y doesn't work, let's rethink Z
-/do:shape we need to switch from Node to Bun
-
-# Audit — what could be better technically?
-/do:audit
-/do:audit error handling
-
-# Challenge — is the product right?
-/do:challenge
-/do:challenge onboarding experience
-
-# Release — ship a version
-/do:release
+### Start a new project
+```
+/do:work what problem are we solving?
 ```
 
-## How It Works
+### Continue working
+```
+/do:work
+```
+Reads project files, checks git diffs, picks up where you left off.
 
-**`/do:shape`** is the dialogue skill. The human talks about the project — both what it should do and how to build it. Shape routes internally: intent, constraints, and behavior go in the spec; technology choices, conventions, plan, and environment go in the context. It audits existing tooling, researches options, evaluates fit against constraints, and surfaces tradeoffs. Periodically it steps back to assess whether the spec is still coherent.
+### Build something
+```
+/do:work implement the search feature
+```
+Plans in read-only mode, gets approval, executes via TDD.
 
-**`/do:build`** is the execution skill. It works in two phases separated by a structural gate. First, build enters plan mode — read-only exploration of the codebase — and produces a concrete plan where each task specifies its test alongside its implementation goal. The human approves the plan before any code is written. Then build executes: TDD per task (test first, minimum implementation), driving through apply and verify until the context's definition of done is met. When it stops, it produces concrete next steps — the next buildable unit, spec gaps to shape, or human actions needed.
+### Audit the stack
+```
+/do:work audit
+```
+Technical evaluation against current best practices.
 
-The feedback loop is the core mechanism. Build produces evidence. Shape incorporates it into shared understanding. Each cycle sharpens the spec, the context, and the solution.
+### Challenge assumptions
+```
+/do:work challenge the onboarding flow
+```
+Product review from PM perspective.
 
-**Commands** are single-purpose actions that run and finish. `/do:audit` evaluates the tech stack against current best practices. `/do:challenge` pressure-tests the product from a PM perspective. Both produce findings that feed into shape. `/do:release` handles versioning, changelog, and shipping.
+### Ship a version
+```
+/do:release minor
+```
 
-## Conventions
+## How it works
 
-| File | Purpose |
-|---|---|
-| `.do/spec.md` | Root spec — the shared understanding of what and why |
-| `.do/context.md` | Approach, plan, and progress — the with-what and where-we-are |
-| `.do/<component>/` | Component workspace — spec.md, context.md, and supporting materials |
+The skill reads project files and git diffs to reconstruct current state, then enters whichever mode the request demands. Modes transition fluidly — discovering a gap during execution pauses into dialogue to propose a project file update, then resumes.
+
+All project file updates require human agreement. All code changes require plan approval first. The plan is the execution contract — self-sufficient for agents with no prior context.
+
+Project files and code stay in sync bidirectionally. After execution, the skill verifies project files reflect what was built and proposes updates for any drift. After project file updates, implementation is verified to match. Neither can change without the other.
+
+## Install
+
+```
+claude plugin add morphiax/do
+```
