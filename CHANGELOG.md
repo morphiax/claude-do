@@ -1,5 +1,14 @@
 # Changelog
 
+## [7.2.0] — 2026-03-01
+
+### Added
+- Quick-fix execution path — skip plan approval ceremony for small, obvious fixes while still using task tools and subagents
+
+### Changed
+- Agreement model: direction is established in conversation, project files update as part of execution without re-confirming at write time
+- Only gate for project file writes is introducing new direction (new behaviors, scope changes, architectural shifts) without prior conversation
+
 ## [7.1.0] — 2026-03-01
 
 ### Added
