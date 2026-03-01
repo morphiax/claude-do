@@ -34,7 +34,7 @@ Quality bar: every task is executable from its description alone — includes fi
 
 *Full execution* requires an approved plan. The task list is the progress interface — tasks move through pending → in_progress → completed as subagents work. TDD workflow: failing test, minimum implementation, green. After all tasks complete, verifies bidirectionally: code satisfies spec AND spec reflects what was built.
 
-*Quick fix* (1–3 tasks, obvious fix after investigation) skips plan approval but still uses task tools and subagents. Sequence: state the fix and get human agreement, create tasks, dispatch each to a subagent with sufficient context, mark completed, sync project files. The threshold is clarity, not size — any ambiguity about approach requires full planning. Quick fix is not a shortcut to skip subagents or task tracking; it's a shortcut to skip the plan approval ceremony when the fix is self-evident.
+*Quick fix* (1–3 tasks, obvious fix after investigation) skips plan approval but still uses task tools and subagents. Sequence: (1) state the diagnosis and proposed fix, then **stop and wait for human response** — they may have context that changes the approach, (2) after agreement, create tasks via TaskCreate — even for single-task fixes, since the task list is the user's progress dashboard, (3) dispatch to subagents, (4) mark completed, (5) complete the sync gate. The threshold is clarity, not size — any ambiguity about approach requires full planning. Quick fix is not a shortcut to skip subagents or task tracking; it's a shortcut to skip the plan approval ceremony when the fix is self-evident.
 
 Quality bar: tests assert behaviors, not implementation details. Only the code the test demands gets written. After completion, approach verification as a bug hunt — the first implementation is almost never complete. When execution surfaces new insights, capture them in the relevant project file.
 
@@ -44,7 +44,7 @@ Quality bar: every finding is specific (names files, counts instances, quantifie
 
 Modes transition fluidly. Discovering a gap during execution pauses into dialogue. Resolving a question in dialogue can advance into planning.
 
-**Context management** — Main context handles dialogue, project files, planning, and orchestration only. All implementation file reads, code exploration, and code edits go to subagents — no exceptions, even for quick fixes. Only `.do/` file reads and git commands belong in main context.
+**Context management** — Main context handles dialogue, project files, planning, and orchestration only. All implementation file reads, code exploration, and code edits go to subagents — no exceptions, even for quick fixes. Only `.do/` file reads and git commands belong in main context. When an investigation subagent returns incomplete results, dispatch a targeted follow-up — don't fall back to main-context reads.
 
 **Design thinking** — Before implementing any visual interface, commits to an aesthetic direction by thinking across five dimensions: typography, color, motion, spatial composition, and atmosphere. Reads design.md and reference images first. Matches implementation complexity to the aesthetic vision. Each project's interface should feel genuinely designed for its context — never converging on the same look across projects.
 
@@ -52,9 +52,9 @@ Modes transition fluidly. Discovering a gap during execution pauses into dialogu
 
 1. Read all existing `.do/` files to reconstruct project understanding.
 2. Check what changed since the last relevant commit — diff code, dependencies, and `.do/` files. Surface gaps between project files and reality. Skip when no version control.
-3. Determine mode from the request context.
+3. Determine mode from the request context. Bug reports start as dialogue with investigation in a subagent — never main context. Transition to execution when root cause and fix can be stated in one sentence.
 4. Execute in the determined mode. Modes can transition mid-session.
-5. Sync project files — diff what was built against `.do/` files, propose updates for any drift. Skip when mode is dialogue or analysis with no implementation changes.
+5. Sync gate — mandatory after any execution. Read spec.md (and design.md/stack.md if relevant), enumerate each behavior added/modified/removed, confirm each is reflected or propose an update. If nothing drifted, state explicitly: "Sync gate: all changes reflected in project files." The explicit statement prevents silent skipping. Skip only for dialogue or analysis with no implementation changes.
 6. Produce concrete next steps (mandatory unless project is fully complete).
 
 ### Maintain project files

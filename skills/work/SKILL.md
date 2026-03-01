@@ -18,9 +18,14 @@ Your tone is direct and collaborative — an opinionated colleague, not a defere
 
 1. **Read project files.** Read all `.do/` files that exist (spec.md, reference.md, stack.md, design.md, decisions.md, pitfalls.md). If root spec references components, read `.do/<component>/` as needed. Read any reference images in `.do/` that design.md points to.
 2. **Check what changed.** Under version control, diff code, dependencies, and `.do/` files since last relevant commit. Surface gaps between project files and reality. Check commit history for recurring patterns — repeated fixes in the same area signal something that may need rethinking. Skip when no version control.
-3. **Determine mode.** From request context: dialogue (conversation about project), planning (ready to plan implementation), execution (approved plan exists or quick fix identified), analysis (audit or challenge requested). A bug report or issue typically starts as dialogue (investigation via subagent), then transitions to either planning (complex fix) or quick-fix execution (obvious fix) — never directly to main-context implementation.
+3. **Determine mode.** From request context: dialogue (conversation about project), planning (ready to plan implementation), execution (approved plan exists or quick fix identified), analysis (audit or challenge requested). A bug report starts as dialogue. Investigation runs in a subagent — never in main context. When the root cause and fix can be stated in one sentence, transition to execution: quick fix if the approach is unambiguous, planning if not.
 4. **Execute in mode.** See below. Modes can transition — discovering a gap during execution can pause into dialogue to propose a project file update.
-5. **Sync project files.** After execution, diff what was built against project files. Propose updates for any drift — new behaviors go to spec.md, layout/UI changes to design.md, new technology patterns to stack.md, etc. After project file updates, verify implementation matches. Skip when mode is dialogue or analysis with no file changes.
+5. **Sync gate.** Mandatory after any execution (full or quick fix). Before producing next steps:
+   1. Read spec.md (and design.md if UI changed, stack.md if tooling changed).
+   2. List each behavior that was added, modified, or removed in this session.
+   3. For each: confirm it's already reflected in the project files OR propose an update.
+   4. If no updates are needed, state explicitly: *"Sync gate: all changes reflected in project files."*
+   The explicit statement prevents silent skipping — you must either propose updates or actively verify nothing drifted. Skip only for dialogue or analysis with no implementation changes.
 6. **Produce next steps.** Mandatory unless project is fully complete. Concrete actionable items.
 
 ## Modes
@@ -108,7 +113,14 @@ Execute implementation work. Main context handles orchestration and project file
 
 **Full execution** (multi-task, architectural): Requires an approved plan from planning mode. The task list created during planning is the progress interface. For each task: set it to in_progress, spawn a subagent via Agent tool with `mode: "bypassPermissions"` and the model tier specified in the plan, passing the preamble plus the task description. Mark completed when the subagent finishes.
 
-**Quick fix** (1–3 tasks, obvious fix after investigation): When investigation reveals a small, clear fix — no architectural decisions, no ambiguity — skip EnterPlanMode but still use task tools and subagents. The sequence: (1) state the fix and get human agreement, (2) create tasks via TaskCreate, (3) dispatch each task to a subagent with sufficient context (relevant file paths, what to change, what to test), (4) mark tasks completed as subagents finish, (5) sync project files. The threshold is clarity, not size — if there's any ambiguity about approach, use full planning. Quick fix is not a shortcut to skip subagents or task tracking; it's a shortcut to skip the plan approval ceremony when the fix is self-evident.
+**Quick fix** (1–3 tasks, obvious fix after investigation): When investigation reveals a small, clear fix — no architectural decisions, no ambiguity — skip EnterPlanMode but still use task tools and subagents. The sequence:
+1. State the diagnosis and proposed fix. **Stop and wait for the human's response** — they may have context that changes the approach.
+2. After agreement, create tasks via TaskCreate — even for single-task fixes. The task list is the user's progress dashboard; without it, they see a silent gap while the subagent works.
+3. Dispatch each task to a subagent with sufficient context (relevant file paths, what to change, what to test).
+4. Mark tasks completed as subagents finish.
+5. Complete the sync gate.
+
+The threshold is clarity, not size — if there's any ambiguity about approach, use full planning. Quick fix is not a shortcut to skip subagents or task tracking; it's a shortcut to skip the plan approval ceremony when the fix is self-evident.
 
 Quality dimensions for execution:
 - **Test fidelity**: Tests assert spec behaviors, not implementation details. "Login returns a session cookie" is a behavior test. "Login calls bcrypt.compare" is an implementation test that breaks on refactoring. Write the former.
@@ -123,9 +135,10 @@ Quality dimensions for execution:
 [Progress — which tasks are dispatched, completed, blocked.
 Minimal detail — the work happens in subagents]
 
-### Sync check
-[Any drift between project files and what was built.
-Proposed updates if needed]
+### Sync gate
+**Changes made:** [enumerate each behavior added/modified/removed]
+**Spec coverage:** [for each, confirm reflected or propose update]
+[OR: "Sync gate: all changes reflected in project files"]
 
 ### Next steps
 - [concrete items]
@@ -193,7 +206,7 @@ Analysis findings route directly to project files as part of the work.
 
 - **Agreement happens in conversation, not at file-write time.** Once direction is established through dialogue, update everything — code, spec, pitfalls, reference, whatever the work touches — as part of execution. Don't ask again at the point of writing a project file. The only gate is: don't introduce new direction (new behaviors, scope changes, architectural shifts) without conversation first.
 - **Route to the right file.** Use the routing heuristic below.
-- **Main context is for dialogue, project files, planning, and orchestration.** Only `.do/` file reads and git commands belong in main context. All implementation file reads, code exploration, and code edits go to subagents — no exceptions, even for "quick" fixes. Before using Read, Glob, Grep, or Bash on non-`.do/` files, stop: that work belongs in a subagent. Use haiku for mechanical reads, sonnet for moderate analysis, opus for complex interpretation.
+- **Main context is for dialogue, project files, planning, and orchestration.** Only `.do/` file reads and git commands belong in main context. All implementation file reads, code exploration, and code edits go to subagents — no exceptions, even for "quick" fixes. Before using Read, Glob, Grep, or Bash on non-`.do/` files, stop: that work belongs in a subagent. Use haiku for mechanical reads, sonnet for moderate analysis, opus for complex interpretation. When an investigation subagent returns incomplete results, dispatch a targeted follow-up with a narrower prompt informed by what you learned — don't fall back to main-context reads. "Just one file" always becomes seven.
 - **The plan is the contract.** Self-sufficient for agents with no prior context. Once approved, follow it. If reality diverges — stop and propose an update.
 - **Tests live in the plan.** Each task specifies test + implementation goal. Plan approval = TDD approval.
 - **Treat project files as all specification.** Everything is actionable: intent (build it), constraint (enforce it), understanding (use it for decisions).

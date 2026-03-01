@@ -6,7 +6,7 @@
 
 **Root cause:** Implementation introduces changes — new API fields, layout restructuring, behavioral tweaks — that never get reflected back into project files. The implementer considers the task "done" when the code works, forgetting that the spec is a parallel representation.
 
-**Fix:** Protocol step 5 (Sync project files) and the bidirectional sync rule. After every execution, diff what was built against `.do/` files. Propose updates for any drift. This must be a mechanical step, not a judgment call — drift is always unacceptable.
+**Fix:** Protocol step 5 (Sync gate) requires enumerating each behavior changed and confirming spec coverage — or explicitly stating nothing drifted. The mechanical output requirement makes skipping visible.
 
 **Pattern:** Any system with dual representations (docs/code, schema/implementation, spec/tests) suffers this. The fix is always the same: make sync a protocol step, not a hope.
 
@@ -43,3 +43,23 @@
 **Fix:** The quick-fix execution path provides a lighter ceremony (skip plan approval) while preserving the invariants that matter: subagents for implementation, task tools for tracking, project file sync for knowledge capture. The main context rule is now explicit: all implementation file reads and code edits go to subagents, no exceptions.
 
 **Pattern:** When a process has only a heavyweight path, users (and models) will bypass the entire process rather than just the unnecessary parts. Provide graduated paths that preserve core invariants while scaling ceremony to task size.
+
+## Sync step silently skipped after execution
+
+**Symptom:** Implementation lands, tests pass, but project files (especially spec.md) don't reflect the new behavior. The skill reports "done" without proposing any spec updates.
+
+**Root cause:** After a successful fix, there's strong momentum to report success. The aspirational instruction "diff what was built against project files" competes with the pull to ship, and loses. The sync step was phrased as guidance ("propose updates for any drift") rather than a mechanical gate with required output.
+
+**Fix:** Protocol step 5 is now a "sync gate" with required output: enumerate each behavior changed, confirm spec coverage for each, and either propose updates or explicitly state "Sync gate: all changes reflected in project files." The explicit statement makes skipping visible — you must actively verify, not passively omit.
+
+**Pattern:** Aspirational instructions ("remember to X") fail under momentum pressure. Mechanical gates with required output ("state X or propose Y") survive because skipping them produces a visibly incomplete response.
+
+## Investigation leaks into main context after incomplete subagent
+
+**Symptom:** An Explore subagent returns a plausible but incomplete answer. The model reads implementation files directly in main context to "verify quickly." One file becomes seven. Investigation work pollutes main context and hides progress from the user.
+
+**Root cause:** The subagent overhead (formulating prompt, waiting) feels slower than reading directly. Under efficiency pressure, "just one file" is rationalized as faster. The rule against main-context reads is negative ("don't") and competes with the positive pull to "get the answer now."
+
+**Fix:** The main-context rule now explicitly addresses this: "When an investigation subagent returns incomplete results, dispatch a targeted follow-up — don't fall back to main-context reads. 'Just one file' always becomes seven." The follow-up subagent is framed as faster (narrower prompt, informed by first attempt) rather than as compliance overhead.
+
+**Pattern:** Negative rules ("don't do X") lose to efficiency pressure. Reframing the compliant path as the efficient path ("targeted follow-up is faster") makes compliance the path of least resistance.

@@ -70,7 +70,7 @@ The skill reads project files and git diffs to reconstruct current state, then e
 
 Direction is established in conversation; project files update as part of execution without re-confirming at write time. The only gate is: new direction (behaviors, scope, architecture) needs conversation first. All code changes require plan approval (or the quick-fix path for obvious fixes). The plan is the execution contract — self-sufficient for agents with no prior context.
 
-Project files and code stay in sync bidirectionally. After execution, the skill verifies project files reflect what was built and proposes updates for any drift. After project file updates, implementation is verified to match. Neither can change without the other.
+Project files and code stay in sync bidirectionally. After execution, a sync gate requires enumerating each changed behavior and confirming spec coverage — or explicitly stating nothing drifted. After project file updates, implementation is verified to match. Neither can change without the other.
 
 ## Install
 

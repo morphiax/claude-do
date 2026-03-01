@@ -1,5 +1,12 @@
 # Changelog
 
+## [7.3.0] — 2026-03-01
+
+### Changed
+- Sync step replaced with sync gate — requires enumerating changed behaviors and confirming spec coverage (or explicitly stating nothing drifted), preventing silent skipping
+- Quick-fix sequence now stops and waits for human response before dispatching — prevents the model from stating a fix and implementing in the same message
+- Investigation subagent follow-ups: when a subagent returns incomplete results, dispatch a targeted follow-up instead of falling back to main-context reads
+
 ## [7.2.0] — 2026-03-01
 
 ### Added

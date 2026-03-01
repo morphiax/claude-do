@@ -59,3 +59,23 @@
 **Decision:** Add a quick-fix execution path: skip plan approval but still require task tools and subagent dispatch. The threshold is clarity (no ambiguity about approach), not size. Quick fix is explicitly not a shortcut to skip subagents or task tracking — it's a shortcut to skip the plan approval ceremony.
 
 **Tipping point:** The failure mode was observed in practice: the model read implementation files and made edits directly in main context, used no task tools, and skipped project file sync — all because the full pipeline felt like too much ceremony for a small fix. The right fix isn't "allow main context implementation" — it's providing a lighter path that still enforces the invariants that matter (subagents for implementation, task tracking for visibility, project file sync for knowledge capture).
+
+## Sync gate over sync step (v7.3.0)
+
+**Context:** Protocol step 5 said "Sync project files — diff what was built against project files, propose updates for any drift." In practice, after a successful fix with passing tests, the model skipped this step entirely — reporting success without checking if the spec reflected the new behavior. The instruction was aspirational ("propose updates for drift") and competed with strong momentum to ship.
+
+**Alternative:** Add more emphatic language ("don't forget to sync!" / "this is mandatory!").
+
+**Decision:** Replace the aspirational step with a mechanical gate that requires specific output. The sync gate demands: enumerate each behavior changed, confirm spec coverage for each, and either propose updates or state "Sync gate: all changes reflected in project files." The explicit statement makes skipping visible.
+
+**Tipping point:** Aspirational instructions ("remember to X") fail under momentum pressure because omitting them produces no visible gap — the response just doesn't have a sync section, and that's easy to not notice. A required output format ("state X or propose Y") fails visibly — the response skeleton has a mandatory section that's either filled or conspicuously absent.
+
+## Stop-and-wait in quick fix sequence (v7.3.0)
+
+**Context:** The quick fix sequence said "state the fix and get human agreement." In practice, the model stated the fix and dispatched the implementation in the same message — never waiting for agreement. The human had no chance to redirect.
+
+**Alternative:** Rely on the existing instruction being clear enough.
+
+**Decision:** Make the stop explicit with bold formatting: "**Stop and wait for the human's response.**" Also add the rationale inline — "they may have context that changes the approach" — so the instruction isn't just a rule but explains why pausing matters.
+
+**Tipping point:** "Get human agreement" is ambiguous — it could mean "state it and proceed unless they object" (which is how the model interpreted it). "Stop and wait for the human's response" is unambiguous — it requires a message boundary.
