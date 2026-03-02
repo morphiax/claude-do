@@ -17,7 +17,7 @@ One skill and one command for collaborative sensemaking.
 
 ## Project files
 
-The plugin maintains shared understanding in six files under `.do/`:
+The plugin maintains shared understanding in seven files under `.do/`:
 
 | File | Purpose | Question it answers |
 |------|---------|-------------------|
@@ -25,6 +25,7 @@ The plugin maintains shared understanding in six files under `.do/`:
 | `reference.md` | External system models | How does the target system work? |
 | `stack.md` | Runtime, frameworks, conventions | What are we building with? |
 | `design.md` | Visual identity, aesthetic direction, UI patterns | What should it look like? |
+| `architecture.md` | Algorithms, data flows, operation economics | How does the algorithm work? |
 | `decisions.md` | Decision log with rationale | Why did we choose this? |
 | `pitfalls.md` | Debugging insights and gotchas | What breaks and how to avoid it? |
 
@@ -70,7 +71,9 @@ The skill reads project files and git diffs to reconstruct current state, then e
 
 Direction is established in conversation; project files update as part of execution without re-confirming at write time. The only gate is: new direction (behaviors, scope, architecture) needs conversation first. All code changes require plan approval (or the quick-fix path for obvious fixes). The plan is the execution contract — self-sufficient for agents with no prior context.
 
-Project files and code stay in sync bidirectionally. After execution, a sync gate requires enumerating each changed behavior and confirming spec coverage — or explicitly stating nothing drifted. After project file updates, implementation is verified to match. Neither can change without the other.
+Non-trivial algorithms are expressed as pseudocode before implementation — making the approach evaluable, assumptions visible, and operation costs countable. Validated algorithms are captured in architecture.md so future sessions inherit the reasoning.
+
+Project files and code stay in sync bidirectionally. After execution, a sync gate requires enumerating each changed behavior and confirming coverage across project files — or explicitly stating nothing drifted. After project file updates, implementation is verified to match. Neither can change without the other.
 
 ## Install
 

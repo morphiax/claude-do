@@ -10,7 +10,7 @@ AI coding assistants lose context between sessions. Project understanding lives 
 
 Intentionality — every output reflects a deliberate choice, not a default. Before acting in any mode, identify what matters most right now. In dialogue: what's the one question that would most narrow the problem space? In planning: what's the riskiest assumption to resolve first? In execution: what's the failure mode this implementation must prevent? In analysis: what's the finding that would cascade improvements?
 
-Intentionality must survive the handoff. Process insight that stays in conversation history is lost. The same insight crystallized into a spec entry, a plan task, or a pitfall persists — and any future session or subagent benefits from it regardless of their capability. "Returns search results" lets a lesser AI build mediocre search. "Returns search results sorted by relevance, grouped by resort, with the single best value badged" lets the same AI build good search. The quality bars below exist to force this crystallization.
+Intentionality must survive the handoff. Process insight that stays in conversation history is lost. The same insight crystallized into a spec entry, a plan task, or a pitfall persists — and any future session or subagent benefits from it regardless of their capability. "Returns search results" lets a lesser AI build mediocre search. "Returns search results sorted by relevance, grouped by category, with the single best value badged" lets the same AI build good search. The quality bars below exist to force this crystallization.
 
 ## Behaviors
 
@@ -59,7 +59,7 @@ Modes transition fluidly. Discovering a gap during execution pauses into dialogu
 
 ### Maintain project files
 
-Six files under `.do/`, each answering a specific question:
+Seven files under `.do/`, each answering a specific question:
 
 | File | Question |
 |------|----------|
@@ -67,16 +67,18 @@ Six files under `.do/`, each answering a specific question:
 | reference.md | How does the target system work? |
 | stack.md | What are we building with? |
 | design.md | What should it look like? |
+| architecture.md | How does the algorithm work? |
 | decisions.md | Why did we choose this? |
 | pitfalls.md | What breaks and how to avoid it? |
 
-Information routes to files by signal type. Behaviors go to spec. External system facts go to reference. Technology choices go to stack. Aesthetic direction goes to design. Choice rationale goes to decisions. Debugging insights go to pitfalls.
+Information routes to files by signal type. Behaviors go to spec. External system facts go to reference. Technology choices go to stack. Aesthetic direction goes to design. Algorithms and data flows go to architecture. Choice rationale goes to decisions. Debugging insights go to pitfalls.
 
 Each file type has a quality bar enforced during writing — both what to include and what to avoid:
 - **spec.md**: Behaviors are testable and include quality expectations. Sequences captured as behavior. Constraints probed. Data formats precise. The rebuild test: could someone rebuild from this spec alone? Avoid: capabilities without quality bars, specs that require reading code to understand, implicit sequencing, implementation details (those go in stack.md).
 - **reference.md**: Implementation-grade detail. Edge cases documented. Gotchas surfaced. Freshness signals noted. Avoid: high-level overviews that don't help implementation, omitting the non-obvious behaviors that cause bugs.
 - **stack.md**: Conventions specific enough to write new code without reading existing code. Project structure clear. Build/run recipes included. Avoid: generic technology lists without conventions, missing the "how we use it" part.
 - **design.md**: Covers every output surface — visual UI, CLI output, API responses, structured text. Includes tone, information density, and output structure. Avoid: vague aesthetic direction, generic tone descriptions, ignoring non-visual output surfaces, ad-hoc formatting without skeletons.
+- **architecture.md**: Algorithms as pseudocode, operation counts, assumption documentation, data flow traces, boundary conditions. The step between spec (WHAT) and code (implementation). Avoid: restating the spec, embedding file paths or function signatures, algorithms described only in prose.
 - **decisions.md**: Context sufficient, alternatives acknowledged, tipping point named, reversal cost noted. Avoid: recording trivial decisions, omitting rationale, listing what without why.
 - **pitfalls.md**: Recognizable symptom, specific root cause, actionable fix, pattern class identified. Avoid: vague warnings, missing the symptom, fixes that don't explain the mechanism.
 

@@ -16,12 +16,12 @@ Your tone is direct and collaborative — an opinionated colleague, not a defere
 
 ## Protocol
 
-1. **Read project files.** Read all `.do/` files that exist (spec.md, reference.md, stack.md, design.md, decisions.md, pitfalls.md). If root spec references components, read `.do/<component>/` as needed. Read any reference images in `.do/` that design.md points to.
+1. **Read project files.** Read all `.do/` files that exist (spec.md, reference.md, stack.md, design.md, architecture.md, decisions.md, pitfalls.md). If root spec references components, read `.do/<component>/` as needed. Read any reference images in `.do/` that design.md points to.
 2. **Check what changed.** Under version control, diff code, dependencies, and `.do/` files since last relevant commit. Surface gaps between project files and reality. Check commit history for recurring patterns — repeated fixes in the same area signal something that may need rethinking. Skip when no version control.
 3. **Determine mode.** From request context: dialogue (conversation about project), planning (ready to plan implementation), execution (approved plan exists or quick fix identified), analysis (audit or challenge requested). A bug report starts as dialogue. Investigation runs in a subagent — never in main context. When the root cause and fix can be stated in one sentence, transition to execution: quick fix if the approach is unambiguous, planning if not.
 4. **Execute in mode.** See below. Modes can transition — discovering a gap during execution can pause into dialogue to propose a project file update.
 5. **Sync gate.** Mandatory after any execution (full or quick fix). Before producing next steps:
-   1. Read spec.md (and design.md if UI changed, stack.md if tooling changed).
+   1. Read spec.md (and design.md if UI changed, architecture.md if algorithms changed, stack.md if tooling changed).
    2. List each behavior that was added, modified, or removed in this session.
    3. For each: confirm it's already reflected in the project files OR propose an update.
    4. If no updates are needed, state explicitly: *"Sync gate: all changes reflected in project files."*
@@ -71,6 +71,7 @@ Quality dimensions for a plan:
 - **Test specificity**: Every test comes from the spec — it's a behavior made executable. "Test that login works" is not a test. "Test that invalid credentials return 401 with error message, valid credentials return 200 with session cookie, and missing fields return 400" is a test.
 - **Dependency ordering**: Tasks ordered so each builds on the last. No task references code that a later task creates. Infrastructure and schema tasks come first.
 - **Preamble completeness**: The preamble carries the dispatch mechanism, TDD workflow, coding conventions from stack.md, quality gates, and any constraints. After plan approval the SKILL.md may no longer be in scope — the preamble must replace it entirely. The dispatch mechanism must specify: each task runs in its own subagent (Agent tool with `mode: "bypassPermissions"`), receiving the preamble plus its task description. This gives each task a clean context window — no pollution from prior tasks. The orchestrator tracks progress via TaskUpdate on the corresponding task item (pending → in_progress → completed). Each task specifies its model tier — haiku for mechanical work (renaming, boilerplate, simple refactors), sonnet for standard work (feature implementation, test writing), opus for complex work (architectural decisions, multi-file refactors, nuanced interpretation). The model choice is a planning decision, not an execution decision.
+- **Algorithm validation**: Before decomposing into tasks, express the core approach as pseudocode. Count operations, surface assumptions about external systems, and probe uncertain assumptions with throwaway scripts. A plan built on a wrong algorithm produces correct code that does the wrong thing — this step catches "correct but wrong" before task decomposition locks in the approach. Capture the validated algorithm in architecture.md.
 - **Decision frontloading**: Every ambiguity resolved here, not during execution. If two valid approaches exist, choose one in the plan. If a spec behavior is unclear, flag it before submitting.
 
 **Response skeleton:**
@@ -114,7 +115,7 @@ Execute implementation work. Main context handles orchestration and project file
 **Full execution** (multi-task, architectural): Requires an approved plan from planning mode. The task list created during planning is the progress interface. For each task: set it to in_progress, spawn a subagent via Agent tool with `mode: "bypassPermissions"` and the model tier specified in the plan, passing the preamble plus the task description. Mark completed when the subagent finishes.
 
 **Quick fix** (1–3 tasks, obvious fix after investigation): When investigation reveals a small, clear fix — no architectural decisions, no ambiguity — skip EnterPlanMode but still use task tools and subagents. The sequence:
-1. State the diagnosis and proposed fix. **Stop and wait for the human's response** — they may have context that changes the approach.
+1. State the diagnosis and proposed fix. For non-obvious fixes, express the fix as a pseudo-process first — "currently X happens, fix changes it to Y" — so the approach is evaluable before implementation begins. **Stop and wait for the human's response** — they may have context that changes the approach.
 2. After agreement, create tasks via TaskCreate — even for single-task fixes. The task list is the user's progress dashboard; without it, they see a silent gap while the subagent works.
 3. Dispatch each task to a subagent with sufficient context (relevant file paths, what to change, what to test).
 4. Mark tasks completed as subagents finish.
@@ -212,12 +213,19 @@ Analysis findings route directly to project files as part of the work.
 - **Treat project files as all specification.** Everything is actionable: intent (build it), constraint (enforce it), understanding (use it for decisions).
 - **Write for build.** Capture behavior (what it does, what it takes, what it produces), not concepts (why it matters). Everything in the spec must be actionable by an implementer.
 - **Don't over-build.** The spec describes the scope — stay within it.
-- **Project files and code stay in sync.** They are two representations of the same truth. After execution, verify project files reflect what was built — update spec, design, stack, etc. for any behavioral, layout, or API changes introduced. After project file updates, verify implementation matches. Neither drifts without the other.
+- **Project files and code stay in sync.** They are two representations of the same truth. After execution, verify project files reflect what was built — update spec, design, architecture, stack, etc. for any behavioral, layout, algorithmic, or API changes introduced. After project file updates, verify implementation matches. Neither drifts without the other.
 - **Drive to done.** Don't stop at code. Run tests, apply changes, verify outcomes.
 - **Next steps are mandatory.** Every session ends with concrete next steps.
 - **Prefer simplicity.** Eliminate > reuse > configure > extend > build.
 
 ## Techniques
+
+**Pseudocode-first.** Before implementing any non-trivial algorithm, pipeline, or system interaction, express it as pseudocode. Pseudocode strips implementation noise and makes the approach evaluable — bad algorithms that hide in 200 lines of code are obvious in 10 lines of pseudo. Three applications:
+- **Algorithm**: Write the algorithm as pseudo. Count the operations. "N items × M categories × 2 API calls = 2NM requests" is visible in pseudo but invisible in code. Iterate until the approach is sound, then plan implementation. Share with the human when the tradeoff warrants collaborative evaluation.
+- **Architecture**: Write the data/control flow as pseudo before designing components. "User opens → GET options → pick default → GET details → group → sort → render." Surfaces API shape, data dependencies, and state before file structure decisions.
+- **Debugging**: Write what SHOULD happen vs what DOES happen as parallel pseudo-processes. The gap is the bug. Then write throwaway probe scripts to test the differing assumption against the real system.
+
+When the pseudo is right, implementation is translation. When assumptions are uncertain, probe them with throwaway scripts before committing — one fetch that reveals the real behavior saves a full implementation cycle. Capture validated algorithms in architecture.md so future sessions inherit the reasoning, not just the code.
 
 **Listen, then reflect back.** Reflect vague descriptions with structure. Connect to established patterns. Ask if understanding matches.
 
@@ -292,6 +300,7 @@ Example: `### Proposed update → spec.md` followed by a fenced markdown block w
 | How an external system works | reference.md |
 | Technology choices or project organization | stack.md |
 | Visual identity, aesthetic direction, UI patterns | design.md |
+| Algorithm, data flow, system interaction patterns | architecture.md |
 | Why we chose this approach | decisions.md |
 | Something that broke or a non-obvious trap | pitfalls.md |
 
@@ -346,25 +355,37 @@ For all interfaces (including non-visual):
 
 Reference screenshots or inspiration images stored in `.do/` by filename. A future session reading this file should be able to implement a new page or output format that looks and feels like it belongs. Avoid: aesthetic direction so vague any implementation would satisfy it ("clean and modern"), missing the typography or color specifics that make designs cohere, ignoring non-visual output surfaces. Generic tone descriptions that could apply to any project ("friendly and professional"). One-size-fits-all density when different contexts demand different verbosity. Ad-hoc output formatting that changes between invocations — if the system produces a type of output repeatedly, that output needs a skeleton.
 
+**architecture.md** — Quality dimensions:
+
+Architecture captures HOW the system works at the algorithmic level — the step between spec (WHAT it does) and code (the implementation). It's the document that prevents correct implementations of wrong algorithms.
+
+- **Pseudocode clarity**: Each algorithm expressed as pseudocode that an implementer can translate directly. Not prose descriptions of code, not actual code — the sweet spot where the logic is visible without implementation noise. Include operation counts where they matter. "For each of N periods: 1 POST → all items with inline details" is immediately evaluable. The equivalent spread across hundreds of lines of code is not.
+- **Assumption documentation**: Every algorithm rests on assumptions about external systems, data shapes, or performance characteristics. Name them explicitly. "Assumes the detail endpoint returns the same structure regardless of filter parameters" — when this assumption breaks, the algorithm needs revisiting. Undocumented assumptions become invisible bugs.
+- **Data flow specificity**: Trace the path data takes through the system. What enters, what transforms, what persists, what gets discarded. "List page HTML → extract targets → {name, id}[] → for each: fetch detail → extract fields → normalize → DB." This makes the pipeline debuggable — when output is wrong, you can identify which stage corrupted it.
+- **Operation economics**: For algorithms that interact with external systems, networks, or databases, quantify the cost. Requests per run, rows per query, time per operation. "Phase 1: N items × 2 requests each = ~2N requests. Phase 2: M periods × 1 request = M requests." This makes inefficiencies visible and regressions measurable.
+- **Boundary conditions**: What happens at the edges — empty results, pagination limits, session timeouts, rate limits. The happy path is obvious; the boundary conditions are where algorithms fail silently.
+
+Avoid: restating the spec (architecture.md says HOW, spec.md says WHAT), embedding implementation details like file paths or function signatures (those belong in stack.md or the code itself), algorithms described only in prose without pseudocode, missing the operation count that makes efficiency evaluable. Stale algorithms that no longer match the code — if the algorithm changes, architecture.md must update in the sync gate.
+
 **decisions.md** — Quality dimensions:
-- **Context sufficiency**: Enough situation description that a future session understands WHY the decision came up, not just what was decided. "We needed a database" is thin. "We needed persistent storage for 200+ resort records with availability entries that get bulk-upserted monthly, queried by month and filtered by points/sleepers/location" explains the forces.
+- **Context sufficiency**: Enough situation description that a future session understands WHY the decision came up, not just what was decided. "We needed a database" is thin. "We needed persistent storage for 10K+ records with nested entries that get bulk-upserted weekly, queried by date range and filtered by multiple dimensions" explains the forces.
 - **Alternatives acknowledged**: Name at least one alternative that was considered. A decision without alternatives is just a fact — it doesn't help a future session understand the tradeoff space.
-- **Tipping point**: What specifically made the chosen option win. "10-20x faster because PostBack is just HTTP POST with the right form fields — no browser needed" is a tipping point. "It seemed better" is not.
+- **Tipping point**: What specifically made the chosen option win. "10-20x faster because the lightweight approach avoids browser overhead entirely" is a tipping point. "It seemed better" is not.
 - **Reversal cost**: Would reversing this decision require significant rework? If yes, that's precisely why it needs an entry.
 
 Avoid: recording trivial decisions, omitting the rationale, listing what was chosen without why.
 
 **pitfalls.md** — Quality dimensions:
-- **Recognizable symptom**: What you'll see when this problem strikes — the error message, the unexpected behavior, the silent failure. "Scraper finds 0 availability for all resorts" is recognizable. "Something goes wrong with the scraper" is not.
-- **Root cause specificity**: Not "the format was wrong" but "CLI accepted 'September 2026' but passed it unsplit to runScrape which did month.split('-') producing garbage — UCDropDown received 'September 2026|0' instead of '2026|9'." Specific enough to understand the mechanism.
-- **Actionable fix**: What to do, not just what went wrong. "Normalize month to YYYY-MM at CLI entry point before passing to any function" is actionable. "Be more careful with formats" is not.
-- **Pattern recognition**: When the pitfall represents a class of problems (not just one instance), name the class. "UCDropDown requires both fields" is a specific instance of "ASP.NET custom controls often have hidden fields that must be set alongside visible ones."
+- **Recognizable symptom**: What you'll see when this problem strikes — the error message, the unexpected behavior, the silent failure. "Returns 0 results for all queries despite valid inputs" is recognizable. "Something goes wrong with the query" is not.
+- **Root cause specificity**: Not "the format was wrong" but "CLI accepted 'September 2026' but passed it unsplit to the handler which did month.split('-') producing garbage — the downstream API received 'September 2026|0' instead of '2026|9'." Specific enough to understand the mechanism.
+- **Actionable fix**: What to do, not just what went wrong. "Normalize month to YYYY-MM at the CLI entry point before passing to any function" is actionable. "Be more careful with formats" is not.
+- **Pattern recognition**: When the pitfall represents a class of problems (not just one instance), name the class. "The dropdown control requires both fields" is a specific instance of "form controls with hidden companion fields that must be set alongside visible ones."
 
 Avoid: vague warnings ("be careful with dates"), missing the symptom that would help someone recognize the problem, fixes that don't explain the underlying mechanism.
 
 ## Components
 
-When a project has distinct subprojects with different concerns, each gets its own folder under `.do/<component>/`. The trigger is logical separation, not size. Each component folder contains whichever of the six files it needs — not all are required. The root level acts as an index: cross-cutting intent, shared constraints, how components relate.
+When a project has distinct subprojects with different concerns, each gets its own folder under `.do/<component>/`. The trigger is logical separation, not size. Each component folder contains whichever of the seven files it needs — not all are required. The root level acts as an index: cross-cutting intent, shared constraints, how components relate.
 
 ## Self-targeting
 

@@ -1,5 +1,18 @@
 # Changelog
 
+## [7.4.0] — 2026-03-02
+
+### Added
+- architecture.md as seventh project file — captures algorithms as pseudocode, operation counts, assumptions, data flow traces, and boundary conditions
+- Pseudocode-first technique — express algorithms, architecture, and debugging hypotheses as pseudo before implementing
+- Algorithm validation step in planning — write pseudocode and probe assumptions before decomposing into tasks
+
+### Changed
+- Genericized all project-specific examples in SKILL.md quality dimensions (decisions, pitfalls, architecture examples now use placeholder domain terms)
+- Quick-fix sequence includes pseudo-process expression for non-obvious fixes
+- Sync gate checks architecture.md when algorithms changed
+- Project file count updated from six to seven across spec, README, and SKILL.md
+
 ## [7.3.0] — 2026-03-01
 
 ### Changed
