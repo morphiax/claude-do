@@ -1,5 +1,10 @@
 # Changelog
 
+## [7.5.0] — 2026-03-02
+
+### Added
+- "Own everything" rule and invariant — every issue in the project is a project issue regardless of when it appeared; the only valid dispositions are fix or track, never dismiss as "pre-existing"
+
 ## [7.4.0] — 2026-03-02
 
 ### Added

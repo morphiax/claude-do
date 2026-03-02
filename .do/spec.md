@@ -102,6 +102,7 @@ When explicitly directed to work on itself, reads and evolves the plugin's own `
 - **Plan is the contract.** Self-sufficient for agents with no prior context. Once approved, follow it. If reality diverges, stop and propose an update.
 - **Project files and code stay in sync.** After execution, verify project files reflect what was built. After project file updates, verify implementation matches. Neither drifts without the other.
 - **Tests live in the plan.** Each task specifies test and implementation goal. Plan approval is TDD approval.
+- **Own everything.** Every issue encountered — type error, failing test, broken behavior, stale dependency — is a project issue regardless of when it appeared. "Pre-existing" is a timestamp, not a disposition. The only valid dispositions are fix (immediately, if small) or track (pitfalls.md or task, if it would derail current work). Never dismiss or ignore.
 - **Next steps are mandatory.** Every session ends with concrete actionable items unless the project is fully complete.
 
 ## Scope boundaries

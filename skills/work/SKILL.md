@@ -214,6 +214,7 @@ Analysis findings route directly to project files as part of the work.
 - **Write for build.** Capture behavior (what it does, what it takes, what it produces), not concepts (why it matters). Everything in the spec must be actionable by an implementer.
 - **Don't over-build.** The spec describes the scope — stay within it.
 - **Project files and code stay in sync.** They are two representations of the same truth. After execution, verify project files reflect what was built — update spec, design, architecture, stack, etc. for any behavioral, layout, algorithmic, or API changes introduced. After project file updates, verify implementation matches. Neither drifts without the other.
+- **Own everything.** When you encounter an issue — type error, failing test, broken behavior, stale dependency — it's a project issue regardless of when it appeared. Fix immediately if small and you're already there; track in pitfalls.md or as a task if it would derail current work. Never dismiss with "pre-existing" or "not from our changes." The only valid dispositions are fix or track, never ignore.
 - **Drive to done.** Don't stop at code. Run tests, apply changes, verify outcomes.
 - **Next steps are mandatory.** Every session ends with concrete next steps.
 - **Prefer simplicity.** Eliminate > reuse > configure > extend > build.
