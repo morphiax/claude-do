@@ -1,81 +1,71 @@
 # Decisions
 
-## Unified single skill (v7.0.0)
+## Single unified skill over separate mode-specific skills
 
-**Context:** The plugin had three separate skills — shape (dialogue), build (planning + execution), and two analysis commands (audit, challenge). Users had to know which to invoke. Mode selection was a user burden that didn't need to exist.
+**Context:** The system needs to support dialogue, planning, execution, and analysis. These could be separate invocations (e.g., `/do:shape`, `/do:build`, `/do:audit`) or a single entry point that routes internally. The question arose because mode transitions happen naturally during real work — discovering a gap during execution needs dialogue, resolving a question in dialogue leads to planning.
 
-**Alternative:** Keep separate skills with clear triggers.
+**Alternative:** Separate skills with explicit triggers. The human decides which mode to enter.
 
-**Decision:** Merge everything into `/do:work` with automatic mode routing. The skill reads context and picks the right mode. Modes transition fluidly within a session.
+**Tipping point:** Mode transitions require re-establishing context. Separate skills mean exiting one, invoking another, and re-reading project state. A unified skill with internal routing preserves context across transitions and removes the burden of mode selection from the human.
 
-**Tipping point:** Mode transitions happen naturally in real work — you discover a gap during execution and need dialogue, you resolve a question in dialogue and want to plan. Separate skills made these transitions jarring (exit one skill, invoke another, re-establish context).
+**Reversal cost:** Moderate. Splitting back into separate skills would require decomposing the SKILL.md routing logic and duplicating shared protocol steps (orient, sync gate, next steps). The accumulated decision to handle transitions fluidly would be lost — each skill would need its own transition-out logic.
 
-## Six project files instead of two (v7.0.0)
+## Seven specialized files over fewer general-purpose files
 
-**Context:** v6 had two files: spec.md (behaviors) and context.md (everything else). Context.md became a dumping ground — technology choices, debugging insights, decision rationale, and external system models all mixed together.
+**Context:** Project understanding must persist across sessions in `.do/` files. Earlier iterations used two files: `spec.md` for behaviors and `context.md` for everything else. As projects grew, context.md became a dumping ground — technology choices, debugging insights, decision rationale, external system models, and aesthetic direction all intermixed.
 
-**Alternative:** Keep two files but with stricter internal structure (sections within context.md).
+**Alternative:** Keep two files with stricter internal structure (named sections within context.md). Fewer files means fewer routing decisions and less overhead.
 
-**Decision:** Split into six files with distinct routing: spec, reference, stack, design, decisions, pitfalls. Each answers one question. The routing heuristic makes placement unambiguous.
+**Tipping point:** A future session reading context.md couldn't quickly find what it needed. Seven files with distinct names are self-indexing — you know where to look without reading the whole thing. The routing heuristic (behaviors -> spec, broke -> pitfalls, chose -> decisions, etc.) makes placement unambiguous. The cost of maintaining seven files is paid once during writing; the benefit of fast lookup is paid every session.
 
-**Tipping point:** A future session reading context.md couldn't quickly find what it needed. Six files with clear names are self-indexing — you know where to look without reading the whole thing.
+**Reversal cost:** Low for structure, high for accumulated content. Merging files back is mechanical. But the routing discipline — knowing which signal goes where — would degrade. Mixed files invite mixed signals.
 
-## No status file (v7.0.0)
+## Reconstructed state over persistent status file
 
-**Context:** Earlier versions maintained a status.md that tracked what was done, what was in progress, and what was next.
+**Context:** Sessions need to know what happened since the last session. A status.md file could track progress, or the system could reconstruct state from project files and git diffs each time.
 
-**Alternative:** Keep status tracking in a project file.
+**Alternative:** Maintain a status.md that records what was done, in-progress, and next.
 
-**Decision:** Reconstruct state from project files and git diffs each session. No status file.
+**Tipping point:** Status files go stale immediately. Git history is ground truth for what changed. Project files are ground truth for what should exist. A status file is a third source that contradicts the other two whenever someone forgets to update it — which is every time.
 
-**Tipping point:** Status files go stale immediately. Git history is the ground truth for what changed. Project files are the ground truth for what should exist. A status file is a third source that contradicts the other two.
+**Reversal cost:** Negligible. Adding a status file back would be additive. The reconstruction logic in orient would still work.
 
-## Bidirectional sync invariant (v7.1.0)
+## Mandatory sync gate over aspirational sync step
 
-**Context:** Implementation could change behavior without updating the spec. The layout redesign problem: code was updated to remove a sidebar and add a card grid, but spec.md and design.md still described the old sidebar layout.
+**Context:** After execution, project files must reflect what was built. The original protocol had a step: "diff what was built against project files, propose updates for any drift." In practice, after successful execution with passing tests, this step was skipped — the momentum to report success outweighed the instruction to verify sync.
 
-**Alternative:** Rely on the developer to remember to update specs after implementation.
+**Alternative:** Stronger language in the existing step ("this is mandatory," "don't forget"). Also considered: automated diff tooling that mechanically detects drift.
 
-**Decision:** Make it a protocol step and a rule. After execution, the skill diffs what was built against project files and proposes updates. The spec and code are two representations of the same truth — neither changes without the other.
+**Tipping point:** Aspirational instructions ("remember to X") fail under momentum pressure because omitting them produces no visible gap. A required output format — enumerate each behavior changed, confirm spec coverage, or explicitly state "Sync gate: all changes reflected" — fails visibly. The response skeleton has a mandatory section that is either filled or conspicuously absent.
 
-**Tipping point:** The failure was silent. Nobody noticed the spec was wrong until someone asked "did you update the spec?" That's the most dangerous kind of bug — the one that doesn't look like a bug.
+**Reversal cost:** Low. Removing the gate is a SKILL.md edit. But the failure mode it prevents (silent spec drift) returns immediately — the aspirational version was already tried and failed.
 
-## Task list as execution interface (v7.1.0)
+## Quick-fix path over full-planning-only execution
 
-**Context:** The protocol started each session with `TaskCreate subject: "Work"` — a single generic task that sat in_progress for the entire session. In practice this looked wrong: the task list showed a permanent "Work" spinner alongside no other tasks. It was ceremony without information.
+**Context:** All implementation required full plan mode (enter plan mode, human approval, task creation, subagent dispatch). When investigation revealed a small, obvious fix, the system bypassed the entire protocol — reading implementation files in main context, editing directly, skipping task tools and sync. The heavyweight path created an all-or-nothing dynamic.
 
-**Alternative:** Remove task tracking entirely from the skill.
+**Alternative:** Enforce full planning for everything regardless of size. Accept that small fixes will carry ceremony overhead.
 
-**Decision:** Replace the generic "Work" task with real plan tasks. After plan approval, each plan task becomes a TaskCreate with a specific subject and activeForm. During execution, tasks move through pending → in_progress → completed as subagents work. The task list becomes a live progress dashboard. No tasks created for dialogue or short exchanges.
+**Tipping point:** The observed failure mode: the system treated "not worth the ceremony" as permission to skip every structural invariant — not just plan approval, but subagents, task tracking, and sync. The right response is a lighter path that preserves the invariants that matter (subagents for implementation, task tools for visibility, sync gate for knowledge capture) while dropping the one that doesn't (plan approval for self-evident fixes). The threshold is clarity, not size.
 
-**Tipping point:** The task list is the most visible UI element in Claude Code during long operations. A single "Work" task wastes that real estate. Real tasks with real progress give the user an at-a-glance understanding of where execution stands — which is exactly what the task list was designed for.
+**Reversal cost:** Low structurally (remove the quick-fix branch from SKILL.md). But the behavioral regression is immediate — the system will resume bypassing everything when the only option is heavyweight.
 
-## Quick fix execution path (v7.2.0)
+## Orchestrator/worker context boundary
 
-**Context:** The skill required full plan mode (EnterPlanMode → approval → execution) for all implementation work. When investigation revealed a small, obvious fix (e.g., a month default mismatch causing an empty state), the model would skip the ceremony entirely — implementing directly in main context without task tools or subagents — because the full pipeline felt disproportionate to a 3-file fix.
+**Context:** The main conversation context could handle everything — reading implementation files, making edits, running tests — or it could be restricted to orchestration while subagents handle implementation. The question is whether the separation is worth the overhead of formulating subagent prompts and waiting for results.
 
-**Alternative:** Enforce full planning for everything regardless of size.
+**Alternative:** Allow main context to read and edit implementation files directly, using subagents only for parallel work.
 
-**Decision:** Add a quick-fix execution path: skip plan approval but still require task tools and subagent dispatch. The threshold is clarity (no ambiguity about approach), not size. Quick fix is explicitly not a shortcut to skip subagents or task tracking — it's a shortcut to skip the plan approval ceremony.
+**Tipping point:** Main-context implementation reads have unbounded scope creep. "Just one file" becomes seven. Investigation work pollutes the context window, displacing project-level reasoning with implementation details. The context boundary is a forcing function: the orchestrator thinks about what to do, subagents think about how to do it. Mixing the two degrades both.
 
-**Tipping point:** The failure mode was observed in practice: the model read implementation files and made edits directly in main context, used no task tools, and skipped project file sync — all because the full pipeline felt like too much ceremony for a small fix. The right fix isn't "allow main context implementation" — it's providing a lighter path that still enforces the invariants that matter (subagents for implementation, task tracking for visibility, project file sync for knowledge capture).
+**Reversal cost:** High. Removing the boundary is easy. Re-establishing the discipline after it erodes is hard — every "just this once" exception trains the system to bypass.
 
-## Sync gate over sync step (v7.3.0)
+## Pseudocode over prose for mechanisms in spec
 
-**Context:** Protocol step 5 said "Sync project files — diff what was built against project files, propose updates for any drift." In practice, after a successful fix with passing tests, the model skipped this step entirely — reporting success without checking if the spec reflected the new behavior. The instruction was aspirational ("propose updates for drift") and competed with strong momentum to ship.
+**Context:** The spec describes routing logic, validation functions, session sequences, and other mechanisms. These could be expressed in prose ("the system first reads all files, then checks for staleness...") or pseudocode (`files = read_all(path); for file in files: check_staleness(file)`).
 
-**Alternative:** Add more emphatic language ("don't forget to sync!" / "this is mandatory!").
+**Alternative:** Prose throughout, with pseudocode reserved for architecture.md algorithms only.
 
-**Decision:** Replace the aspirational step with a mechanical gate that requires specific output. The sync gate demands: enumerate each behavior changed, confirm spec coverage for each, and either propose updates or state "Sync gate: all changes reflected in project files." The explicit statement makes skipping visible.
+**Tipping point:** Prose descriptions of mechanisms are ambiguous about ordering, conditionality, and completeness. "The system checks for staleness and consistency" doesn't say which happens first or whether both always run. Pseudocode makes control flow explicit. The contract-vs-comment rule adds a second benefit: behavioral contracts must be pseudocode statements, preventing important requirements from hiding in comments that look optional.
 
-**Tipping point:** Aspirational instructions ("remember to X") fail under momentum pressure because omitting them produces no visible gap — the response just doesn't have a sync section, and that's easy to not notice. A required output format ("state X or propose Y") fails visibly — the response skeleton has a mandatory section that's either filled or conspicuously absent.
-
-## Stop-and-wait in quick fix sequence (v7.3.0)
-
-**Context:** The quick fix sequence said "state the fix and get human agreement." In practice, the model stated the fix and dispatched the implementation in the same message — never waiting for agreement. The human had no chance to redirect.
-
-**Alternative:** Rely on the existing instruction being clear enough.
-
-**Decision:** Make the stop explicit with bold formatting: "**Stop and wait for the human's response.**" Also add the rationale inline — "they may have context that changes the approach" — so the instruction isn't just a rule but explains why pausing matters.
-
-**Tipping point:** "Get human agreement" is ambiguous — it could mean "state it and proceed unless they object" (which is how the model interpreted it). "Stop and wait for the human's response" is unambiguous — it requires a message boundary.
+**Reversal cost:** Moderate. Converting pseudocode back to prose loses precision. Subtle ordering and branching contracts would need to be re-discovered through testing.

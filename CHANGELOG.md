@@ -1,5 +1,30 @@
 # Changelog
 
+## [8.0.0] — 2026-03-03
+
+### Added
+- Technology-agnostic behavioral spec — spec.md now describes WHAT the system does without tool names or file paths; implementation details moved to context.md
+- context.md as implementation mapping — maps spec concepts to Claude Code (Agent tool, TaskCreate, model tiers, git commands, preamble construction, sequentialthinking)
+- validate_context_entry — ensures implementation context files have tool permissions, concrete syntax, dispatch patterns, and no behavioral contracts
+- Response skeletons for all six modes in SKILL.md — dialogue, planning, execution, quick-fix (diagnosis + confirmation), and analysis
+- Per-mode tone and density descriptions inlined in SKILL.md
+- Formatting conventions section in SKILL.md
+- Pitfall-derived operational rules inlined at point of action (stop-and-wait, routing function, zero-context plan check, preamble contract)
+
+### Changed
+- Reduced project files from seven to six — architecture.md removed, algorithm pseudocode folded into spec.md per choose_format routing
+- SKILL.md regenerated from spec + context + design + pitfalls (668 lines, up from 473)
+- Scope section converted from prose to pseudocode function with explicit refuse
+- find_next_constraint simplified — removed rebuild-test measurement mechanism
+- design.md, decisions.md, pitfalls.md rewritten with higher information density against their validate_*_entry criteria
+- decisions.md adds "pseudocode over prose" and "orchestrator/worker context boundary" as standalone decisions
+- pitfalls.md adds "wrong-file routing" and "plan tasks require prior context"
+
+### Removed
+- architecture.md and validate_architecture_entry — pseudocode algorithm criteria folded into validate_spec_entry
+- EnterPlanMode and sequentialthinking references from SKILL.md (sequentialthinking moved to context.md)
+- Rebuild-test measurement from find_next_constraint (meta-process, not runtime behavior)
+
 ## [7.5.0] — 2026-03-02
 
 ### Added
