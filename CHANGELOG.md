@@ -1,5 +1,18 @@
 # Changelog
 
+## [8.2.0] — 2026-03-03
+
+### Added
+- Research-backed pseudocode style rules — `validate_pseudocode_style` enforces typed signatures, one-line docstrings, Python-like formatting, 50-70% token density, and structure-first design, each backed by measured effect sizes from IBM EMNLP 2023, Waheed 2024, CodePlan ICLR 2025, and ABC 2026
+- Docstrings on all pseudocode functions — every function in spec.md and SKILL.md now has a one-line behavioral contract as its first line, acting as a chain-of-thought anchor (2-3 ROUGE-L point improvement per IBM 2023)
+- Hard/soft invariant distinction — invariants split into hard (single violation is a breach) and soft (recoverable within session), leveraging the ABC framework's transparency effect
+- Research reference section in reference.md — evidence hierarchy, key findings, style rules, and source citations for the four papers grounding the pseudocode approach
+- Pseudocode style decision in decisions.md — documents the three converging lines of evidence (measured effectiveness, structure as mechanism, precision of contracts)
+
+### Changed
+- All pseudocode function signatures now include type annotations (`def name(arg: Type) -> ReturnType:`)
+- `/do:release` command rewritten as pseudocode with typed functions, edge case handling (no prior tag, no changelog, dirty working directory, disagreeing version sources), and tighter changelog quality rules (imperative mood, significance ordering, noise filtering)
+
 ## [8.1.0] — 2026-03-03
 
 ### Added

@@ -45,7 +45,8 @@ When content spans categories, split it: behavioral contract -> spec, rationale 
 ## Session algorithm
 
 ```
-SESSION(arguments, working_directory):
+SESSION(arguments: str, working_directory: Path):
+  """One iteration of the orient-decide-act-observe loop."""
   path = resolve_model_path(arguments, working_directory)
   model = orient(path)
   mode = route(arguments, model)
@@ -61,7 +62,8 @@ SESSION(arguments, working_directory):
 Read all model files from `path`. If `design.md` references images, read them.
 
 ```
-orient(path) -> MentalModel:
+orient(path: ModelPath) -> MentalModel:
+  """Read all model files and surface gaps between files and reality."""
   files = read_all_model_files(path)
   if design_file references images: read(referenced_images)
 
@@ -72,8 +74,9 @@ orient(path) -> MentalModel:
   consistency = check_cross_file_consistency(files)
   if consistency.issues: flag(consistency.issues)
 
-  drift = diff(code + dependencies + model_files, last_relevant_commit)
-  gaps = where(drift NOT reflected_in files)
+  if version_control_available:
+    drift = diff(code + dependencies + model_files, last_relevant_commit)
+    gaps = where(drift NOT reflected_in files)
 
   all_issues = staleness_flags + consistency.issues + gaps
   ranked = rank_by_impact(all_issues)
@@ -91,7 +94,8 @@ Impact ranking: stale spec outranks stale pitfall. Spec-code contradiction outra
 ## Mode routing
 
 ```
-route(arguments, model) -> Mode:
+route(arguments: str, model: MentalModel) -> Mode:
+  """Determine which mode the session should enter."""
   "audit" in arguments                          -> AUDIT
   "challenge" in arguments                      -> CHALLENGE
   approved_plan_exists AND "execute" implied     -> FULL_EXECUTION
@@ -126,7 +130,8 @@ Modes transition mid-session as elevation: when the constraint cannot be resolve
 ## Constraint identification
 
 ```
-identify_constraint(mode, model) -> single_constraint:
+identify_constraint(mode: Mode, model: MentalModel) -> Constraint:
+  """Identify the single thing that would make the biggest difference right now."""
   DIALOGUE:       -> the question whose answer would change the most downstream decisions
   PLANNING:       -> the riskiest assumption — most likely to invalidate the plan
   FULL_EXECUTION: -> the failure mode this implementation must prevent
@@ -146,7 +151,8 @@ Use `mcp__sequential-thinking__sequentialthinking` for competing constraints, fu
 ## Dialogue
 
 ```
-dialogue(arguments, model, constraint):
+dialogue(arguments: str, model: MentalModel, constraint: Constraint):
+  """Conversation that narrows the problem space and routes insights to model files."""
   if existing_code AND no_spec:
     survey(code_structure, via_worker)
     probe_human(gaps_code_cannot_reveal)
@@ -167,7 +173,8 @@ dialogue(arguments, model, constraint):
 ```
 
 ```
-validate_dialogue(exchange) -> pass | fail:
+validate_dialogue(exchange: DialogueExchange) -> pass | fail:
+  """Each exchange must narrow the problem space, not just record it."""
   targets_constraint       = pursues the question that most narrows the problem space
   narrows_problem_space    = answer would change the approach
   surfaces_constraints     = probes what must hold, what cannot change
@@ -210,7 +217,8 @@ Agree?
 ## Planning
 
 ```
-planning(arguments, model, constraint):
+planning(arguments: str, model: MentalModel, constraint: Constraint):
+  """Decompose work into self-sufficient tasks via read-only exploration."""
   explore(codebase, via_workers, concurrent=true)
 
   if has_nontrivial_algorithm:
@@ -232,7 +240,8 @@ planning(arguments, model, constraint):
 ```
 
 ```
-validate_task(task) -> pass | fail:
+validate_task(task: PlanTask) -> pass | fail:
+  """Each task must be executable by an agent with zero prior context."""
   has_file_paths     = names specific files to read and write
   has_patterns       = references existing code to follow
   has_test           = specifies concrete behavioral assertion
@@ -248,13 +257,15 @@ validate_task(task) -> pass | fail:
 After writing the plan, re-read each task as if you have zero context. If any task requires information not in its description, the plan is underspecified.
 
 ```
-validate_plan(tasks) -> pass | fail:
+validate_plan(tasks: list[PlanTask]) -> pass | fail:
+  """Plan must front-load risk and name failure modes."""
   riskiest_first      = most uncertain assumptions tested earliest
   failure_modes_named = each task identifies what could go wrong
 ```
 
 ```
-research_and_validate(problem) -> validated_approach:
+research_and_validate(problem: Problem) -> ValidatedApproach:
+  """Check prior art and probe assumptions before committing to an approach."""
   prior_art = research([product_patterns, academic_methods, community_practice])
   approach = adapt(prior_art, local_constraints)
   capture(prior_art, rationale, to=model_files)
@@ -303,7 +314,8 @@ quality gates, constraints, validate_output test]
 ### Full execution
 
 ```
-execute_full(plan, model, constraint):
+execute_full(plan: ApprovedPlan, model: MentalModel, constraint: Constraint):
+  """Dispatch plan tasks to workers in dependency order via TDD."""
   preamble = build_preamble(model)
   assert preamble contains relevant_model_content AND validate_output_test
 
@@ -355,7 +367,8 @@ Sync gate: all changes reflected in project files.
 ### Quick fix
 
 ```
-execute_quick_fix(diagnosis, fix):
+execute_quick_fix(diagnosis: str, fix: str):
+  """Fix an unambiguous issue — skip plan approval, keep all other invariants."""
   assert clarity(diagnosis) AND clarity(fix)
   if any_ambiguity: route_to(PLANNING)
   present(diagnosis, evidence, proposed_fix)
@@ -400,7 +413,8 @@ Response skeleton — after confirmation:
 Mandatory after any execution. A response without a sync gate section is conspicuously incomplete.
 
 ```
-sync_gate(result, model):
+sync_gate(result: ExecutionResult, model: MentalModel):
+  """Verify model files reflect what was built — update or explicitly confirm."""
   reread(spec from model)
   if ui_behaviors_changed:    reread(design from model)
   if algorithm_changed:       reread(spec from model)
@@ -429,7 +443,8 @@ sync_gate(result, model):
 ## Analysis
 
 ```
-analyze(type, scope, model, constraint):
+analyze(type: AnalysisType, scope: str, model: MentalModel, constraint: Constraint):
+  """Audit or challenge the project with evidence-backed findings."""
   if type == AUDIT:
     survey(entry_points, deps, config, tests, build, concurrent=true)
     research(current_best_practices, concurrent=true)
@@ -446,7 +461,8 @@ analyze(type, scope, model, constraint):
 ```
 
 ```
-validate_finding(finding) -> pass | fail:
+validate_finding(finding: AnalysisFinding) -> pass | fail:
+  """Every finding must be specific, evidenced, and actionable."""
   is_specific       = names files, counts instances, quantifies impact
   is_evidenced      = grounded in research or observed behavior
   is_actionable     = includes what to do AND effort estimate
@@ -490,7 +506,8 @@ What to do. Effort estimate. Cascade score.]
 Applied to all outputs including this skill file.
 
 ```
-validate_output(output) -> pass | fail:
+validate_output(output: SkillOutput) -> pass | fail:
+  """Cut everything that doesn't prevent a specific mistake."""
   for element in output:
     if element is behavioral_contract:                         keep
     mistake = what_mistake_would_removing_this_cause(element)
@@ -507,7 +524,8 @@ Behavioral contracts can be compressed but never removed.
 ### Quality evolution
 
 ```
-find_next_constraint(quality_problem) -> test | reframe:
+find_next_constraint(quality_problem: QualityProblem) -> test | reframe:
+  """Express the biggest source of damage as a mechanical, discriminating test."""
   constraint = biggest_source_of_damage(quality_problem)
   test = express_as_mechanical_test(constraint)
 
@@ -522,7 +540,8 @@ find_next_constraint(quality_problem) -> test | reframe:
 ### Spec language
 
 ```
-choose_format(content) -> pseudocode | prose:
+choose_format(content: SpecContent) -> pseudocode | prose:
+  """Route content to the representation that LLMs process most effectively."""
   if content describes control_flow:        -> pseudocode
   if content describes routing_decisions:   -> pseudocode
   if content describes validation_criteria: -> pseudocode
@@ -534,12 +553,41 @@ choose_format(content) -> pseudocode | prose:
   if content describes social_contracts:    -> prose
 ```
 
-In pseudocode blocks, comments clarify HOW, not WHAT. If removing a comment would lose a behavior, it is a contract and must be a pseudocode statement.
+### Pseudocode style
+
+Each rule is empirically grounded — see reference.md for sources and measured effect sizes.
+
+```
+validate_pseudocode_style(block: PseudocodeBlock) -> pass | fail:
+  """Pseudocode must follow the style that maximizes LLM comprehension."""
+  # structure is the primary signal — more important than semantics
+  has_indentation       = visual nesting reflects logical nesting
+  has_explicit_flow     = branching via if/elif/else, iteration via for — never prose
+  is_python_like        = PEP 8 formatting, Python constructs
+
+  # typed signatures reinforce input/output contracts
+  has_typed_signature   = def name(arg: Type) -> ReturnType:
+  has_docstring         = one-line behavioral contract as first line of function body
+
+  # comments as reasoning cues, not documentation
+  has_comments          = inline # on non-obvious lines
+  comments_clarify_how  = comments explain mechanism, not restate intent
+  no_comment_contracts  = if removing a comment loses a behavior, it must be a statement
+
+  # naming encodes intent
+  descriptive_names     = function and variable names indicate purpose — never generic
+  atomic_steps          = each line does one thing
+
+  # density in the sweet spot
+  not_verbose           = 50-70% token density of equivalent full code
+  no_classes            = no classes, imports, generators, comprehensions — basic constructs only
+```
 
 ### validate_spec_entry
 
 ```
-validate_spec_entry(entry) -> pass | fail:
+validate_spec_entry(entry: SpecEntry) -> pass | fail:
+  """Spec entries must be testable, bounded, and sufficient for a rebuild."""
   is_testable         = can write an assertion against it
   has_quality_bar     = describes what "good" looks like, not just capability
   captures_sequences  = if steps must be ordered, order is explicit
@@ -566,30 +614,35 @@ validate_spec_entry(entry) -> pass | fail:
 ## Model file validators
 
 ```
-validate_reference_entry(entry) -> pass | fail:
+validate_reference_entry(entry: ReferenceEntry) -> pass | fail:
+  """Reference entries must be implementation-grade — field names, not overviews."""
   impl_grade_detail   = field names, URL patterns, request/response formats
   edge_cases          = timeouts, error responses, optional vs required
   gotchas_surfaced    = things that look like they work one way but don't
   freshness_signals   = version numbers, API versions, dates
 
-validate_stack_entry(entry) -> pass | fail:
+validate_stack_entry(entry: StackEntry) -> pass | fail:
+  """Stack entries must let someone write matching code without reading existing files."""
   convention_specific = can write new code without reading existing code
   structure_clear     = each directory has a defined role
   has_recipes         = how to run, test, build, deploy
 
-validate_design_entry(entry) -> pass | fail:
+validate_design_entry(entry: DesignEntry) -> pass | fail:
+  """Design entries must cover every surface the user touches with actionable specifics."""
   covers_all_surfaces = every surface the user touches
   has_tone            = how the system communicates, how it varies by context
   has_density         = when terse vs expansive, per output type
   has_skeletons       = consistent structure for recurring output types
 
-validate_decisions_entry(entry) -> pass | fail:
+validate_decisions_entry(entry: DecisionsEntry) -> pass | fail:
+  """Decisions must capture the forces, not just the outcome."""
   has_context         = why the decision came up (forces, not just topic)
   has_alternatives    = at least one alternative named
   has_tipping_point   = what specifically made the winner win
   has_reversal_cost   = would reversing require significant rework?
 
-validate_pitfalls_entry(entry) -> pass | fail:
+validate_pitfalls_entry(entry: PitfallsEntry) -> pass | fail:
+  """Pitfalls must be recognizable on sight and fixable without further research."""
   has_symptom         = what you will see when this strikes
   has_root_cause      = specific mechanism, not vague description
   has_fix             = what to do, not just what went wrong
@@ -599,7 +652,8 @@ validate_pitfalls_entry(entry) -> pass | fail:
 ## validate_context_entry
 
 ```
-validate_context_entry(entry) -> pass | fail:
+validate_context_entry(entry: ContextEntry) -> pass | fail:
+  """Context maps abstract spec operations to concrete platform mechanics."""
   maps_all_concepts     = every abstract spec operation has a concrete platform mapping
   has_tool_permissions   = per-role table of what each role can and cannot use
   has_concrete_syntax    = exact tool names, parameter names, invocation patterns
@@ -647,24 +701,29 @@ Before implementing any visual interface, commit to an aesthetic direction acros
 
 ```
 INVARIANTS:
+  # hard — single violation is a breach, no recovery
   bidirectional_sync:  spec == implementation, always
   human_agreement:     propose -> confirm -> write
   plan_is_contract:    self-sufficient for zero-context workers
                        if reality diverges -> stop, propose update
+  no_plan_mode:        never call EnterPlanMode — planning happens inline
+                       plan mode's system prompt supersedes skill directives
+                       use WAIT_FOR_APPROVAL() in conversation instead
+
+  # soft — can recover within session if violated
   tests_in_plan:       each task specifies test + implementation
                        plan approval = TDD approval
   own_everything:      every issue is a project issue regardless of when it appeared
                        dispositions: fix (if small) or track — never ignore
   next_steps:          mandatory emission at session end unless project fully complete
-  no_plan_mode:        never call EnterPlanMode — planning happens inline
-                       plan mode's system prompt supersedes skill directives
-                       use WAIT_FOR_APPROVAL() in conversation instead
+                       presented as numbered menu — user selects by entering the number
 ```
 
 ## Scope
 
 ```
-scope_boundary(action) -> proceed | refuse:
+scope_boundary(action: Action) -> proceed | refuse:
+  """Determine whether an action falls within the system's ownership."""
   owns:
     model file creation and maintenance
     planning and task decomposition

@@ -1,6 +1,6 @@
 # do
 
-One skill and one command for collaborative sensemaking.
+A Claude Code plugin for collaborative project development — `/do:work` evolves understanding through dialogue, plans and builds through execution, and analyzes through audit and challenge modes.
 
 ## What it does
 
@@ -14,6 +14,34 @@ One skill and one command for collaborative sensemaking.
 | Analysis | Technical audit or product challenge | Want an honest assessment |
 
 `/do:release` ships versions — bump, changelog, docs sync, commit, tag, push.
+
+## How it works
+
+### Pseudocode-driven specs
+
+The core of the system is a behavioral spec written as pseudocode rather than prose. This isn't a stylistic preference — it's grounded in research:
+
+- **7-38% improvement** over prose prompts across 132 tasks (IBM, EMNLP 2023)
+- **Structure matters more than semantics** — LLMs are more sensitive to control flow and indentation than variable names or comments, and this gap *widens* with model scale (Waheed, 3331 experiments, 2024)
+- **25% average improvement** with code-form plans across 13 benchmarks, with gains *scaling with task complexity* (CodePlan, ICLR 2025)
+
+Every function in the spec has a typed signature (`def name(arg: Type) -> ReturnType:`) and a one-line docstring stating its behavioral contract. Comments are reasoning cues, not documentation — if removing a comment loses a behavior, it becomes a pseudocode statement instead. The full style is codified in `validate_pseudocode_style` and enforced self-referentially: the spec validates against its own quality rules.
+
+### Session loop
+
+Each session runs an orient-decide-act-observe loop. The system reads project files and git diffs to reconstruct current state, then enters whichever mode the request demands. Modes transition fluidly — discovering a gap during execution pauses into dialogue to propose a project file update, then resumes.
+
+### Orchestrator/worker separation
+
+The main conversation context handles dialogue, planning, and orchestration only. All implementation — code reads, edits, tests — runs in subagents that receive a preamble and task description with zero inherited context. This prevents implementation details from polluting the project-level reasoning window.
+
+### Bidirectional sync
+
+Project files and code stay in sync. After execution, a sync gate requires enumerating each changed behavior and confirming coverage across project files — or explicitly stating nothing drifted. Neither can change without the other.
+
+### Quality system
+
+The spec includes validation functions for every output type — plans, dialogue exchanges, findings, spec entries, model file entries. Each validation function is a set of mechanical tests, not subjective criteria. Invariants are split into hard (single violation is a breach) and soft (recoverable within session), which improves compliance through the transparency effect (ABC Framework, 2026).
 
 ## Project files
 
@@ -63,18 +91,6 @@ Product review from PM perspective.
 ```
 /do:release minor
 ```
-
-## How it works
-
-The skill reads project files and git diffs to reconstruct current state, then enters whichever mode the request demands. Modes transition fluidly — discovering a gap during execution pauses into dialogue to propose a project file update, then resumes.
-
-Direction is established in conversation; project files update as part of execution without re-confirming at write time. The only gate is: new direction (behaviors, scope, architecture) needs conversation first. All code changes require plan approval (or the quick-fix path for obvious fixes). The plan is the execution contract — self-sufficient for agents with no prior context.
-
-Non-trivial algorithms are expressed as pseudocode before implementation — making the approach evaluable, assumptions visible, and operation costs countable. Algorithm pseudocode lives in spec.md alongside the behavioral contracts it implements.
-
-The spec is technology-agnostic (what the system does). A companion context.md maps spec concepts to the implementation platform (tool names, file paths, dispatch patterns). Together they generate the operational skill file.
-
-Project files and code stay in sync bidirectionally. After execution, a sync gate requires enumerating each changed behavior and confirming coverage across project files — or explicitly stating nothing drifted. After project file updates, implementation is verified to match. Neither can change without the other.
 
 ## Install
 

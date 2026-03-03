@@ -66,6 +66,24 @@
 
 **Alternative:** Prose throughout, with pseudocode reserved for architecture.md algorithms only.
 
-**Tipping point:** Prose descriptions of mechanisms are ambiguous about ordering, conditionality, and completeness. "The system checks for staleness and consistency" doesn't say which happens first or whether both always run. Pseudocode makes control flow explicit. The contract-vs-comment rule adds a second benefit: behavioral contracts must be pseudocode statements, preventing important requirements from hiding in comments that look optional.
+**Tipping point:** Three converging lines of evidence:
 
-**Reversal cost:** Moderate. Converting pseudocode back to prose loses precision. Subtle ordering and branching contracts would need to be re-discovered through testing.
+1. *Measured effectiveness.* Pseudocode prompts produce 7-38% improvement over prose across 132 tasks (IBM, EMNLP 2023). Code-form plans show 25% average improvement across 13 benchmarks, with gains *scaling with task complexity* (CodePlan, ICLR 2025). Step-by-step natural language procedures are consistently the worst representation across all task types (Waheed, 2024).
+
+2. *Structure is the mechanism.* LLMs are more sensitive to structural perturbations (indentation, control flow) than semantic ones (variable names, comments). The gap *widens* with model scale — larger models depend more on structure, not less (Waheed, 3331 experiments, 2024). Pseudocode forces explicit branching, sequencing, and variable binding that prose allows you to elide.
+
+3. *Precision of contracts.* Prose descriptions of mechanisms are ambiguous about ordering, conditionality, and completeness. "The system checks for staleness and consistency" doesn't say which happens first or whether both always run. Pseudocode makes control flow explicit. The contract-vs-comment rule adds a second benefit: behavioral contracts must be pseudocode statements, preventing important requirements from hiding in comments.
+
+This decision also extends to pseudocode style: typed function signatures, one-line docstrings, inline comments as reasoning cues, Python-like formatting, and 50-70% token density — each backed by measured effect sizes (see reference.md).
+
+**Reversal cost:** High. Converting pseudocode back to prose loses 7-38% effectiveness based on measured data. Subtle ordering and branching contracts would need to be re-discovered through testing. The typed signatures, docstrings, and style conventions would lose their empirical grounding.
+
+## Hard/soft invariant distinction
+
+**Context:** The invariants block lists behavioral contracts that must hold. Originally all invariants were treated equally — binary pass/fail with no severity distinction. In practice, some invariants (like `bidirectional_sync` and `human_agreement`) are non-negotiable, while others (like `next_steps` formatting) can be recovered from within a session if missed.
+
+**Alternative:** Keep all invariants at equal severity. Simpler to express, no classification decisions needed.
+
+**Tipping point:** The ABC framework (2026) empirically demonstrated a "transparency effect" — simply specifying severity categories (hard vs soft) improves compliance even before enforcement. Hard constraints that are called out as hard get violated less than undifferentiated constraints. The distinction also prevents the system from treating a formatting miss the same as a spec-code desynchronization.
+
+**Reversal cost:** Negligible. Removing the `# hard` / `# soft` comments from the invariants block is a cosmetic change. But the compliance benefit — treating critical invariants differently from recoverable ones — would degrade.
