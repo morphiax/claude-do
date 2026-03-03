@@ -53,6 +53,7 @@ SESSION(arguments: str, working_directory: Path):
   constraint = identify_constraint(mode, model)
   result = execute(mode, arguments, model, constraint)
   if mode produced_implementation:
+    verify_build(result, model)
     sync_gate(result, model)
   assert emit(next_steps)
 ```
@@ -354,6 +355,10 @@ Response skeleton:
 [Progress — which tasks are dispatched, completed, blocked.
 State changes only, not narration]
 
+### Verification
+[Tests: pass/fail. Types: pass/fail/skipped. Lint: pass/fail/skipped.
+Quality review: issues found and fixed, or "no issues".]
+
 ### Sync gate
 [Enumerate each behavior changed. For each: confirmed in spec
 or proposed update. If nothing drifted:]
@@ -400,6 +405,9 @@ Response skeleton — after confirmation:
 
 [Task created. Subagent dispatched. Outcome.]
 
+### Verification
+[Tests: pass/fail. Types: pass/fail/skipped. Lint: pass/fail/skipped.]
+
 ### Sync gate
 [Same format as full execution]
 
@@ -407,6 +415,71 @@ Response skeleton — after confirmation:
 1. [action]
 2. [action]
 ```
+
+## Build verification
+
+Runs after execution completes, before the sync gate. Catches regressions and quality issues.
+
+```
+verify_build(result: ExecutionResult, model: MentalModel):
+  """Catch regressions and quality issues before declaring done."""
+  # mechanical verification — always run, both execution paths
+  run(full_test_suite)  # not just new tests — catch collateral damage
+  if stack.has(type_checking): run(type_check)
+  if stack.has(linting): run(lint)
+
+  if failures:
+    for failure in failures:
+      dispatch_worker(fix_context=failure)
+    rerun(verification)  # confirm fixes
+
+  # quality review — full execution only, skip for quick fixes
+  if result.type == FULL_EXECUTION:
+    changed = files_changed_during(result)
+    issues = dispatch_worker(
+      prompt=review_quality_prompt(changed, model)
+    )
+    if issues:
+      dispatch_worker(fix_context=issues)
+      rerun(verification)  # confirm quality fixes didn't break anything
+```
+
+```
+review_quality(changed: list[Path], model: MentalModel) -> list[Issue]:
+  """Review changed artifacts for clarity and simplicity — preserve all behavior."""
+  # hard constraint — never change what it does, only how
+  assert all_original_behaviors_intact(changed)
+
+  issues = []
+  for artifact in changed:
+    # clarity — make it easier to understand
+    if has(unnecessary_nesting_or_complexity):       issues.append(simplify_structure)
+    if has(redundant_code_or_text):                  issues.append(deduplicate)
+    if has(unclear_names):                           issues.append(rename_for_intent)
+    if has(scattered_related_logic):                 issues.append(consolidate)
+    if has(comments_restating_the_obvious):          issues.append(remove_comment)
+    if has(nested_ternaries_or_dense_one_liners):    issues.append(expand_for_clarity)
+
+    # cascade — one insight can eliminate many
+    if same_pattern_implemented_multiple_ways:       issues.append(unify_pattern)
+    if growing_special_case_list:                    issues.append(find_general_rule)
+
+    # conventions — match existing patterns
+    if diverges_from(model.stack.conventions):        issues.append(align_to_convention)
+
+  # balance — drop fixes that would over-simplify
+  for issue in issues:
+    if fix_would(remove_helpful_abstraction):         drop(issue)
+    if fix_would(create_clever_compact_code):         drop(issue)  # clarity > brevity
+    if fix_would(combine_too_many_concerns):          drop(issue)
+    if fix_would(make_harder_to_debug_or_extend):     drop(issue)
+
+  return issues
+```
+
+Applies to all artifact types — code, specs, skills, prose, configuration. Redundant prose is as much a quality issue as redundant code.
+
+The quality review worker receives `review_quality` criteria in its prompt along with `stack.md` conventions. It reviews only files changed during this execution, not the entire codebase.
 
 ## Sync gate
 

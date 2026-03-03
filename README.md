@@ -35,9 +35,13 @@ Each session runs an orient-decide-act-observe loop. The system reads project fi
 
 The main conversation context handles dialogue, planning, and orchestration only. All implementation — code reads, edits, tests — runs in subagents that receive a preamble and task description with zero inherited context. This prevents implementation details from polluting the project-level reasoning window.
 
+### Build verification
+
+After execution completes, the system runs the full test suite, type checker, and linter to catch regressions — not just from the current work, but pre-existing failures too. For full executions, a quality review worker checks all changed artifacts (code, specs, prose) for unnecessary complexity, redundancy, unclear naming, and convention divergence, with balance guards that prevent over-simplification.
+
 ### Bidirectional sync
 
-Project files and code stay in sync. After execution, a sync gate requires enumerating each changed behavior and confirming coverage across project files — or explicitly stating nothing drifted. Neither can change without the other.
+Project files and code stay in sync. After execution and verification, a sync gate requires enumerating each changed behavior and confirming coverage across project files — or explicitly stating nothing drifted. Neither can change without the other.
 
 ### Quality system
 

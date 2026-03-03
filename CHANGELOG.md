@@ -1,5 +1,13 @@
 # Changelog
 
+## [8.3.0] — 2026-03-03
+
+### Added
+- Post-execution build verification — `verify_build` runs full test suite, type checking, and linting after every execution (both full and quick fix), catching regressions before the sync gate
+- Quality review step — `review_quality` dispatches a worker to review all changed artifacts (code, specs, prose, skills) for clarity, redundancy, naming, scattered logic, and convention divergence, with balance guards that prevent over-simplification
+- Cascade detection in quality review — identifies patterns implemented multiple ways and growing special-case lists, suggesting unification
+- Verification section added to execution response skeletons
+
 ## [8.2.0] — 2026-03-03
 
 ### Added
