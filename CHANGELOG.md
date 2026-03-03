@@ -1,5 +1,24 @@
 # Changelog
 
+## [8.5.0] — 2026-03-04
+
+### Changed
+- Consolidated project files from seven to four — reference.md and stack.md merged into context.md, decisions.md and pitfalls.md merged into lessons.md
+- Resynthesized SKILL.md from the simplified model files — all pseudocode functions preserved, new structural compression checks and meta-process functions added
+- Routing table, validators, and sync gate updated for four-file model throughout spec, context, design, and SKILL.md
+
+### Added
+- `validate_output` structural checks — five mechanical compression rules (higher-authority restatement, duplicate sections, framing sections, parallel sections, single-fact sections)
+- Meta-process functions — `optimize` (TOC focusing loop), `resynthesize` (derive simpler artifact from I/O contracts), `evolve_quality` (express damage as mechanical test), `derive_flow_analysis` (trace data flow through I/O annotations)
+- Design gate invariant — `assert design_direction_committed_before_implementation`
+- lessons.md entry documenting the self-contained operational document pattern — SKILL.md must be self-contained because it runs in other projects where `.do/` contains that project's files
+
+### Removed
+- reference.md — external system knowledge merged into context.md
+- stack.md — technology choices and conventions merged into context.md
+- decisions.md — decision rationale merged into lessons.md
+- pitfalls.md — failure modes merged into lessons.md
+
 ## [8.4.0] — 2026-03-03
 
 ### Added

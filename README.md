@@ -49,16 +49,14 @@ The spec includes validation functions for every output type — plans, dialogue
 
 ## Project files
 
-The plugin maintains shared understanding in six files under `.do/`:
+The plugin maintains shared understanding in four files under `.do/`:
 
 | File | Purpose | Question it answers |
 |------|---------|-------------------|
 | `spec.md` | Behaviors, constraints, algorithm pseudocode | What should it do? |
-| `reference.md` | External system models | How does the target system work? |
-| `stack.md` | Runtime, frameworks, conventions | What are we building with? |
+| `context.md` | Technology, conventions, external system facts | How does the implementation environment work? |
 | `design.md` | Output surfaces, tone, density, skeletons | What should it look and feel like? |
-| `decisions.md` | Decision log with rationale | Why did we choose this? |
-| `pitfalls.md` | Failure modes and fixes | What breaks and how to avoid it? |
+| `lessons.md` | Decision rationale and failure modes | Why this approach, and what breaks? |
 
 ## Usage
 
