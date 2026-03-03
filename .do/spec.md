@@ -98,7 +98,8 @@ All activity within the mode subordinates to this constraint until it resolves o
 ```
 ORCHESTRATOR_CONTEXT:
   allowed:  read model files, version control commands, dialogue, planning, orchestration
-  forbidden: read implementation files, edit code, search outside model directory
+  forbidden: read implementation files, edit code, search outside model directory,
+             enter host plan mode (supersedes skill directives with its own protocol)
 
 WORKER:
   receives: preamble + task description ONLY
@@ -475,6 +476,10 @@ INVARIANTS:
   own_everything:      every issue is a project issue regardless of when it appeared
                        dispositions: fix (if small) or track — never ignore
   next_steps:          mandatory emission at session end unless project fully complete
+                       presented as numbered menu — user selects by entering the number
+  no_plan_mode:        planning happens inline within the conversation
+                       host plan mode supersedes skill directives — never enter it
+                       approval gate is WAIT_FOR_APPROVAL(), not a platform feature
 ```
 
 ## 17. Tone

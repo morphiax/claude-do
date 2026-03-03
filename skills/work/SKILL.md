@@ -19,7 +19,7 @@ Tone: direct and collaborative. An opinionated colleague, not a deferential assi
 | | Orchestrator (main context) | Worker (Agent subagent) |
 |---|---|---|
 | **Allowed** | Read `.do/*`, Bash(git commands), dialogue, planning, TaskCreate, TaskUpdate | All tools needed for assigned task |
-| **Forbidden** | Read/Glob/Grep on non-`.do/` paths, Edit/Write code files | Nothing outside task scope |
+| **Forbidden** | Read/Glob/Grep on non-`.do/` paths, Edit/Write code files, EnterPlanMode | Nothing outside task scope |
 
 Workers receive a preamble string + task description only. They inherit nothing — no conversation history, no model files unless passed in the preamble. When a worker returns incomplete results, dispatch a targeted follow-up worker with a narrower prompt — never fall back to orchestrator reads.
 
@@ -202,8 +202,9 @@ surface constraints, ask convergent questions]
 
 Agree?
 
-### Next steps
-- [concrete items]
+### What's next?
+1. [action]
+2. [action]
 ```
 
 ## Planning
@@ -292,9 +293,9 @@ quality gates, constraints, validate_output test]
 ### Task 2: [title] (model: [tier])
 ...
 
-### Next steps
-- Approve plan to begin execution
-- [alternatives or open questions if any]
+### What's next?
+1. Approve plan to begin execution
+2. [alternatives or open questions if any]
 ```
 
 ## Execution
@@ -346,8 +347,9 @@ State changes only, not narration]
 or proposed update. If nothing drifted:]
 Sync gate: all changes reflected in project files.
 
-### Next steps
-- [concrete items]
+### What's next?
+1. [action]
+2. [action]
 ```
 
 ### Quick fix
@@ -388,8 +390,9 @@ Response skeleton — after confirmation:
 ### Sync gate
 [Same format as full execution]
 
-### Next steps
-- [concrete items]
+### What's next?
+1. [action]
+2. [action]
 ```
 
 ## Sync gate
@@ -475,8 +478,9 @@ What to do. Effort estimate. Cascade score.]
 ### What's working well
 [Genuine praise for good choices — not padding]
 
-### Next steps
-- [concrete items, proposed project file updates]
+### What's next?
+1. [action]
+2. [action]
 ```
 
 ## Quality system
@@ -609,7 +613,7 @@ validate_context_entry(entry) -> pass | fail:
 - **Headers**: `##` for major sections within a response. `###` for subsections. Never `#` (reserved for page titles in `.do/` files).
 - **Tables**: For comparisons, option matrices, file routing. Not for prose.
 - **Fenced blocks**: For project file proposals, code snippets, plan tasks, pseudocode. Always with a language hint when applicable.
-- **Bullets**: For next steps, constraint lists, findings. Not for narrative.
+- **Bullets**: For constraint lists, findings. Not for narrative.
 - **Bold**: For key terms on first use, finding titles, file names in routing. Not for emphasis in running prose.
 - **Inline code**: For file names, function names, CLI commands, config values, tool names.
 
@@ -626,7 +630,14 @@ Agree?
 
 Subagent preambles: instructional and complete. Written for a reader with zero context who must execute correctly from this text alone.
 
-Next steps: one bullet per item. Verb-first. No explanation unless the item is non-obvious.
+Next steps: numbered list as a menu under "### What's next?" header. Verb-first. The user picks by entering the number.
+
+```
+### What's next?
+1. [action]
+2. [action]
+3. [action]
+```
 
 ## Design thinking
 
@@ -645,6 +656,9 @@ INVARIANTS:
   own_everything:      every issue is a project issue regardless of when it appeared
                        dispositions: fix (if small) or track — never ignore
   next_steps:          mandatory emission at session end unless project fully complete
+  no_plan_mode:        never call EnterPlanMode — planning happens inline
+                       plan mode's system prompt supersedes skill directives
+                       use WAIT_FOR_APPROVAL() in conversation instead
 ```
 
 ## Scope

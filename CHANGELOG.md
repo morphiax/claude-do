@@ -1,5 +1,16 @@
 # Changelog
 
+## [8.1.0] — 2026-03-03
+
+### Added
+- EnterPlanMode prohibition — planning happens inline; plan mode's system prompt supersedes skill directives, so it is now a forbidden tool and an invariant
+- Numbered next steps menu — "What's next?" header with numbered actions the user selects by entering the number
+- Pitfall: "Host platform feature supersedes skill directives" — documents the protocol handoff directive loss pattern
+
+### Changed
+- All response skeletons use "### What's next?" with numbered list instead of "### Next steps" with bullets
+- spec.md context boundary and invariants updated to reflect plan mode prohibition and menu-style next steps
+
 ## [8.0.0] — 2026-03-03
 
 ### Added

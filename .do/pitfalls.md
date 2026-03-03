@@ -69,3 +69,13 @@
 **Fix:** Each task must pass `validate_task`: specific file paths, existing patterns to follow, concrete test assertion, implementation approach with enough detail to start, model tier, and named risks. After writing the plan, re-read it as if you have zero context. If any task requires information not in its description, the plan is underspecified.
 
 **Pattern class:** Curse-of-knowledge in delegation. The delegator's context makes instructions feel complete when they're actually dependent on shared knowledge. The fix is always a zero-context test: can someone with only this text execute the task?
+
+## Host platform feature supersedes skill directives
+
+**Symptom:** The system enters plan mode via `EnterPlanMode`, and subsequent output follows the platform's planning protocol instead of the skill's planning directives. Task validation rules, preamble construction, self-sufficiency checks, and response skeletons are all replaced by plan mode's built-in behavior. The plan looks reasonable but doesn't follow the skill's quality bars.
+
+**Root cause:** `EnterPlanMode` transfers control to a platform-level system prompt that governs the conversation until `ExitPlanMode`. The skill's SKILL.md is no longer the active directive — the platform's plan mode protocol is. The skill's planning section has its own approval gate (`WAIT_FOR_APPROVAL`), task validation, and response structure, but none of these survive the mode transition because the platform prompt doesn't know about them.
+
+**Fix:** Prohibit `EnterPlanMode` entirely. The skill's planning mode already provides everything plan mode offers — read-only exploration, structured decomposition, human approval gate — without ceding control to a different protocol. Add to forbidden tools and as an invariant: planning happens inline, approval uses `WAIT_FOR_APPROVAL()`, never a platform feature.
+
+**Pattern class:** Protocol handoff directive loss. When a skill delegates to a platform feature that has its own governing prompt, the skill's directives are superseded for the duration. The platform feature provides generic behavior where the skill needs specific behavior. Fix by prohibition: if the skill already implements the capability, never hand off to the platform's version.
