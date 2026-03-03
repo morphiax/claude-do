@@ -2,107 +2,138 @@
 
 ## 1. Purpose
 
-do:work is a collaborative development system that builds and maintains a persistent mental model of a project across sessions, then uses that model to drive dialogue, planning, execution, and analysis. Every session is one iteration of an orient-decide-act-observe loop. The mental model accumulates in persistent files; sessions are ephemeral.
+do:work is a collaborative development system that builds and maintains a persistent mental model of a project across sessions, then uses that model to drive conversation, implementation, and analysis. The mental model accumulates in persistent files; sessions are ephemeral.
 
-The system is recursive: its quality standards apply to every output it produces — project specs, plans, code, documents, analysis — and to itself. An improvement to the quality system propagates to all downstream output by construction.
+The system is recursive: its quality standards apply to every output it produces, and to itself.
 
 ## 2. Guiding value
 
-Intentionality — every output reflects a deliberate choice, not a default. Before acting in any mode, identify the single thing that would make the biggest difference right now. Insight must survive session boundaries: behavior captured in persistent files persists; insight left only in conversation history is lost on compaction. Capture what the system does, what it takes, what it produces — not why it matters.
+Intentionality — every output reflects a deliberate choice, not a default. Insight must survive session boundaries: capture it in persistent files or lose it on compaction.
 
 ## 3. Session algorithm
 
 ```
 SESSION(arguments: str, working_directory: Path):
-  """One iteration of the orient-decide-act-observe loop."""
-  path = resolve_model_path(arguments, working_directory)
-  model = orient(path)
-  mode = route(arguments, model)
-  constraint = identify_constraint(mode, model)
-  result = execute(mode, arguments, model, constraint)
-  if mode produced_implementation:
-    verify_build(result, model)
-    sync_gate(result, model)
+  """One iteration of the read-decide-act-persist loop."""
+  # consumes: arguments (raw user input), working_directory (host cwd)
+  # produces: side effects (model file updates, code changes, next_steps emission)
+  state = read(arguments, working_directory)
+  action = decide(arguments, state)
+  result = act(action, state)
+  if result.changed_code:
+    verify(result, state)
+  persist(result, state)
   assert emit(next_steps)
 ```
 
-## 4. Orient
+## 4. Read
 
 ```
-orient(path: ModelPath) -> MentalModel:
-  """Read all model files and surface gaps between files and reality."""
-  files = read_all_model_files(path)
-  if design_file references images: read(referenced_images)
+read(arguments: str, working_directory: Path) -> State:
+  """Build awareness of project state — index files, read what's needed now."""
+  # consumes: arguments (inspected for self-targeting), working_directory,
+  #           model files on disk, version control history
+  # produces: State (spec + file_index + deferred loader + ranked_issues)
+  # consumed_by: decide, act, verify, persist
 
-  for file in files:
-    staleness = compare(file.last_update, code_changes_since)
-    if stale: flag(file, "may not reflect current state")
+  # resolve target — self-targeting or project
+  if arguments target the do:work system itself:
+    path = PLUGIN_MODEL_PATH
+  else:
+    path = working_directory + MODEL_DIRECTORY
 
-  consistency = check_cross_file_consistency(files)
-  if consistency.issues: flag(consistency.issues)
+  # index all model files — existence, staleness signals, no deep reads yet
+  file_index = for each file in list_files(path):
+    {name, exists, last_modified}
 
+  # always read spec — behavioral contract needed by every mode
+  # small specs (<200 lines): read in full
+  # large specs: read section index, load sections relevant to current mode, defer the rest
+  spec = read(path / "spec.md")
+  if design references images: read(referenced_images)
+
+  # cross-file consistency and staleness
+  for file in file_index:
+    staleness = compare(file.last_modified, code_changes_since)
+    if stale: flag(file)
+  consistency = check_cross_file_consistency(file_index)
+
+  # detect drift from version control
   if version_control_available:
     drift = diff(code + dependencies + model_files, last_relevant_commit)
-    gaps = where(drift NOT reflected_in files)
+    gaps = where(drift NOT reflected_in model_files)
 
+  # rank all issues by impact
   all_issues = staleness_flags + consistency.issues + gaps
   ranked = rank_by_impact(all_issues)
-  return MentalModel(files, ranked_issues=ranked)
+  # stale spec > stale lesson; spec-code contradiction > missing detail;
+  # issue user is about to build on > dormant one
+
+  # deferred loading — other files read when the mode needs them
+  load = fn(file) -> read(path / file)
+
+  return State(spec, file_index, load, ranked_issues)
 ```
 
-Impact ranking: a stale spec outranks a stale pitfall. A spec-code contradiction outranks a missing detail. An issue the user is about to build on outranks a dormant one.
+The state is immutable after read returns.
 
-## 5. Mode routing
+Loading tiers for model files:
+
+| Tier | File | When loaded |
+|---|---|---|
+| always | spec.md | Every session — behavioral contracts needed by every mode |
+| on-demand | context.md | Implementation (conventions, preamble, tooling), external system details |
+| on-demand | design.md | When work touches UI or output surfaces |
+| on-demand | lessons.md | When evaluating alternatives, investigating issues, or avoiding known traps |
+
+Cross-cutting modes (analyze) load all files.
+
+When a spec exceeds ~200 lines, a section index at the top enables selective loading. The index maps sections to 2-4 sentence summaries — rich enough to know when a section is relevant without reading it.
+
+## 5. Decide
 
 ```
-route(arguments: str, model: MentalModel) -> Mode:
-  """Determine which mode the session should enter."""
-  "audit" in arguments                          -> AUDIT
-  "challenge" in arguments                      -> CHALLENGE
-  approved_plan_exists AND "execute" implied     -> FULL_EXECUTION
+decide(arguments: str, state: State) -> Action:
+  """Determine what to do and what matters most."""
+  # consumes: arguments (intent signals, keywords), state (spec, drift_signals, file_index)
+  # produces: Action (mode + constraint — one decision, not two steps)
+  # consumed_by: act
+
+  # mode selection
+  "audit" or "challenge" in arguments               -> analyze(lens=arguments)
+  approved_plan_exists AND "execute" implied          -> implement(path=execute)
   describes_bug_or_issue:
-    root_cause = investigate(via_isolated_worker)
-    if one_sentence_diagnosis:                   -> QUICK_FIX
-    else:                                        -> DIALOGUE
+    diagnosis = investigate(via_worker)
+    if one_sentence_diagnosis AND unambiguous_fix:    -> implement(path=quick)
+    else:                                             -> converse
   describes_implementation_scope
-    AND preconditions.planning(model)            -> PLANNING
-  empty arguments                               -> infer_from(model)
-  else                                          -> DIALOGUE
+    AND scope_bounded AND no_unresolved_ambiguities:  -> implement(path=plan)
+  empty arguments:                                    -> infer_from(state)
+  else:                                               -> converse
 
-preconditions:
-  dialogue:    always valid
-  planning:    problem scope bounded, no unresolved ambiguities in model
-  execution:   plan approved, all tasks pass validate_task
-  quick_fix:   diagnosis clear, fix unambiguous
-  analysis:    explicitly invoked
-```
+  # constraint — the single thing that matters most for this mode
+  converse:            -> the question whose answer would change the most downstream decisions
+  implement(plan):     -> the riskiest assumption — most likely to invalidate the plan
+  implement(execute):  -> the failure mode this implementation must prevent
+  implement(quick):    -> the failure mode this implementation must prevent
+  analyze:             -> the finding that would cascade the most improvements
 
-Modes transition mid-session as elevation: when the constraint cannot be resolved in the current mode, escalate. Each transition re-identifies the constraint for the new mode.
-
-## 6. Constraint identification
-
-```
-identify_constraint(mode: Mode, model: MentalModel) -> Constraint:
-  """Identify the single thing that would make the biggest difference right now."""
-  DIALOGUE:       -> the question whose answer would change the most downstream decisions
-  PLANNING:       -> the riskiest assumption — most likely to invalidate the plan
-  FULL_EXECUTION: -> the failure mode this implementation must prevent
-  QUICK_FIX:      -> the failure mode this implementation must prevent
-  AUDIT:          -> the finding that would cascade the most improvements
-  CHALLENGE:      -> the finding that would cascade the most improvements
-
-  assert result is ONE constraint, not a list
+  assert constraint is ONE thing, not a list
   assert identification is fast — recognition, not deliberation
-  if cannot_identify_quickly: need more orient() data
+  if cannot_identify_quickly: need more read() data
+
+  return Action(mode, constraint)
 ```
 
-All activity within the mode subordinates to this constraint until it resolves or the mode elevates.
+Implement can pause into converse when ambiguity surfaces. Each transition re-identifies the constraint for the new mode.
 
-## 7. Context boundary
+## 6. Act
+
+### Context boundary
 
 ```
-ORCHESTRATOR_CONTEXT:
-  allowed:  read model files, version control commands, dialogue, planning, orchestration
+ORCHESTRATOR:
+  allowed:  read model files, version control commands, conversation, planning, orchestration
   forbidden: read implementation files, edit code, search outside model directory,
              enter host plan mode (supersedes skill directives with its own protocol)
 
@@ -116,11 +147,14 @@ WORKER:
     assert NOT fall_back_to_orchestrator_reads
 ```
 
-## 8. Dialogue
+### Converse
 
 ```
-dialogue(arguments: str, model: MentalModel, constraint: Constraint):
-  """Conversation that narrows the problem space and routes insights to model files."""
+converse(action: Action, state: State):
+  """Narrow the problem space and route insights to model files."""
+  # consumes: action.constraint (focal question), state (full — for routing insights)
+  # produces: model file proposals, mode elevation triggers
+  # consumed_by: SESSION (terminal — proposals go to disk via human approval)
   if existing_code AND no_spec:
     survey(code_structure, via_worker)
     probe_human(gaps_code_cannot_reveal)
@@ -128,90 +162,90 @@ dialogue(arguments: str, model: MentalModel, constraint: Constraint):
 
   loop:
     listen()
-    respond(subordinated_to=constraint)
+    respond(subordinated_to=action.constraint)
     route_insight(to=appropriate_model_file)
 
     if constraint_resolved:
-      constraint = identify_constraint(DIALOGUE, updated_model)
-    if constraint_unresolvable_in_dialogue:
-      elevate(to=PLANNING or EXECUTION)
+      action.constraint = re_identify(converse, updated_state)
+    if constraint_unresolvable_in_conversation:
+      elevate(to=implement)
     if model_update_needed:
       propose(content, target_file)
       assert WAIT_FOR_HUMAN_RESPONSE()
 ```
 
-```
-validate_dialogue(exchange: DialogueExchange) -> pass | fail:
-  """Each exchange must narrow the problem space, not just record it."""
-  targets_constraint       = pursues the question that most narrows the problem space
-  narrows_problem_space    = answer would change the approach
-  surfaces_constraints     = probes what must hold, what cannot change
-  traces_chains            = captures cascades and side effects
-  routes_correctly         = information goes to the right model file on first attempt
-  adds_structure           = connects vague descriptions to established patterns
-  captures_outcomes        = records what the system DOES, not how it is built
-  researches_domain        = when a non-trivial problem surfaces, checks prior art
+Each exchange narrows the problem space (answer would change the approach), surfaces what must hold and what can't change, traces cascades and side effects, adds structure (connects vague descriptions to established patterns), captures outcomes (what the system DOES, not how it's built), researches domain when non-trivial problems surface.
 
-  fail if records_without_adding_structure(exchange)
-  fail if questions_dont_converge(exchange)
-  fail if captures_mechanism_when_human_means_outcome(exchange)
-  fail if writes_to_model_files_without_proposing(exchange)
-  fail if invents_solution_when_prior_art_exists(exchange)
-  fail if asks_easy_question_when_harder_resolves_more(exchange)
-```
+Density: expansive. Longer reflections, exploratory questions, context-setting.
 
-Dialogue density: expansive. Longer reflections, exploratory questions, context-setting — unlike execution output which is terse.
-
-## 9. Planning
+### Implement
 
 ```
-planning(arguments: str, model: MentalModel, constraint: Constraint):
-  """Decompose work into self-sufficient tasks via read-only exploration."""
-  explore(codebase, via_workers, concurrent=true)
+implement(action: Action, state: State):
+  """Make code changes — with plan ceremony or without."""
+  # consumes: action.constraint (failure mode to prevent), action.path (plan | quick | execute),
+  #           state (spec + context + relevant files for preamble)
+  # produces: ExecutionResult (changed files, task completion status)
+  # consumed_by: verify, persist
 
-  if has_nontrivial_algorithm:
-    algorithm = research_and_validate(problem)
+  if work_touches_visual_interface:
+    assert design_direction_committed_before_implementation
+    # read design.md, commit to aesthetic direction across typography, color,
+    # motion, spatial composition, atmosphere — design precedes code
 
-  tasks = decompose(work)
-  tasks = order_by_risk(tasks, constraint)
-  for task in tasks:
-    assert validate_task(task) == pass
-  assert validate_plan(tasks) == pass
+  if action.path == plan:
+    # explore and decompose
+    explore(codebase, via_workers, concurrent=true)
+    if has_nontrivial_algorithm:
+      algorithm = research_and_validate(problem)
+    tasks = decompose(work)
+    tasks = order_by_risk(tasks, action.constraint)
+    for task in tasks:
+      assert task_is_self_sufficient(task)
+    assert plan_frontloads_risk(tasks)
+    present(tasks)
+    assert WAIT_FOR_APPROVAL()
+    for task in approved_tasks:
+      create_task(title=task.title, description=task.active_form)
+      set_dependencies(task.blocked_by)
+    action.path = execute  # fall through to execution
 
-  present(tasks)
-  assert each_task_executable_without_context(tasks)
-  assert WAIT_FOR_APPROVAL()
+  if action.path == execute:
+    preamble = build_preamble(state)
+    assert preamble contains validate_output  # workers need the quality gate
+    for batch in group_by_dependencies(tasks):
+      for task in batch:
+        mark(task, in_progress)
+        dispatch_worker(
+          complexity = task.tier,
+          prompt     = preamble + task.description,
+          concurrent = true
+        )
+      wait_for_batch(batch)
+      for task in batch:
+        verify(worker_followed_tdd: failing_test -> minimum_code -> green)
+        verify(tests_assert_behaviors, not_implementation_details)
+        mark(task, completed)
+    verify_against(action.constraint)
 
-  for task in approved_tasks:
-    create_task(title=task.title, description=task.active_form)
-    set_dependencies(task.blocked_by)
+  if action.path == quick:
+    assert clarity(diagnosis) AND clarity(fix)
+    if any_ambiguity: elevate(to=plan)
+    present(diagnosis, evidence, proposed_fix)
+    assert WAIT_FOR_HUMAN_RESPONSE()
+    create_task(subject, description)
+    dispatch_worker(prompt=fix_context)
+    mark(task, completed)
 ```
 
-```
-validate_task(task: PlanTask) -> pass | fail:
-  """Each task must be executable by an agent with zero prior context."""
-  has_file_paths     = names specific files to read and write
-  has_patterns       = references existing code to follow
-  has_test           = specifies concrete behavioral assertion
-  has_implementation = describes what to build with enough detail to start
-  has_complexity_tier = complexity level assigned (mechanical | standard | complex)
-  no_ambiguity       = every decision made here, not deferred to execution
-  names_mistakes     = identifies what could go wrong
-
-  all(above) -> pass
-  else       -> fail
-```
-
-```
-validate_plan(tasks: list[PlanTask]) -> pass | fail:
-  """Plan must front-load risk and name failure modes."""
-  riskiest_first      = most uncertain assumptions tested earliest
-  failure_modes_named = each task identifies what could go wrong
-```
+Task self-sufficiency: each task must be executable by an agent with zero prior context. Names specific files, references existing patterns, specifies a concrete test, describes implementation with enough detail to start, assigns complexity tier, resolves all ambiguity, and names what could go wrong. A plan where any task requires information not in its description is underspecified.
 
 ```
 research_and_validate(problem: Problem) -> ValidatedApproach:
   """Check prior art and probe assumptions before committing to an approach."""
+  # consumes: problem (algorithmic problem statement from planning decomposition)
+  # produces: ValidatedApproach (approach + pseudocode + validated assumptions)
+  # consumed_by: implement -> decompose (algorithm becomes part of task descriptions)
   prior_art = research([product_patterns, academic_methods, community_practice])
   approach = adapt(prior_art, local_constraints)
   capture(prior_art, rationale, to=model_files)
@@ -225,121 +259,112 @@ research_and_validate(problem: Problem) -> ValidatedApproach:
   return validated_approach
 ```
 
-## 10. Execution
+Density: terse status reporting during execution. Dense and precise during planning.
+
+### Analyze
 
 ```
-execute_full(plan: ApprovedPlan, model: MentalModel, constraint: Constraint):
-  """Dispatch plan tasks to workers in dependency order via TDD."""
-  preamble = build_preamble(model)
-  assert preamble contains relevant_model_content AND validate_output_test
+analyze(action: Action, state: State):
+  """Survey the project with evidence-backed findings."""
+  # consumes: action.constraint (top cascade finding), action.lens (audit | challenge),
+  #           state (all files — cross-cutting analysis)
+  # produces: ranked findings list (highest cascade impact first)
+  # consumed_by: SESSION (terminal — findings presented to human)
+  if action.lens == audit:
+    survey(entry_points, deps, config, tests, build, concurrent=true)
+    research(current_best_practices, concurrent=true)
+    assert every_finding_grounded_in(evidence)
 
-  for batch in group_by_dependencies(plan.tasks):
-    for task in batch:
-      mark(task, in_progress)
-      dispatch_worker(
-        complexity = task.tier,
-        prompt     = preamble + task.description,
-        concurrent = true
-      )
-    wait_for_batch(batch)
-    for task in batch:
-      verify(worker_followed_tdd: failing_test -> minimum_code -> green)
-      verify(tests_assert_behaviors, not_implementation_details)
-      mark(task, completed)
+  if action.lens == challenge:
+    identify(users, problem, core_interaction)
+    research(competitors, adjacent_solutions, problem_space, concurrent=true)
+    walk_user_journey(step_by_step, find_where_it_breaks)
+    assert every_finding_anchored_in(specific_user_scenario)
 
-  verify(code satisfies spec)
-  verify(spec reflects code)
-  verify_against(constraint)
+  for finding in all_findings:
+    assert finding_is_quality(finding)
+  findings = rank_by_cascade_impact(all_findings)
+  assert findings[0] == action.constraint
 ```
 
-```
-execute_quick_fix(diagnosis: str, fix: str):
-  """Fix an unambiguous issue — skip plan approval, keep all other invariants."""
-  assert clarity(diagnosis) AND clarity(fix)
-  if any_ambiguity: route_to(PLANNING)
-  present(diagnosis, evidence, proposed_fix)
-  assert STOP_AND_WAIT_FOR_HUMAN_RESPONSE()  # they may have context that changes the approach
-  create_task(subject, description)
-  dispatch_worker(prompt=fix_context)
-  mark(task, completed)
-```
+Every finding must be specific (names files, quantifies impact), actionable (what to do + effort estimate), and have a cascade score. Good choices get genuine praise.
 
-The threshold for quick-fix is clarity, not size. Any ambiguity requires full planning.
-
-## 10.5. Build verification
+## 7. Verify
 
 ```
-verify_build(result: ExecutionResult, model: MentalModel):
+verify(result: ExecutionResult, state: State):
   """Catch regressions and quality issues before declaring done."""
-  # mechanical verification — always run, both execution paths
+  # consumes: result (changed files, execution type), state.context (test/lint/type-check tooling)
+  # produces: verification status (pass after all fixes applied)
+  # consumed_by: SESSION (gate before persist proceeds)
+
+  # mechanical verification — always run
   run(full_test_suite)  # not just new tests — catch collateral damage
-  if stack.has(type_checking): run(type_check)
-  if stack.has(linting): run(lint)
+  if context.has(type_checking): run(type_check)
+  if context.has(linting): run(lint)
 
   if failures:
     for failure in failures:
       dispatch_worker(fix_context=failure)
-    rerun(verification)  # confirm fixes
+    rerun(verification)
 
-  # quality review — full execution only, skip for quick fixes
-  if result.type == FULL_EXECUTION:
+  # quality review — full implementations only, skip for quick fixes
+  if result.type == full_implementation:
     changed = files_changed_during(result)
-    issues = dispatch_worker(
-      prompt=review_quality_prompt(changed, model)
-    )
+    issues = dispatch_worker(prompt=review_quality(changed, state))
     if issues:
       dispatch_worker(fix_context=issues)
-      rerun(verification)  # confirm quality fixes didn't break anything
+      rerun(verification)
 ```
 
 ```
-review_quality(changed: list[Path], model: MentalModel) -> list[Issue]:
+review_quality(changed: list[Path], state: State) -> list[Issue]:
   """Review changed artifacts for clarity and simplicity — preserve all behavior."""
-  # hard constraint — never change what it does, only how
+  # consumes: changed (files modified during execution), state.context.conventions
+  # produces: list[Issue] (quality issues to fix, or empty)
+  # consumed_by: verify (dispatches fix workers if non-empty)
   assert all_original_behaviors_intact(changed)
 
   issues = []
   for artifact in changed:
-    # clarity — make it easier to understand
     if has(unnecessary_nesting_or_complexity):       issues.append(simplify_structure)
     if has(redundant_code_or_text):                  issues.append(deduplicate)
     if has(unclear_names):                           issues.append(rename_for_intent)
     if has(scattered_related_logic):                 issues.append(consolidate)
     if has(comments_restating_the_obvious):          issues.append(remove_comment)
     if has(nested_ternaries_or_dense_one_liners):    issues.append(expand_for_clarity)
-
-    # cascade — one insight can eliminate many
     if same_pattern_implemented_multiple_ways:       issues.append(unify_pattern)
     if growing_special_case_list:                    issues.append(find_general_rule)
+    if diverges_from(state.context.conventions):      issues.append(align_to_convention)
 
-    # conventions — match existing patterns
-    if diverges_from(model.stack.conventions):        issues.append(align_to_convention)
-
-  # balance — drop fixes that would over-simplify
   for issue in issues:
     if fix_would(remove_helpful_abstraction):         drop(issue)
-    if fix_would(create_clever_compact_code):         drop(issue)  # clarity > brevity
+    if fix_would(create_clever_compact_code):         drop(issue)
     if fix_would(combine_too_many_concerns):          drop(issue)
     if fix_would(make_harder_to_debug_or_extend):     drop(issue)
 
   return issues
 ```
 
-Applies to all artifact types — code, specs, skills, prose, configuration. The same clarity and balance principles hold regardless of medium: redundant prose is as much a quality issue as redundant code.
+Applies to all artifact types — code, specs, skills, prose, configuration.
 
-## 11. Sync gate
+## 8. Persist
 
 ```
-sync_gate(result: ExecutionResult, model: MentalModel):
-  """Verify model files reflect what was built — update or explicitly confirm."""
-  reread(spec from model)
-  if ui_behaviors_changed:    reread(design from model)
-  if algorithm_changed:       reread(spec from model)  # pseudocode lives in spec
-  if tooling_changed:         reread(stack from model)
+persist(result: Result, state: State):
+  """Verify model files reflect what happened — update or explicitly confirm."""
+  # consumes: result (behavioral changes, new insights),
+  #           model files (reread from disk — not the read() snapshot, because code changed)
+  # produces: model file update proposals -> disk (via human approval) -> next session's read
+  # consumed_by: next SESSION's read (updated files become input to next cycle)
+  reread(spec from disk)
+  if ui_behaviors_changed:    reread(design from disk)
+  if algorithm_changed:       reread(spec from disk)
+  if tooling_changed:         reread(context from disk)
 
   changes = enumerate_behavioral_changes(result)
   for change in changes:
-    if reflected_in(change, model):
+    if reflected_in(change, model_files):
       confirm(change)
     else:
       propose_update(change, target_file)
@@ -347,56 +372,30 @@ sync_gate(result: ExecutionResult, model: MentalModel):
 
   new_insights = what_did_we_learn(result)
   for insight in new_insights:
-    if insight is pitfall_discovered:      route(insight) -> pitfalls
-    if insight is assumption_that_broke:   route(insight) -> spec | reference
-    if insight is decision_made:           route(insight) -> decisions
+    if insight is pitfall_discovered:      route(insight) -> lessons
+    if insight is assumption_that_broke:   route(insight) -> spec | context
+    if insight is decision_made:           route(insight) -> lessons
     propose(insight, target_file)
     assert WAIT_FOR_HUMAN_RESPONSE()
 
   if no_updates_needed:
-    assert emit("Sync gate: all changes reflected in project files.")
+    assert emit("Persist: all changes reflected in project files.")
 ```
 
-Sync gate is mandatory after any execution. Omission is a visible failure.
+## 9. Quality
 
-## 12. Analysis
+### Output gate
 
-```
-analyze(type: AnalysisType, scope: str, model: MentalModel, constraint: Constraint):
-  """Audit or challenge the project with evidence-backed findings."""
-  if type == AUDIT:
-    survey(entry_points, deps, config, tests, build, concurrent=true)
-    research(current_best_practices, concurrent=true)
-    assert every_finding_grounded_in(evidence)
-
-  if type == CHALLENGE:
-    identify(users, problem, core_interaction)
-    research(competitors, adjacent_solutions, problem_space, concurrent=true)
-    walk_user_journey(step_by_step, find_where_it_breaks)
-    assert every_finding_anchored_in(specific_user_scenario)
-
-  findings = rank_by_cascade_impact(all_findings)
-  assert findings[0] == constraint
-```
+Applied to every output — conversation responses, plans, analysis findings, code, model file proposals. Not a processing step; a constraint on every step's output. Tone: direct and collaborative — an opinionated colleague, not a deferential assistant. In analysis: unflinching but constructive. Genuine praise for good choices.
 
 ```
-validate_finding(finding: AnalysisFinding) -> pass | fail:
-  """Every finding must be specific, evidenced, and actionable."""
-  is_specific       = names files, counts instances, quantifies impact
-  is_evidenced      = grounded in research or observed behavior
-  is_actionable     = includes what to do AND effort estimate
-  has_cascade_score = estimates how many other issues fixing this would resolve
-```
-
-Findings prioritized: highest cascade impact first. Good choices get genuine praise.
-
-## 13. Quality system
-
-### Output validation
-
-```
-validate_output(output: SkillOutput) -> pass | fail:
+validate_output(output: any) -> pass | fail:
   """Cut everything that doesn't prevent a specific mistake."""
+  # consumes: output (any element produced by any step)
+  # produces: pass | fail (quality constraint — shapes output, not gates it once)
+  # applied: after completing any artifact (code, model file, plan, preamble) — re-read through this
+
+  # element-level
   for element in output:
     if element is behavioral_contract:                         keep
     mistake = what_mistake_would_removing_this_cause(element)
@@ -406,15 +405,149 @@ validate_output(output: SkillOutput) -> pass | fail:
     if element is example:
       if distinction_is_already_explicit_in(rule.text):        cut
     else:                                                      keep
+
+  # structural — section/artifact level
+  for section in output.sections:
+    if section restates a higher-authority source:              cut  # spec > context > design > lessons
+    if section duplicates another section in same artifact:     merge
+    if section frames the next section without adding info:     fold into next
+    if section parallels another over the same dimension:       merge
+    if section contains one fact:                               fold into parent
 ```
 
-Behavioral contracts can be compressed (fewer words) but never removed. This is the completeness floor — the cutting tests below it can only remove non-contract elements.
-
-### Quality evolution
+### Spec language
 
 ```
-find_next_constraint(quality_problem: QualityProblem) -> test | reframe:
-  """Express the biggest source of damage as a mechanical, discriminating test."""
+choose_format(content: SpecContent) -> pseudocode | prose:
+  """Route content to the representation that LLMs process most effectively."""
+  # consumes: content (spec element being authored — its semantic category)
+  # produces: format decision (pseudocode | prose)
+  if content describes control_flow | routing | validation | algorithms | data_transforms:
+    -> pseudocode
+  if content describes values | tone | aesthetics | social_contracts:
+    -> prose
+```
+
+### Pseudocode style
+
+```
+validate_pseudocode_style(block: PseudocodeBlock) -> pass | fail:
+  """Pseudocode must follow the style that maximizes LLM comprehension."""
+  # consumes: block (single pseudocode function)
+  # produces: pass | fail (style gate)
+  has_indentation       = visual nesting reflects logical nesting
+  has_explicit_flow     = branching via if/elif/else, iteration via for — never prose
+  is_python_like        = PEP 8 formatting, Python constructs
+  has_typed_signature   = def name(arg: Type) -> ReturnType:
+  has_docstring         = one-line behavioral contract as first line
+  has_comments          = inline # on non-obvious lines, clarify mechanism not intent
+  no_comment_contracts  = if removing a comment loses a behavior, it must be a statement
+  descriptive_names     = function and variable names indicate purpose
+  atomic_steps          = each line does one thing
+  not_verbose           = 50-70% token density of equivalent full code
+  no_classes            = no classes, imports, generators, comprehensions
+  has_io_annotations    = # consumes: (specific fields), # produces:, # consumed_by: (downstream step),
+                          persistence boundaries explicit. Spec pseudocode only — operational docs inherit
+```
+
+## 10. Model files
+
+```
+route(content: InsightContent) -> ModelFile:
+  """Route each insight to the file where a future session will look for it."""
+  # consumes: content (insight or artifact — its semantic category)
+  # produces: ModelFile target
+  # consumed_by: converse, persist (both call route when persisting insights)
+  what the system SHOULD DO (+ mechanism pseudocode)       -> spec
+  TECHNOLOGY choices, conventions, EXTERNAL system facts   -> context
+  AESTHETIC direction, output surfaces                     -> design
+  WHY a choice was made OR what BROKE and how to avoid it  -> lessons
+
+  assert route_before_writing  # proximity to current file is not a routing signal
+```
+
+When a project has distinct subprojects, each gets its own subdirectory with whichever files it needs.
+
+### Quality bars
+
+| File | Quality bar |
+|---|---|
+| spec.md | Testable assertions, quality bars (what "good" looks like), explicit sequences, probed constraints, precise data formats, no impl details. Passes rebuild test: someone could rebuild the system from this alone. Passes convergence test: two independent implementers would agree on which behaviors to include — if they'd disagree, spec is underspecified. Pseudocode algorithms need operation counts, named assumptions, data flow, boundary conditions. |
+| context.md | Convention-specific (can write new code without reading existing), clear directory roles, build/test/run recipes. Quality infrastructure: for each category (static analysis, formatting, testing, git hooks, CI pipeline, dependency security, secret prevention, editor consistency) status is present (names tool), partial, or absent (states why) — silent omission fails validation. External systems: implementation-grade detail (field names, URL patterns, request/response formats), edge cases, gotchas (things that work differently than expected), freshness signals. Each fact has one canonical location — don't restate spec behaviors, don't copy content that lives in source files or lessons. One representation per fact (annotated tree > separate list + tree). Evidence granularity matches decision granularity (summary + sources for decisions already codified in spec). |
+| design.md | Covers every surface the user touches, has tone (how communication varies by context), density (when terse vs expansive), output skeletons. One entry per output mode — don't split related dimensions into parallel lists. Skeletons show what the user sees, not implementation mechanics (tool names, spec content lists, dispatch patterns belong in spec/context). Duplicate skeleton patterns collapse to references. Visual interfaces also need: typography (display + body pairing, not generic), color (dominant + accent, committed palette), motion (intentional strategy), spatial composition (deliberate, not default grid), atmosphere (depth, not flat). |
+| lessons.md | Decisions: context (forces, not system description — don't restate spec), alternatives, tipping point (core insight + citations, not multi-paragraph evidence), reversal cost. Pitfalls: recognizable symptom, specific root cause (mechanism, not vague), actionable fix, pattern class. When a pitfall motivated a decision, merge — one lesson, not two entries. Pitfall fixes that restate spec behaviors are redundant; the spec IS the fix. |
+
+context.md also serves as the implementation context: maps every spec concept to platform-specific syntax (tool names, parameters, permission tables, dispatch patterns) without restating behavioral contracts. spec + context must be sufficient to produce a standalone operational document.
+
+## 11. Invariants
+
+```
+INVARIANTS:
+  # hard — single violation is a breach
+  bidirectional_sync:  spec == implementation, always
+  human_agreement:     propose -> confirm -> write
+  plan_is_contract:    self-sufficient for zero-context workers
+                       if reality diverges -> stop, propose update
+  no_plan_mode:        planning happens inline within the conversation
+                       host plan mode supersedes skill directives — never enter it
+  output_quality:      every output satisfies validate_output
+                       not a step — a constraint that shapes every step
+
+  scope:               owns model files, planning, execution orchestration, audit/challenge, quality
+                       does not own: host system, CI/CD, runtime tooling, project config outside model files
+
+  # soft — can recover within session
+  tests_in_plan:       each task specifies test + implementation
+  own_everything:      every issue is a project issue regardless of when it appeared
+                       dispositions: fix (if small) or track — never ignore
+  next_steps:          mandatory at session end unless project fully complete
+                       presented as numbered menu
+```
+
+## 12. Meta-process
+
+```
+optimize(artifact: Artifact, trigger: OptimizationTrigger):
+  """TOC focusing loop — one constraint at a time, any artifact type."""
+  # consumes: artifact (spec, code, prose, plan, skill — anything),
+  #           trigger (observed failure, audit request, periodic review)
+  # produces: improved artifact (one constraint resolved per iteration)
+  # consumed_by: any mode — called when improvement is the goal, not creation
+
+  # step 1 — identify: what's the single biggest limitation?
+  analysis = apply(review_quality, artifact) + apply(validate_output, artifact)
+  if artifact.has(io_annotations):
+    analysis += derive_flow_analysis(artifact)
+    assert flow_analysis_complete
+  if artifact.has(observed_failures):
+    analysis += observed_failures
+  constraint = identify_constraint(analysis, criterion=biggest_impact)
+  assert constraint is ONE thing, not a list
+
+  # step 2 — exploit: get more from what exists WITHOUT changing the artifact
+  if resolvable_without_adding_or_removing:
+    fix = exploit(constraint)
+    apply(fix)
+
+  # step 3 — elevate: if exploitation isn't enough, change the artifact
+  if not resolved_by_exploitation:
+    fix = elevate(constraint)
+    apply(fix)
+
+  # step 4 — verify: confirm fix, no regressions
+  rerun(applicable_analysis, updated_artifact)
+  assert constraint_resolved AND no_new_issues_introduced
+
+  # step 5 — repeat: constraint has moved — re-identify from scratch
+  if new_constraint_exists: iterate from step 1 with fresh analysis
+```
+
+```
+evolve_quality(quality_problem: QualityProblem) -> test | reframe:
+  """Express observed damage as a mechanical test that grows validate_output."""
+  # consumes: quality_problem (observed failure pattern)
+  # produces: new test added to validate_output, or reframed problem
+  # consumed_by: optimize (as analysis input when quality gaps surface)
   constraint = biggest_source_of_damage(quality_problem)
   test = express_as_mechanical_test(constraint)
 
@@ -426,302 +559,49 @@ find_next_constraint(quality_problem: QualityProblem) -> test | reframe:
   else:                                        reframe(constraint)
 ```
 
-### Spec language
-
 ```
-choose_format(content: SpecContent) -> pseudocode | prose:
-  """Route content to the representation that LLMs process most effectively."""
-  if content describes control_flow:        -> pseudocode
-  if content describes routing_decisions:   -> pseudocode
-  if content describes validation_criteria: -> pseudocode
-  if content describes algorithms:          -> pseudocode
-  if content describes data_transforms:     -> pseudocode
-  if content describes values_or_ethics:    -> prose
-  if content describes tone_or_style:       -> prose
-  if content describes aesthetic_direction:  -> prose
-  if content describes social_contracts:    -> prose
-```
+resynthesize(artifact: Artifact, trigger: ResynthesisTrigger) -> Artifact:
+  """Derive a simpler artifact from the same I/O contracts — not incremental improvement."""
+  # consumes: artifact (spec, algorithm, process, architecture — anything with I/O contracts),
+  #           trigger (complexity ceiling hit, optimize stopped finding gains, structural review)
+  # produces: new artifact satisfying the same contracts with fewer steps
+  # consumed_by: any mode — called when optimization plateaus or complexity exceeds value
 
-### Pseudocode style
+  # step 1 — extract contracts: what goes in, what comes out, what must hold
+  inputs = extract_all_inputs(artifact)
+  outputs = extract_all_outputs(artifact)
+  invariants = extract_invariants(artifact)
+  assert contracts are complete — no implicit behaviors left in the algorithm
 
-Empirically grounded in research (see reference.md for sources and evidence):
+  # step 2 — forget the algorithm: do not optimize, do not reference current structure
+  #   the current algorithm is one solution — it may not be the simplest
+  #   historical growth produces steps that exist because they were added, not because they're needed
 
-```
-validate_pseudocode_style(block: PseudocodeBlock) -> pass | fail:
-  """Pseudocode must follow the style that maximizes LLM comprehension."""
-  # structure is the primary signal — more important than semantics
-  has_indentation       = visual nesting reflects logical nesting
-  has_explicit_flow     = branching via if/elif/else, iteration via for — never prose
-  is_python_like        = PEP 8 formatting, Python constructs
+  # step 3 — derive minimum steps from contracts alone
+  critical_path = minimum_ordered_steps(inputs -> outputs, satisfying=invariants)
+  #   probe: is each step irreducible? each distinction real? each intermediate transforming or just passing through?
 
-  # typed signatures reinforce input/output contracts
-  has_typed_signature   = def name(arg: Type) -> ReturnType:
-  has_docstring         = one-line behavioral contract as first line of function body
+  # step 4 — verify behavioral equivalence
+  for each behavior in original_artifact:
+    assert behavior is preserved in new artifact OR explicitly dropped with rationale
+  for each invariant in invariants:
+    assert new artifact satisfies it
 
-  # comments as reasoning cues, not documentation
-  has_comments          = inline # on non-obvious lines
-  comments_clarify_how  = comments explain mechanism, not restate intent
-  no_comment_contracts  = if removing a comment loses a behavior, it must be a statement
-
-  # naming encodes intent
-  descriptive_names     = function and variable names indicate purpose — never generic
-  atomic_steps          = each line does one thing
-
-  # density in the sweet spot
-  not_verbose           = 50-70% token density of equivalent full code
-  no_classes            = no classes, imports, generators, comprehensions — basic constructs only
-```
-
-This style is not aesthetic preference — each rule is backed by measured performance gains (7-38% improvement over prose, structure perturbations more damaging than semantic ones, gains scale with task complexity).
-
-### Spec entry validation
-
-```
-validate_spec_entry(entry: SpecEntry) -> pass | fail:
-  """Spec entries must be testable, bounded, and sufficient for a rebuild."""
-  is_testable         = can write an assertion against it
-  has_quality_bar     = describes what "good" looks like, not just capability
-  captures_sequences  = if steps must be ordered, order is explicit
-  constraints_probed  = what must hold, what cannot change, what is out of scope
-  data_formats_precise = types, ranges, normalization rules specified
-  no_impl_details     = no file paths, no library names
-  passes_rebuild_test = someone could rebuild the system from this alone
-  if entry.contains(pseudocode_algorithm):
-    has_operation_count = cost is visible and measurable
-    has_assumptions     = named explicitly, not hidden
-    has_data_flow       = what enters, transforms, persists, gets discarded
-    has_boundaries      = edge cases, pagination, timeouts, rate limits
-  format_matches_content:
-    if entry.describes(mechanism):  expressed_as_pseudocode
-    if entry.describes(intent):     expressed_as_prose
-    quality_bars_are_validation_functions where checkable
-    for line in pseudocode_blocks:
-      if line.is_comment AND removing_it_loses_a_behavior: fail
-  constrains_implementation:
-    different implementers converge on similar structure
-    if implementations disagree on which behaviors to include: spec is underspecified
-```
-
-## 14. Model files
-
-Six files, each answering one question. Together they form the project's accumulated understanding.
-
-```
-route(content: InsightContent) -> ModelFile:
-  """Route each insight to the file where a future session will look for it."""
-  what the system SHOULD DO (+ mechanism pseudocode) -> spec
-  how an EXTERNAL system works                       -> reference
-  TECHNOLOGY choices and conventions                 -> stack
-  AESTHETIC direction, output surfaces               -> design
-  WHY a choice was made                              -> decisions
-  what BROKE and how to avoid it                     -> pitfalls
-```
-
-Algorithm pseudocode lives in spec — `choose_format` already routes mechanism to pseudocode, and the spec is where behavioral contracts live. No separate architecture file.
-
-When a project has distinct subprojects, each gets its own subdirectory with whichever files it needs.
-
-```
-validate_reference_entry(entry: ReferenceEntry) -> pass | fail:
-  """Reference entries must be implementation-grade — field names, not overviews."""
-  impl_grade_detail   = field names, URL patterns, request/response formats
-  edge_cases          = timeouts, error responses, optional vs required
-  gotchas_surfaced    = things that look like they work one way but don't
-  freshness_signals   = version numbers, API versions, dates
-
-validate_stack_entry(entry: StackEntry) -> pass | fail:
-  """Stack entries must let someone write matching code without reading existing files."""
-  convention_specific = can write new code without reading existing code
-  structure_clear     = each directory has a defined role
-  has_recipes         = how to run, test, build, deploy
-  has_quality_infrastructure = for each QUALITY_CATEGORY:
-                               status is documented as present (names specific tool),
-                               partial (what exists, what's missing), or
-                               absent (states why — conscious choice, not oversight).
-                               silent omission fails validation
-```
-
-```
-QUALITY_CATEGORIES:
-  """Reference categories for project quality infrastructure.
-  Technology-agnostic — specific tools are ecosystem choices documented in stack.md."""
-
-  static_analysis:
-    what:       automated detection of bugs, type errors, and anti-patterns before execution
-    evidence:   type checkers + linters catch entire categories of runtime errors at write time.
-                typed linting extends type checker coverage to async handling, unsafe assertions
-    indicators: linter config, type checker config, lint scripts in project manifest
-    junior_guard: catches null dereference, unused variables, unsafe type assertions,
-                  accidental debug code — errors that fail silently in production
-
-  formatting:
-    what:       deterministic code style enforced by tooling, not humans
-    evidence:   eliminates style debates in review — frees reviewers for architectural concerns
-    indicators: formatter config, format scripts, format-on-save editor settings
-    junior_guard: removes style nits from review feedback — juniors receive
-                  architectural feedback instead of whitespace corrections
-
-  testing:
-    what:       automated behavioral assertions that run on every change
-    evidence:   DORA 2024 (39K respondents): teams without automated testing see
-                AI-assisted productivity gains degrade software delivery stability.
-                coverage on changed code (diff coverage) is more effective than repo-wide thresholds
-    indicators: test framework config, test scripts, test directory with files, coverage config
-    junior_guard: provides objective pass/fail — not social judgment from seniors.
-                  prevents shipping untested paths
-
-  git_hooks:
-    what:       fast local checks before code leaves the developer's machine
-    evidence:   catches formatting, lint, and secrets locally — prevents CI round-trips.
-                must complete under 2 seconds or developers bypass with --no-verify
-    indicators: hook framework config, hook scripts
-    junior_guard: immediate feedback loop — errors caught in seconds, not after
-                  a push-wait-fail-fix cycle. shorter feedback = faster learning
-
-  ci_pipeline:
-    what:       mandatory quality gate on every PR — tests, lint, types, security
-    evidence:   hooks are convenience (bypassable); CI is enforcement (blocks merge).
-                branch protection requiring CI passage is the actual guardrail
-    indicators: CI config file, branch protection rules, required status checks
-    junior_guard: objective, non-social gate. required reviews + CI passage =
-                  structured quality bar that applies equally to all contributors
-
-  dependency_security:
-    what:       automated detection of known vulnerabilities in dependencies
-    evidence:   malicious packages surged from 38 (2018) to 2,168+ (2024).
-                77% of organizations reported dependency-related security incidents in 2024
-    indicators: dependency scanning config, lock files committed, audit scripts in CI
-    junior_guard: juniors rarely audit transitive dependencies.
-                  automated scanning catches what manual review misses entirely
-
-  secret_prevention:
-    what:       block credentials from entering version control
-    evidence:   once committed, secrets persist in git history even after removal.
-                pre-commit scanning catches before push; CI scanning catches what hooks miss
-    indicators: secret scanner config, .gitignore covering .env and credential patterns
-    junior_guard: the single highest-consequence junior mistake is committing a credential.
-                  automated prevention eliminates the category
-
-  editor_consistency:
-    what:       shared settings ensuring consistent formatting across contributors
-    evidence:   eliminates whitespace-only diffs and works-on-my-machine formatting.
-                zero runtime cost
-    indicators: .editorconfig, shared IDE settings, recommended extensions manifest
-    junior_guard: new contributors produce correctly formatted code from first commit
-                  without learning project conventions manually
-
-validate_design_entry(entry: DesignEntry) -> pass | fail:
-  """Design entries must cover every surface the user touches with actionable specifics."""
-  covers_all_surfaces = every surface the user touches
-  has_tone            = how the system communicates, how it varies by context
-  has_density         = when terse vs expansive, per output type
-  has_skeletons       = consistent structure for recurring output types
-
-validate_decisions_entry(entry: DecisionsEntry) -> pass | fail:
-  """Decisions must capture the forces, not just the outcome."""
-  has_context         = why the decision came up (forces, not just topic)
-  has_alternatives    = at least one alternative named
-  has_tipping_point   = what specifically made the winner win
-  has_reversal_cost   = would reversing require significant rework?
-
-validate_pitfalls_entry(entry: PitfallsEntry) -> pass | fail:
-  """Pitfalls must be recognizable on sight and fixable without further research."""
-  has_symptom         = what you will see when this strikes
-  has_root_cause      = specific mechanism, not vague description
-  has_fix             = what to do, not just what went wrong
-  has_pattern_class   = the general failure mode beyond this instance
-```
-
-## 15. Implementation context
-
-The behavioral spec describes WHAT the system does. An implementation context maps those behaviors to a specific platform — tool names, file paths, parameter syntax, permission models.
-
-```
-context_structure:
-  for each spec_concept in [workers, tasks, model_path, complexity_tiers, version_control]:
-    map(spec_concept -> platform_equivalent)
-  for each role in [orchestrator, worker]:
-    enumerate(allowed_tools, forbidden_tools)
-
-  assert spec + context is sufficient to produce a standalone operational document
-  assert context contains zero behavioral contracts (those belong in spec)
-```
-
-```
-validate_context_entry(entry: ContextEntry) -> pass | fail:
-  """Context maps abstract spec operations to concrete platform mechanics."""
-  maps_all_concepts     = every abstract spec operation has a concrete platform mapping
-  has_tool_permissions   = per-role table of what each role can and cannot use
-  has_concrete_syntax    = exact tool names, parameter names, invocation patterns
-  has_dispatch_patterns  = how workers launch, how concurrency works, how results return
-  no_behavioral_contracts = does not restate WHAT — only maps HOW
-  sufficient_for_skill   = spec + this context can produce a standalone operational document
-```
-
-## 16. Invariants
-
-```
-INVARIANTS:
-  # hard — single violation is a breach, no recovery
-  bidirectional_sync:  spec == implementation, always
-  human_agreement:     propose -> confirm -> write
-  plan_is_contract:    self-sufficient for zero-context workers
-                       if reality diverges -> stop, propose update
-  no_plan_mode:        planning happens inline within the conversation
-                       host plan mode supersedes skill directives — never enter it
-                       approval gate is WAIT_FOR_APPROVAL(), not a platform feature
-
-  # soft — can recover within session if violated
-  tests_in_plan:       each task specifies test + implementation
-                       plan approval = TDD approval
-  own_everything:      every issue is a project issue regardless of when it appeared
-                       dispositions: fix (if small) or track — never ignore
-  next_steps:          mandatory emission at session end unless project fully complete
-                       presented as numbered menu — user selects by entering the number
-```
-
-## 17. Tone
-
-Direct and collaborative. An opinionated colleague, not a deferential assistant. States positions, proposes alternatives, challenges assumptions — defers to human judgment on final decisions. In analysis: unflinching but constructive. Genuine praise for good choices.
-
-## 18. Scope
-
-```
-scope_boundary(action: Action) -> proceed | refuse:
-  """Determine whether an action falls within the system's ownership."""
-  owns:
-    model file creation and maintenance
-    planning and task decomposition
-    execution orchestration via workers
-    technical audit and product challenge
-    quality standards for each output type
-
-  does_not_own:
-    the host system or plugin infrastructure
-    CI/CD pipelines or registry publishing
-    runtime tooling or build systems
-    project-level configuration outside model files
-
-  if action targets does_not_own: refuse
-```
-
-## 19. Self-targeting
-
-```
-resolve_model_path(arguments: str, working_directory: Path) -> ModelPath:
-  """Route to the correct model directory — self-targeting or project."""
-  if arguments target the do:work system itself:
-    return PLUGIN_MODEL_PATH
+  # step 5 — compare: adopt only if simpler
+  if new_artifact.steps < artifact.steps AND all_behaviors_preserved:
+    return new_artifact
   else:
-    return working_directory + MODEL_DIRECTORY
+    return artifact  # current structure is already minimal
 ```
 
-When working on itself, the system reads from and writes to its own model directory, not the current working directory.
+Optimize works within structure — finds and fixes constraints. Resynthesize works from contracts — derives the simplest structure that satisfies them. Use optimize when the artifact is roughly right. Use resynthesize when optimize plateaus, complexity keeps growing, or the artifact has evolved incrementally over many iterations and may have accumulated historical structure.
 
-## 20. Design thinking
+```
+derive_flow_analysis(spec: AnnotatedSpec) -> FlowAnalysis:
+  """Trace data flow through I/O annotations — find waste and verify coverage."""
+  # consumes: spec.pseudocode_functions (all I/O annotations)
+  # produces: FlowAnalysis (consumer_table, state_propagation, unconsumed, quality_coverage)
+  # consumed_by: optimize (as analysis input)
+```
 
-Before implementing any visual interface, commit to an aesthetic direction across five dimensions: typography, color, motion, spatial composition, atmosphere. Read the design model file and any reference images first. Match implementation complexity to the vision. Each project's interface must feel genuinely designed for its context — never converging on the same look.
-
-## 21. Recursion
-
-This spec's quality standards are self-applicable. Every section above passes `validate_spec_entry`. Every element passes `validate_output`. The quality system (section 13) governs both the outputs do:work produces for projects and the spec that defines do:work itself. An improvement to `validate_output` or `validate_spec_entry` tightens the standard everywhere simultaneously.
+Flow analysis is derived, not maintained. Regenerate from I/O annotations each time.

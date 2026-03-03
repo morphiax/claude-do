@@ -1,44 +1,43 @@
-# do:work — Implementation Context
+# do:work — Context
 
-This file maps the behavioral spec to the Claude Code plugin system. The spec describes WHAT; this file describes HOW within the current technology.
+This file maps the behavioral spec to the Claude Code plugin system and captures technology choices and external system knowledge. The spec describes WHAT; this file describes HOW within the current technology.
 
-## Skill invocation
+## Runtime
 
-```yaml
-name: do:work
-description: Project intelligence — orient, plan, execute, and maintain projects through a deliberate observe-orient-decide-act loop.
-argument-hint: "[what you want to do, a bug to fix, 'audit', 'challenge', or empty to infer]"
+Pure Markdown. No runtime code, no dependencies, no build step. The plugin is a collection of prompt files that Claude Code loads and injects.
+
+## Structure and conventions
+
+Semantic versioning in `.claude-plugin/plugin.json`. Tagged `vX.Y.Z`. Use `/do:release` to ship. Distributed via Claude Code marketplace: `claude plugin add morphiax/do`.
+
 ```
-
-The user invokes via `$ARGUMENTS`.
+.claude-plugin/
+  plugin.json            — name, version, description, author
+  marketplace.json       — owner, plugin list
+.do/                     — project model files (this directory)
+skills/
+  work/SKILL.md          — YAML frontmatter (name, description, argument-hint) + prompt body
+commands/
+  release.md             — YAML frontmatter (description, argument-hint) + procedural prompt
+CHANGELOG.md             — Keep a Changelog format, newest first
+README.md                — usage examples and install instructions
+LICENSE
+```
 
 ## Model directory
 
-The persistent mental model lives in `.do/` under the project root. Six files:
+The persistent mental model lives in `.do/` under the project root. Four files:
 
 ```
-.do/spec.md
-.do/reference.md
-.do/stack.md
-.do/design.md
-.do/decisions.md
-.do/pitfalls.md
+.do/spec.md       — behaviors + algorithms (what the system does)
+.do/context.md    — technology, conventions, external system facts
+.do/design.md     — aesthetic direction, output surfaces
+.do/lessons.md    — decisions (why) + pitfalls (what broke)
 ```
-
-Algorithm pseudocode lives in spec.md (not a separate architecture file).
-
-Subprojects use `.do/<component>/` with whichever files are needed.
 
 ## Self-targeting path
 
-When `$ARGUMENTS` references the do plugin itself:
-```
-path = ~/.claude/plugins/marketplaces/do/.do/
-```
-Otherwise:
-```
-path = <cwd>/.do/
-```
+`~/.claude/plugins/marketplaces/do/.do/` when arguments reference the do plugin itself, otherwise `<cwd>/.do/`.
 
 ## Version control
 
@@ -50,8 +49,6 @@ git diff HEAD~1 --stat
 
 ## Worker dispatch
 
-The spec's "worker" maps to the `Agent` tool:
-
 ```
 dispatch_worker(task):
   Agent(
@@ -62,11 +59,9 @@ dispatch_worker(task):
   )
 ```
 
-Independent tasks launch as multiple Agent calls in a single message (concurrent). Dependent tasks wait for predecessors.
+Independent tasks launch as multiple Agent calls in a single message (concurrent). Dependent tasks wait for predecessors. Investigation dispatch uses the same pattern: `Agent(model: "sonnet", prompt: "Investigate: {bug}. Read relevant files. Return one-sentence diagnosis or 'unclear'.")`.
 
 ## Complexity tier mapping
-
-The spec's complexity tiers map to Claude models:
 
 ```
 mechanical  = haiku    # file renaming, simple refactors, boilerplate
@@ -75,8 +70,6 @@ complex     = opus     # architectural decisions, multi-file refactors, nuanced 
 ```
 
 ## Task management
-
-The spec's task operations map to Claude Code task tools:
 
 ```
 create_task(title, description)  ->  TaskCreate(subject=title, activeForm=description)
@@ -87,16 +80,12 @@ mark(task, completed)            ->  TaskUpdate(taskId, status="completed")
 
 ## Context boundary enforcement
 
-The spec's orchestrator/worker boundary maps to:
-
 ```
 ORCHESTRATOR (main context):
-  allowed:   Read .do/*, Bash(git commands), dialogue, planning
-  forbidden: Read/Glob/Grep on non-.do/ paths, Edit/Write code files
-
+  allowed:   Read .do/*, Bash(git commands), dialogue, planning, TaskCreate, TaskUpdate
+  forbidden: Read/Glob/Grep on non-.do/ paths, Edit/Write code files, EnterPlanMode
 WORKER (Agent subagent):
-  receives:  preamble string (built from .do/ files) + task description
-  inherits:  nothing — clean context, no conversation history
+  receives preamble + task description only — clean context, no conversation history
 ```
 
 ## Preamble construction
@@ -106,28 +95,55 @@ build_preamble(project):
   content = ""
   for file in read_all(project.do_path):
     content += file.content
-  content += validate_output_test   # from spec section 13
+  content += validate_output_test   # from spec section 9
   return content
 ```
 
-## Reasoning tool
+## Claude Code plugin system
 
-The spec's constraint identification and multi-factor tradeoff analysis map to `sequentialthinking`:
+`$ARGUMENTS` is the string after the skill name; handle empty case.
 
-```
-competing_constraints or fuzzy_intent -> mcp__sequential-thinking__sequentialthinking()
-```
+### Invocation
 
-Use for: decomposing complex problems, working through risk ordering, resolving ambiguous mode routing. Keep internal unless the reasoning chain itself is informative to the user.
+Format: `/<plugin-name>:<skill-or-command-name> [arguments]`
 
-## Investigation dispatch
+### Installation paths
 
-When routing detects a bug/issue, investigate via subagent before choosing QUICK_FIX or DIALOGUE:
+- **Marketplace source:** `~/.claude/plugins/marketplaces/<marketplace>/<plugin>/` — source of truth for edits
+- **Cache (resolved):** `~/.claude/plugins/cache/<plugin>/<plugin>/<version>/` — what Claude Code loads at runtime
+- **Resolution:** `~/.claude/plugins/installed_plugins.json` tracks installed plugins; `known_marketplaces.json` maps marketplaces to sources
 
-```
-root_cause = Agent(
-  model: "sonnet",
-  prompt: "Investigate: {bug_description}. Read relevant files. Return one-sentence diagnosis or 'unclear'.",
-  run_in_background: true
-)
-```
+### Runtime tools available to skills
+
+- **TaskCreate/TaskUpdate/TaskList/TaskGet** — task list management
+- **Agent** — spawn subagents with `mode: "bypassPermissions"` for execution, or specific subagent_types (Explore, Plan) for information gathering
+- **AskUserQuestion** — structured choice presentation (2-4 options)
+- **mcp__sequential-thinking__sequentialthinking()** — extended reasoning for competing constraints or fuzzy intent
+- **Read/Write/Edit/Glob/Grep/Bash** — standard file and system tools
+- **WebSearch/WebFetch** — web research
+
+## Pseudocode effectiveness for LLM instruction
+
+Research grounding for the pseudocode-first approach used throughout this system.
+
+Per-construct evidence: code structure and indentation have the highest impact, followed by typed signatures, docstrings, inline comments, and descriptive names (IBM EMNLP 2023, Waheed 2024). Hard/soft contract distinction improves compliance via transparency effect (ABC 2026).
+
+### Key findings
+
+- Pseudocode prompts produce 7-38% improvement over prose (IBM, 132 tasks, EMNLP 2023)
+- Structure > semantics: LLMs are more sensitive to structural perturbations than semantic ones; gap widens with model scale (Waheed, 3331 experiments, 2024)
+- Pseudocode achieves 50-70% token reduction while retaining ~95%+ baseline performance; verbosity beyond this sweet spot actively hurts (Waheed 2024)
+- Step-by-step natural language procedures are consistently the worst representation across all task types (Waheed 2024)
+- Code-form plans show 25% average improvement across 13 benchmarks; gains scale with task complexity (CodePlan, ICLR 2025)
+- 0-shot pseudocode outperforms 2-shot — models generate continuation patterns instead of following instructions when given few-shot pseudocode (IBM 2023)
+- Simply specifying behavioral contracts improves compliance before enforcement — the "transparency effect" (ABC 2026)
+- Full pseudocode stack (structure + docstrings + comments + types) in 0-shot outperforms all other combinations including few-shot variants (IBM 2023)
+
+Benefits scale with structural complexity; variable naming barely matters compared to structure (IBM 2023, Waheed 2024). Style rules derived from this evidence are codified in spec §9 `validate_pseudocode_style`.
+
+### Sources
+
+- Mishra et al. "Prompting with Pseudo-Code Instructions" EMNLP 2023. arxiv.org/abs/2305.11790
+- Waheed et al. "On Code-Induced Reasoning in LLMs" 2024. arxiv.org/abs/2509.21499
+- Chae et al. "CodePlan: Unlocking Reasoning Potential" ICLR 2025. arxiv.org/abs/2409.12452
+- "Agent Behavioral Contracts (ABC)" 2026. arxiv.org/abs/2602.22302
