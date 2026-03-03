@@ -1,5 +1,12 @@
 # Changelog
 
+## [8.4.0] — 2026-03-03
+
+### Added
+- Quality infrastructure categories — eight technology-agnostic categories (static analysis, formatting, testing, git hooks, CI pipeline, dependency security, secret prevention, editor consistency) defined in `QUALITY_CATEGORIES` with evidence, indicators, and junior developer guardrail rationale for each
+- `has_quality_infrastructure` validation dimension on `validate_stack_entry` — stack.md must document each quality category as present (naming the tool), partial, or consciously absent; silent omission fails validation
+- Quality infrastructure integrates via existing orient (reads stack.md, flags gaps) and audit (full report per category) — no new mode or workflow
+
 ## [8.3.0] — 2026-03-03
 
 ### Added

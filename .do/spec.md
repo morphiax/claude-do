@@ -534,6 +534,81 @@ validate_stack_entry(entry: StackEntry) -> pass | fail:
   convention_specific = can write new code without reading existing code
   structure_clear     = each directory has a defined role
   has_recipes         = how to run, test, build, deploy
+  has_quality_infrastructure = for each QUALITY_CATEGORY:
+                               status is documented as present (names specific tool),
+                               partial (what exists, what's missing), or
+                               absent (states why — conscious choice, not oversight).
+                               silent omission fails validation
+```
+
+```
+QUALITY_CATEGORIES:
+  """Reference categories for project quality infrastructure.
+  Technology-agnostic — specific tools are ecosystem choices documented in stack.md."""
+
+  static_analysis:
+    what:       automated detection of bugs, type errors, and anti-patterns before execution
+    evidence:   type checkers + linters catch entire categories of runtime errors at write time.
+                typed linting extends type checker coverage to async handling, unsafe assertions
+    indicators: linter config, type checker config, lint scripts in project manifest
+    junior_guard: catches null dereference, unused variables, unsafe type assertions,
+                  accidental debug code — errors that fail silently in production
+
+  formatting:
+    what:       deterministic code style enforced by tooling, not humans
+    evidence:   eliminates style debates in review — frees reviewers for architectural concerns
+    indicators: formatter config, format scripts, format-on-save editor settings
+    junior_guard: removes style nits from review feedback — juniors receive
+                  architectural feedback instead of whitespace corrections
+
+  testing:
+    what:       automated behavioral assertions that run on every change
+    evidence:   DORA 2024 (39K respondents): teams without automated testing see
+                AI-assisted productivity gains degrade software delivery stability.
+                coverage on changed code (diff coverage) is more effective than repo-wide thresholds
+    indicators: test framework config, test scripts, test directory with files, coverage config
+    junior_guard: provides objective pass/fail — not social judgment from seniors.
+                  prevents shipping untested paths
+
+  git_hooks:
+    what:       fast local checks before code leaves the developer's machine
+    evidence:   catches formatting, lint, and secrets locally — prevents CI round-trips.
+                must complete under 2 seconds or developers bypass with --no-verify
+    indicators: hook framework config, hook scripts
+    junior_guard: immediate feedback loop — errors caught in seconds, not after
+                  a push-wait-fail-fix cycle. shorter feedback = faster learning
+
+  ci_pipeline:
+    what:       mandatory quality gate on every PR — tests, lint, types, security
+    evidence:   hooks are convenience (bypassable); CI is enforcement (blocks merge).
+                branch protection requiring CI passage is the actual guardrail
+    indicators: CI config file, branch protection rules, required status checks
+    junior_guard: objective, non-social gate. required reviews + CI passage =
+                  structured quality bar that applies equally to all contributors
+
+  dependency_security:
+    what:       automated detection of known vulnerabilities in dependencies
+    evidence:   malicious packages surged from 38 (2018) to 2,168+ (2024).
+                77% of organizations reported dependency-related security incidents in 2024
+    indicators: dependency scanning config, lock files committed, audit scripts in CI
+    junior_guard: juniors rarely audit transitive dependencies.
+                  automated scanning catches what manual review misses entirely
+
+  secret_prevention:
+    what:       block credentials from entering version control
+    evidence:   once committed, secrets persist in git history even after removal.
+                pre-commit scanning catches before push; CI scanning catches what hooks miss
+    indicators: secret scanner config, .gitignore covering .env and credential patterns
+    junior_guard: the single highest-consequence junior mistake is committing a credential.
+                  automated prevention eliminates the category
+
+  editor_consistency:
+    what:       shared settings ensuring consistent formatting across contributors
+    evidence:   eliminates whitespace-only diffs and works-on-my-machine formatting.
+                zero runtime cost
+    indicators: .editorconfig, shared IDE settings, recommended extensions manifest
+    junior_guard: new contributors produce correctly formatted code from first commit
+                  without learning project conventions manually
 
 validate_design_entry(entry: DesignEntry) -> pass | fail:
   """Design entries must cover every surface the user touches with actionable specifics."""

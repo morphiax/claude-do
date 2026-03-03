@@ -699,6 +699,12 @@ validate_stack_entry(entry: StackEntry) -> pass | fail:
   convention_specific = can write new code without reading existing code
   structure_clear     = each directory has a defined role
   has_recipes         = how to run, test, build, deploy
+  has_quality_infrastructure = for each quality category (static_analysis, formatting,
+                               testing, git_hooks, ci_pipeline, dependency_security,
+                               secret_prevention, editor_consistency):
+                               status is present (names tool), partial, or
+                               absent (states why). silent omission fails validation.
+                               categories defined in spec QUALITY_CATEGORIES
 
 validate_design_entry(entry: DesignEntry) -> pass | fail:
   """Design entries must cover every surface the user touches with actionable specifics."""
