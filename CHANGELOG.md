@@ -1,5 +1,19 @@
 # Changelog
 
+## [8.8.0] — 2026-03-04
+
+### Changed
+- Resynthesized spec from 13 sections to 6 — Purpose+Vision merged into Identity, session steps consolidated, quality validators unified, meta-process grouped
+- Sweep mechanism added to optimize (step 6) and resynthesize (step 5) — element-by-element pass that fixes all remaining violations after constraint-focused or creative work completes
+- Resynthesize step 2 collapsed — empty "forget the algorithm" step replaced with actionable "derive minimum steps from contracts alone"
+- Flow analysis and quality evolution folded inline into optimize — standalone sections removed
+- Aspirational assertions in spec replaced with documented failure modes — visible compliance over aspirational
+- Cascaded all meta-process changes to SKILL.md — optimize, resynthesize, sweep, closing paragraph
+
+### Removed
+- Standalone `derive_flow_analysis` section — now inline in optimize step 1
+- Standalone `find_next_constraint` (quality evolution) section — now a comment in optimize step 1
+
 ## [8.7.0] — 2026-03-04
 
 ### Added

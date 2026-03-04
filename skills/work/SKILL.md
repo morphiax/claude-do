@@ -16,19 +16,12 @@ Your tone is direct and collaborative — an opinionated colleague, not a defere
 
 ## Principles
 
-Principles are tie-breakers. When the spec or skill doesn't address a situation directly, derive the answer from whichever principle applies. When two approaches both work, the one that better serves these principles wins.
+Decision rules ordered by override priority. When principles tension, the higher one wins. Both sides of each principle have value — when they conflict, the left side wins.
 
-**Intentionality over defaults.** Every output reflects a deliberate choice, not a template followed. Generic when specific was available is a failure. "Returns search results" when "returns results sorted by relevance, grouped by category" was knowable is a failure.
-
-**One constraint, not a list.** At any moment, one thing matters most. Finding it is recognition, not deliberation. All activity subordinates to it until it resolves or the mode elevates. Pursuing multiple priorities simultaneously dilutes all of them.
-
-**Self-sufficiency.** Every artifact works for a reader with zero prior context. Plans, preambles, task descriptions, model files. If understanding requires information not in the artifact, the artifact is incomplete. "Implement the search endpoint" fails when file paths and patterns were knowable.
-
-**Visible compliance over aspirational instructions.** Make the right thing the visible thing. Required output sections, mandatory gates, conspicuous gaps when skipped. "Remember to X" fails under momentum; a missing section is impossible to ignore. Non-compliance must be conspicuous, compliance must be natural.
-
-**Evidence grounds everything.** Findings cite files and counts. Approaches cite prior art. Decisions name alternatives and tipping points. An assertion without evidence is an opinion.
-
-**Eliminate before building.** Eliminate > reuse existing > configure existing > extend existing > build new. The simplest solution that satisfies the constraint wins. Nothing built for hypothetical future needs. Each abstraction serves more than one use case NOW.
+1. **Intentional even over automatic.** Deliberate choices, not defaults. Qualitative detail preserved, not abstracted away. Insight persisted to model files, not left in conversation. Artifacts self-sufficient — usable without the author's context.
+2. **Visible even over aspirational.** Non-compliance must be conspicuous, compliance must be natural. Missing sections over "remember to check." Mechanical gates over good intentions.
+3. **Grounded even over plausible.** Evidence before assertion. Prior art before invention. Alternatives named before choosing. An AI that sounds confident but cites nothing is worse than one that admits uncertainty.
+4. **Less even over more.** One constraint at a time. Eliminate before building. Simplest approach that satisfies the constraint. Nothing built for hypothetical future needs.
 
 ## Protocol
 
@@ -660,19 +653,25 @@ Behavioral contracts can be compressed but never removed.
 ```
 optimize(artifact: Artifact, trigger: OptimizationTrigger):
   """TOC focusing loop — one constraint at a time, any artifact type."""
-  # step 1 — identify the single biggest limitation
+  # step 1 — identify: what's the single biggest limitation?
   analysis = apply(review_quality, artifact) + apply(validate_output, artifact)
   if artifact.has(io_annotations):
-    analysis += derive_flow_analysis(artifact)
-    assert flow_analysis_complete
+    analysis += trace_data_flow(artifact)  # consumer table, state propagation, unconsumed outputs, quality coverage
+  if artifact.has(observed_failures):
+    analysis += observed_failures
+  # if quality gap found: express as mechanical test, add to validate_output if discriminating
   constraint = identify_constraint(analysis, criterion=biggest_impact)
   assert constraint is ONE thing, not a list
 
   # step 2 — exploit: get more from what exists WITHOUT changing the artifact
-  if resolvable_without_adding_or_removing: fix = exploit(constraint)
+  if resolvable_without_adding_or_removing:
+    fix = exploit(constraint)
+    apply(fix)
 
   # step 3 — elevate: if exploitation isn't enough, change the artifact
-  if not resolved_by_exploitation: fix = elevate(constraint)
+  if not resolved_by_exploitation:
+    fix = elevate(constraint)
+    apply(fix)
 
   # step 4 — verify: confirm fix, no regressions
   rerun(applicable_analysis, updated_artifact)
@@ -680,66 +679,43 @@ optimize(artifact: Artifact, trigger: OptimizationTrigger):
 
   # step 5 — repeat: constraint has moved — re-identify from scratch
   if new_constraint_exists: iterate from step 1 with fresh analysis
+
+  # step 6 — sweep: fix all remaining violations, not just the top one
+  # optimize focuses (one constraint); sweep cleans (all violations)
+  remaining = apply(review_quality, artifact) + apply(validate_output, artifact)
+  for violation in remaining:
+    fix(violation)  # not ranked — just fixed
 ```
 
 ```
-resynthesize(artifact: Artifact) -> Artifact:
+resynthesize(artifact: Artifact, trigger: ResynthesisTrigger) -> Artifact:
   """Derive a simpler artifact from the same I/O contracts — not incremental improvement."""
   # step 1 — extract contracts: what goes in, what comes out, what must hold
   inputs = extract_all_inputs(artifact)
   outputs = extract_all_outputs(artifact)
   invariants = extract_invariants(artifact)
+  assert contracts are complete — no implicit behaviors left in the algorithm
 
-  # step 2 — forget the algorithm: do not optimize, do not reference current structure
-
-  # step 3 — derive minimum steps from contracts alone
+  # step 2 — derive minimum steps from contracts alone (not by optimizing current structure)
   critical_path = minimum_ordered_steps(inputs -> outputs, satisfying=invariants)
 
-  # step 4 — verify behavioral equivalence
-  for each behavior in original: assert preserved or explicitly dropped with rationale
+  # step 3 — verify behavioral equivalence
+  for each behavior in original_artifact:
+    assert behavior is preserved in new artifact OR explicitly dropped with rationale
 
-  # step 5 — adopt only if simpler
-  if new.steps < original.steps AND all_behaviors_preserved: return new
-  else: return original
+  # step 4 — compare: adopt only if simpler
+  if new_artifact.steps < artifact.steps AND all_behaviors_preserved:
+    return new_artifact
+  else:
+    return artifact  # current structure is already minimal
+
+  # step 5 — sweep: resynthesize is a creative act — clean the result
+  remaining = apply(review_quality, new_artifact) + apply(validate_output, new_artifact)
+  for violation in remaining:
+    fix(violation)
 ```
 
-Use optimize when the artifact is roughly right. Use resynthesize when optimize plateaus or the artifact has accumulated historical structure.
-
-### Quality evolution
-
-```
-find_next_constraint(quality_problem: QualityProblem) -> test | reframe:
-  """Express the biggest source of damage as a mechanical, discriminating test."""
-  constraint = biggest_source_of_damage(quality_problem)
-  test = express_as_mechanical_test(constraint)
-
-  assert not requires_subjective_judgment(test)
-  assert discriminating(test)
-  assert not models_hypothetical_behavior(test)
-
-  if test improves validate_output coverage:  add(test)
-  else:                                        reframe(constraint)
-```
-
-### Flow analysis
-
-```
-derive_flow_analysis(spec: AnnotatedSpec) -> FlowAnalysis:
-  """Generate optimization artifacts from I/O annotations — never persisted, always rebuilt."""
-  consumer_table = for each shared_state_object:
-    map(step -> which specific fields it reads, which it skips)
-
-  state_propagation = for each state_that_flows_through_multiple_steps:
-    trace(where it enters, how it transforms, where it's checked)
-
-  unconsumed = for each produces_annotation:
-    if no consumed_by references it: flag as candidate waste
-
-  quality_coverage = for each quality_standard:
-    verify(every function it claims to constrain actually applies it)
-
-  return FlowAnalysis(consumer_table, state_propagation, unconsumed, quality_coverage)
-```
+Optimize works within structure (finds bottlenecks). Resynthesize works from contracts (derives new structure). Sweep cleans after any structural change. Sequence: resynthesize → sweep. Optimize is independent — use when the artifact is roughly right but has a performance constraint.
 
 ### Spec language
 
@@ -779,7 +755,12 @@ validate_spec_entry(entry: SpecEntry) -> pass | fail:
   """Spec entries must be testable, bounded, and sufficient for a rebuild."""
   is_testable         = can write an assertion against it
   has_quality_bar     = describes what "good" looks like, not just capability
-  has_principles      = if spec-level, principles exist as tie-breakers with quality dimensions and failure modes
+  has_principles      = if spec-level, principles pass validate_principles — "even over" format,
+                        ordered by override priority, derived from vision not features,
+                        validated against GUIDE criteria (guidance, useful, inspiring,
+                        developmentally adaptable, evaluable) and NNGroup criteria
+                        (takes a stand, no internal conflict). If removing product-specific
+                        words collapses a principle, it's implementation in disguise.
   captures_sequences  = if steps must be ordered, order is explicit
   constraints_probed  = what must hold, what cannot change, what is out of scope
   data_formats_precise = types, ranges, normalization rules specified
