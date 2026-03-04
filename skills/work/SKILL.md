@@ -748,7 +748,21 @@ validate_pseudocode_style(block: PseudocodeBlock) -> pass | fail:
   no_classes            = no classes, imports, generators, comprehensions
 ```
 
-### Model file quality bars
+### Model file quality
+
+```
+validate_model_file_content(file: ModelFile, entry: ModelFileEntry) -> pass | fail:
+  """Model file content must pass both structural and principle quality gates."""
+  # structural gate — does the entry have the right sections?
+  assert passes_quality_bar(file, entry)  # per-file quality bar below
+
+  # principle gate — is the content worth having?
+  assert validate_intentional(entry)  # deliberate choices, not defaults or templates
+  assert validate_grounded(entry)     # cites evidence, names alternatives, checks prior art
+  assert validate_less(entry)         # one canonical location, no speculative structure
+
+  # visible is structural by nature — already enforced by quality bars
+```
 
 ```
 validate_spec_entry(entry: SpecEntry) -> pass | fail:

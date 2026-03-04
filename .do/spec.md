@@ -547,6 +547,25 @@ route(content: InsightContent) -> ModelFile:
 
 When a project has distinct subprojects, each gets its own subdirectory with whichever files it needs.
 
+```
+validate_model_file_content(file: ModelFile, entry: ModelFileEntry) -> pass | fail:
+  """Model file content must pass both structural and principle quality gates."""
+  # consumes: file (which model file), entry (content being written or reviewed)
+  # produces: pass | fail
+  # consumed_by: converse (when proposing updates), persist (when writing files)
+
+  # structural gate — does the entry have the right sections?
+  assert passes_quality_bar(file, entry)  # per-file quality bar below
+
+  # principle gate — is the content worth having?
+  assert validate_intentional(entry)  # deliberate choices, not defaults or templates
+  assert validate_grounded(entry)     # cites evidence, names alternatives, checks prior art
+  assert validate_less(entry)         # one canonical location, no speculative structure
+
+  # visible is structural by nature — already enforced by quality bars
+  # (missing sections > "remember to check", mechanical gates > good intentions)
+```
+
 #### Quality bars
 
 | File | Quality bar |

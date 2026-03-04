@@ -1,5 +1,11 @@
 # Changelog
 
+## [8.9.0] — 2026-03-04
+
+### Added
+- `validate_model_file_content` function — composes structural quality bars with principle validators so model file content passes both shape and intent checks
+- Lessons entry documenting the structure-content gap pattern — principles amplify quality bars by catching entire categories of low-quality content that pass structural checks
+
 ## [8.8.0] — 2026-03-04
 
 ### Changed

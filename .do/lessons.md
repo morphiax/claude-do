@@ -138,6 +138,18 @@ The spec stays as one file — the split is in how it's consumed, not stored. Mo
 
 **Pattern class:** Curse-of-knowledge in delegation. The delegator's context makes instructions feel complete when they're dependent on shared knowledge. The fix is always a zero-context test: can someone with only this text execute the task?
 
+### Principles amplify quality bars for model file authorship
+
+**Context:** Quality bars check structure — design.md has typography, context.md has quality infrastructure entries. But structural completeness doesn't prevent low-quality content. A design session produced generic output that passed all quality bars; the same session re-run through the principles produced markedly better results.
+
+**Alternative:** Add more structural checks to quality bars (e.g., "typography must not be system fonts").
+
+**Tipping point:** Structural checks multiply without bound — one per failure mode. Principles are a small, stable set that catch entire categories. "Intentional even over automatic" catches generic typography, default color palettes, vague recipes, AND underspecified conventions — all in one principle. The quality bars check that the right sections exist; the principles check that the content is worth having.
+
+**Reversal cost:** Low structurally, but quality of model file content regresses to passing-the-checklist.
+
+**Pattern class:** Structure-content gap. Validation that checks structure without checking intent produces artifacts that are complete but not useful. Principles bridge the gap because they're evaluable against content, not just shape.
+
 ### Host platform feature supersedes skill directives
 
 **Symptom:** `EnterPlanMode` transfers control to the platform's planning protocol. The skill's task validation, preamble construction, and response skeletons are all replaced. The plan looks reasonable but doesn't follow the skill's quality bars.
