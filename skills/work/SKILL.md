@@ -507,6 +507,17 @@ sync_gate(result: ExecutionResult, model: MentalModel):
     propose(insight, target_file)
     assert WAIT_FOR_HUMAN_RESPONSE()
 
+  # task runner sync — surface new runnable capabilities
+  if model.context.has(task_runner):
+    new_commands = enumerate_runnable_capabilities(result)
+    # new entry points: features, test suites, build modes, deploy targets,
+    # quality tools, dev servers, migrations, scripts
+    existing = read(task_runner_file)
+    missing = new_commands - existing
+    if missing:
+      propose_task_runner_update(missing, task_runner_file)
+      assert WAIT_FOR_HUMAN_RESPONSE()
+
   if no_updates_needed:
     assert emit("Sync gate: all changes reflected in project files.")
 ```
@@ -787,9 +798,10 @@ validate_context_entry(entry: ContextEntry) -> pass | fail:
   has_recipes             = how to run, test, build, deploy
   has_quality_infra       = for each quality category (static_analysis, formatting,
                             testing, git_hooks, ci_pipeline, dependency_security,
-                            secret_prevention, editor_consistency):
+                            secret_prevention, editor_consistency, task_runner):
                             status is present (names tool), partial, or
                             absent (states why). silent omission fails validation.
+                            task_runner entry also specifies file path.
                           categories defined in spec QUALITY_CATEGORIES
   has_external_detail     = field names, URL patterns, formats, edge cases, gotchas
   freshness_signals       = version numbers, API versions, dates

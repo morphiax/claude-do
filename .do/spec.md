@@ -378,6 +378,17 @@ persist(result: Result, state: State):
     propose(insight, target_file)
     assert WAIT_FOR_HUMAN_RESPONSE()
 
+  # task runner sync — surface new runnable capabilities
+  if state.context.has(task_runner):
+    new_commands = enumerate_runnable_capabilities(result)
+    # new entry points: features, test suites, build modes, deploy targets,
+    # quality tools, dev servers, migrations, scripts
+    existing = read(task_runner_file)
+    missing = new_commands - existing
+    if missing:
+      propose_task_runner_update(missing, task_runner_file)
+      assert WAIT_FOR_HUMAN_RESPONSE()
+
   if no_updates_needed:
     assert emit("Persist: all changes reflected in project files.")
 ```
@@ -473,7 +484,7 @@ When a project has distinct subprojects, each gets its own subdirectory with whi
 | File | Quality bar |
 |---|---|
 | spec.md | Testable assertions, quality bars (what "good" looks like), explicit sequences, probed constraints, precise data formats, no impl details. Passes rebuild test: someone could rebuild the system from this alone. Passes convergence test: two independent implementers would agree on which behaviors to include — if they'd disagree, spec is underspecified. Pseudocode algorithms need operation counts, named assumptions, data flow, boundary conditions. |
-| context.md | Convention-specific (can write new code without reading existing), clear directory roles, build/test/run recipes. Quality infrastructure: for each category (static analysis, formatting, testing, git hooks, CI pipeline, dependency security, secret prevention, editor consistency) status is present (names tool), partial, or absent (states why) — silent omission fails validation. External systems: implementation-grade detail (field names, URL patterns, request/response formats), edge cases, gotchas (things that work differently than expected), freshness signals. Each fact has one canonical location — don't restate spec behaviors, don't copy content that lives in source files or lessons. One representation per fact (annotated tree > separate list + tree). Evidence granularity matches decision granularity (summary + sources for decisions already codified in spec). |
+| context.md | Convention-specific (can write new code without reading existing), clear directory roles, build/test/run recipes. Quality infrastructure: for each category (static analysis, formatting, testing, git hooks, CI pipeline, dependency security, secret prevention, editor consistency, task runner) status is present (names tool), partial, or absent (states why) — silent omission fails validation. Task runner entry also specifies the file path (e.g., justfile, Makefile, package.json scripts). External systems: implementation-grade detail (field names, URL patterns, request/response formats), edge cases, gotchas (things that work differently than expected), freshness signals. Each fact has one canonical location — don't restate spec behaviors, don't copy content that lives in source files or lessons. One representation per fact (annotated tree > separate list + tree). Evidence granularity matches decision granularity (summary + sources for decisions already codified in spec). |
 | design.md | Covers every surface the user touches, has tone (how communication varies by context), density (when terse vs expansive), output skeletons. One entry per output mode — don't split related dimensions into parallel lists. Skeletons show what the user sees, not implementation mechanics (tool names, spec content lists, dispatch patterns belong in spec/context). Duplicate skeleton patterns collapse to references. Visual interfaces also need: typography (display + body pairing, not generic), color (dominant + accent, committed palette), motion (intentional strategy), spatial composition (deliberate, not default grid), atmosphere (depth, not flat). |
 | lessons.md | Decisions: context (forces, not system description — don't restate spec), alternatives, tipping point (core insight + citations, not multi-paragraph evidence), reversal cost. Pitfalls: recognizable symptom, specific root cause (mechanism, not vague), actionable fix, pattern class. When a pitfall motivated a decision, merge — one lesson, not two entries. Pitfall fixes that restate spec behaviors are redundant; the spec IS the fix. |
 
