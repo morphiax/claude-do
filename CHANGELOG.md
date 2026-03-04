@@ -1,5 +1,11 @@
 # Changelog
 
+## [8.6.0] — 2026-03-04
+
+### Added
+- Task runner as 9th quality infrastructure category — context.md must document the task runner tool and file path alongside the other eight categories
+- Persist-level task runner sync — after every execution (not just audits), new runnable capabilities (features, test suites, build modes, deploy targets, quality tools) are enumerated and proposed as task runner updates
+
 ## [8.5.0] — 2026-03-04
 
 ### Changed
