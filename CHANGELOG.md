@@ -1,5 +1,15 @@
 # Changelog
 
+## [8.7.0] — 2026-03-04
+
+### Added
+- Principles section in spec — six tie-breaker principles (intentionality, focus, self-sufficiency, visible compliance, evidence, simplicity) each with validation functions defining quality dimensions and failure modes
+- Principles requirement in spec quality bar — `validate_spec_entry` now requires `has_principles` so new specs authored by the system include principles
+- Principles section in SKILL.md — prose form for the operational document, ensuring principles cascade to every project
+
+### Changed
+- "Guiding value" section replaced by "Principles" — intentionality folded in as the first principle alongside five others derived from existing decisions and lessons
+
 ## [8.6.0] — 2026-03-04
 
 ### Added

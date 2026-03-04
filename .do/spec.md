@@ -6,9 +6,104 @@ do:work is a collaborative development system that builds and maintains a persis
 
 The system is recursive: its quality standards apply to every output it produces, and to itself.
 
-## 2. Guiding value
+## 2. Principles
 
-Intentionality — every output reflects a deliberate choice, not a default. Insight must survive session boundaries: capture it in persistent files or lose it on compaction.
+Principles are tie-breakers. When the spec doesn't address a situation directly, derive the answer from whichever principle applies. When two approaches both satisfy the spec, the one that better serves these principles wins.
+
+### Intentionality over defaults
+
+Every output reflects a deliberate choice, not a default. Insight must survive session boundaries: capture it in persistent files or lose it on compaction. The difference between mediocre and good implementation is often the qualitative detail that intentionality preserves.
+
+```
+validate_intentionality(output: any) -> pass | fail:
+  """Every output must show evidence of deliberate choice."""
+  reflects_choice          = demonstrates a specific decision, not a template followed
+  insight_crystallized     = knowledge that helps future sessions is in model files, not just conversation
+  specificity_preserved    = qualitative detail that makes implementation good is captured, not abstracted away
+
+  fail if generic_when_specific_was_available(output)
+  fail if insight_in_conversation_that_belongs_in_files(output)
+  fail if "returns search results" when "returns results sorted by relevance, grouped by category" was knowable
+```
+
+### One constraint, not a list
+
+At any moment, one thing matters most. Finding it is recognition, not deliberation. All activity subordinates to it until it resolves or the mode elevates.
+
+```
+validate_focus(session: Session) -> pass | fail:
+  """Focus on one constraint until resolved, then re-identify."""
+  has_single_constraint      = one thing identified, not a priority list
+  subordination_visible      = choices trace back to the constraint
+  resolution_drives_next     = constraint resolved -> re-identify from scratch, not "also do these"
+
+  fail if pursuing_multiple_priorities_simultaneously(session)
+  fail if constraint_is_vague("improve quality") when specific_available("spec entries lack quality bars")
+  fail if activity_cannot_trace_to_constraint(session)
+```
+
+### Self-sufficiency
+
+Every artifact works for a reader with zero prior context. Plans, preambles, task descriptions, model files. If understanding requires information not in the artifact, the artifact is incomplete.
+
+```
+validate_self_sufficiency(artifact: Artifact) -> pass | fail:
+  """Artifacts must be usable without their author's context."""
+  executable_without_author  = a different agent could act on this without questions
+  decisions_resolved         = choices made here, not deferred to execution
+  references_concrete        = names files, patterns, assertions — not "implement appropriately"
+
+  fail if requires_shared_context_to_interpret(artifact)
+  fail if defers_decisions_the_author_could_resolve(artifact)
+  fail if "implement the search endpoint" when file paths and patterns were knowable
+```
+
+### Visible compliance over aspirational instructions
+
+Make the right thing the visible thing. Required output sections, mandatory gates, conspicuous gaps when skipped. "Remember to X" fails under momentum; a missing section is impossible to ignore.
+
+```
+validate_compliance_visibility(mechanism: ComplianceMechanism) -> pass | fail:
+  """Non-compliance must be conspicuous, compliance must be natural."""
+  skipping_is_conspicuous    = omitting the step produces a visible gap
+  compliant_path_is_natural  = following the rule is the path of least resistance
+  gate_is_mechanical         = compliance is checkable, not subjective
+
+  fail if relies_on_memory_or_good_intentions(mechanism)
+  fail if non_compliance_is_invisible(mechanism)
+  fail if compliant_path_harder_than_bypass(mechanism)
+```
+
+### Evidence grounds everything
+
+Findings cite files and counts. Approaches cite prior art. Decisions name alternatives and tipping points. An assertion without evidence is an opinion.
+
+```
+validate_evidence(claim: Claim) -> pass | fail:
+  """Claims must be grounded in observation, not assertion."""
+  is_grounded              = cites files, measurements, research, or observed behavior
+  alternatives_named       = at least one alternative was considered
+  prior_art_checked        = for non-trivial problems, existing solutions surveyed first
+
+  fail if asserts_best_without_naming_what_was_compared(claim)
+  fail if builds_from_scratch_when_prior_art_exists(claim)
+```
+
+### Eliminate before building
+
+Solve problems by removing complexity, not adding it. Eliminate > reuse existing > configure existing > extend existing > build new. The simplest solution that satisfies the constraint wins.
+
+```
+validate_simplicity(solution: Solution) -> pass | fail:
+  """Simpler approaches must be ruled out before complex ones are adopted."""
+  hierarchy_applied         = simpler approaches considered before complex
+  no_speculative_structure  = nothing built for hypothetical future needs
+  abstraction_justified     = each abstraction serves more than one use case NOW
+
+  fail if builds_new_when_existing_solution_fits(solution)
+  fail if adds_abstraction_for_single_use_case(solution)
+  fail if designs_for_hypothetical_future(solution)
+```
 
 ## 3. Session algorithm
 
@@ -483,7 +578,7 @@ When a project has distinct subprojects, each gets its own subdirectory with whi
 
 | File | Quality bar |
 |---|---|
-| spec.md | Testable assertions, quality bars (what "good" looks like), explicit sequences, probed constraints, precise data formats, no impl details. Passes rebuild test: someone could rebuild the system from this alone. Passes convergence test: two independent implementers would agree on which behaviors to include — if they'd disagree, spec is underspecified. Pseudocode algorithms need operation counts, named assumptions, data flow, boundary conditions. |
+| spec.md | Testable assertions, quality bars (what "good" looks like), explicit sequences, probed constraints, precise data formats, no impl details. Has principles that serve as tie-breakers for decisions the spec doesn't explicitly address — each with a quality dimension (what good looks like) and failure mode (what to avoid). Passes rebuild test: someone could rebuild the system from this alone. Passes convergence test: two independent implementers would agree on which behaviors to include — if they'd disagree, spec is underspecified. Pseudocode algorithms need operation counts, named assumptions, data flow, boundary conditions. |
 | context.md | Convention-specific (can write new code without reading existing), clear directory roles, build/test/run recipes. Quality infrastructure: for each category (static analysis, formatting, testing, git hooks, CI pipeline, dependency security, secret prevention, editor consistency, task runner) status is present (names tool), partial, or absent (states why) — silent omission fails validation. Task runner entry also specifies the file path (e.g., justfile, Makefile, package.json scripts). External systems: implementation-grade detail (field names, URL patterns, request/response formats), edge cases, gotchas (things that work differently than expected), freshness signals. Each fact has one canonical location — don't restate spec behaviors, don't copy content that lives in source files or lessons. One representation per fact (annotated tree > separate list + tree). Evidence granularity matches decision granularity (summary + sources for decisions already codified in spec). |
 | design.md | Covers every surface the user touches, has tone (how communication varies by context), density (when terse vs expansive), output skeletons. One entry per output mode — don't split related dimensions into parallel lists. Skeletons show what the user sees, not implementation mechanics (tool names, spec content lists, dispatch patterns belong in spec/context). Duplicate skeleton patterns collapse to references. Visual interfaces also need: typography (display + body pairing, not generic), color (dominant + accent, committed palette), motion (intentional strategy), spatial composition (deliberate, not default grid), atmosphere (depth, not flat). |
 | lessons.md | Decisions: context (forces, not system description — don't restate spec), alternatives, tipping point (core insight + citations, not multi-paragraph evidence), reversal cost. Pitfalls: recognizable symptom, specific root cause (mechanism, not vague), actionable fix, pattern class. When a pitfall motivated a decision, merge — one lesson, not two entries. Pitfall fixes that restate spec behaviors are redundant; the spec IS the fix. |
